@@ -6,6 +6,7 @@
 
 Laravel Fmt formats PHP, Blade, and Livewire 4, with first-class Tailwind class sorting. It also formats HTML, CSS, Markdown, JSON, YAML, and XML.
 
+> [!WARNING]
 > **Status: beta.** Not recommended for production code yet. Expect rough edges, and please [report issues](https://github.com/JacobJoergensen/laravel-fmt/issues).
 
 ## Why Laravel Fmt?
