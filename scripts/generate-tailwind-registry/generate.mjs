@@ -436,17 +436,23 @@ const propertyOrder = [
 // gap; getClassOrder answers null for candidates the engine cannot compile,
 // which drops them from the rank map.
 function syntheticNumericCandidates(design) {
-  if (typeof design.utilities?.keys !== 'function') return []
+  if (typeof design.utilities?.keys !== 'function') {
+    return []
+  }
 
   const names = design.getClassList().map(([name]) => name)
   const out = []
 
   for (const stem of design.utilities.keys('functional')) {
     const prefix = `${stem}-`
+
     const hasNumeric = names.some(
       (n) => n.startsWith(prefix) && n[prefix.length] >= '0' && n[prefix.length] <= '9',
     )
-    if (!hasNumeric) out.push(`${prefix}0`)
+
+    if (!hasNumeric) {
+      out.push(`${prefix}0`)
+    }
   }
 
   return out
@@ -457,10 +463,13 @@ function syntheticNumericCandidates(design) {
 // One arbitrary probe per such stem fills the gap; a stem that already has
 // classes gets none, so its rank stays what its real classes give it.
 function syntheticArbitraryCandidates(design, numeric, utilityStems) {
-  if (typeof design.utilities?.keys !== 'function') return []
+  if (typeof design.utilities?.keys !== 'function') {
+    return []
+  }
 
   const stemSet = new Set(utilityStems)
   const listed = [...design.getClassList().map(([name]) => name), ...numeric]
+
   const covered = new Set(
     design
       .getClassOrder(listed)
@@ -469,8 +478,11 @@ function syntheticArbitraryCandidates(design, numeric, utilityStems) {
   )
 
   const out = []
+
   for (const stem of design.utilities.keys('functional')) {
-    if (!covered.has(stem)) out.push(`${stem}-[var(--probe)]`)
+    if (!covered.has(stem)) {
+      out.push(`${stem}-[var(--probe)]`)
+    }
   }
 
   return out
@@ -498,9 +510,13 @@ function buildClassOrderRanks(design, propertyOrder, synthetic = []) {
   ranked.forEach(([name], i) => rank.set(name, i))
 
   const propertyRanks = {}
+
   for (const p of propertyOrder) {
     const r = rank.get(probeFor(p))
-    if (r !== undefined) propertyRanks[p] = r
+
+    if (r !== undefined) {
+      propertyRanks[p] = r
+    }
   }
 
   return { rank, propertyRanks }
@@ -512,9 +528,15 @@ function buildUtilityRegistry(design, rank, propertyOrder, synthetic = []) {
   const propertyToIndex = new Map(propertyOrder.map((p, i) => [p, i]))
   const colorIndices = new Set()
   const sizeIndices = new Set()
+
   for (let i = 0; i < propertyOrder.length; i++) {
-    if (isColorPropertyName(propertyOrder[i])) colorIndices.add(i)
-    if (sizePropertyNames.has(propertyOrder[i])) sizeIndices.add(i)
+    if (isColorPropertyName(propertyOrder[i])) {
+      colorIndices.add(i)
+    }
+
+    if (sizePropertyNames.has(propertyOrder[i])) {
+      sizeIndices.add(i)
+    }
   }
 
   const registry = []
@@ -523,6 +545,7 @@ function buildUtilityRegistry(design, rank, propertyOrder, synthetic = []) {
 
   for (const name of names) {
     const r = rank.get(name)
+
     if (r === undefined) {
       continue
     }
@@ -542,31 +565,46 @@ function buildUtilityRegistry(design, rank, propertyOrder, synthetic = []) {
 // Mirrors the engine's getPropertySort (compile.ts).
 function collectPropertySort(nodes, propertyToIndex) {
   const order = new Set()
+
   let count = 0
   let seenTwSort = false
 
   const queue = [...nodes]
+
   while (queue.length > 0) {
     const node = queue.shift()
+
     if (node.kind === 'declaration') {
-      if (node.value === undefined) continue
+      if (node.value === undefined) {
+        continue
+      }
+
       count++
 
-      if (seenTwSort) continue
+      if (seenTwSort) {
+        continue
+      }
 
       if (node.property === '--tw-sort') {
         const idx = propertyToIndex.get(node.value)
+
         if (idx !== undefined) {
           order.add(idx)
           seenTwSort = true
         }
+
         continue
       }
 
       const idx = propertyToIndex.get(node.property)
-      if (idx !== undefined) order.add(idx)
+
+      if (idx !== undefined) {
+        order.add(idx)
+      }
     } else if (node.kind === 'rule' || node.kind === 'at-rule') {
-      for (const child of node.nodes) queue.push(child)
+      for (const child of node.nodes) {
+        queue.push(child)
+      }
     }
   }
 
@@ -580,25 +618,44 @@ function collectPropertySort(nodes, propertyToIndex) {
 // `text` and value `red-500` by longest-prefix match against these stems.
 function buildUtilityStems(design) {
   const stems = new Set()
+
   if (typeof design.utilities?.keys === 'function') {
-    for (const stem of design.utilities.keys('static')) stems.add(stem)
-    for (const stem of design.utilities.keys('functional')) stems.add(stem)
+    for (const stem of design.utilities.keys('static')) {
+      stems.add(stem)
+    }
+
+    for (const stem of design.utilities.keys('functional')) {
+      stems.add(stem)
+    }
   } else {
     // Fallback for when the private `Utilities.keys` API changes shape:
     // imperfect, but keeps the generator from hard-failing.
     const names = new Set()
-    for (const [name] of design.getClassList()) names.add(name)
+
+    for (const [name] of design.getClassList()) {
+      names.add(name)
+    }
+
     for (const name of names) {
       stems.add(name)
       let candidate = name
+
       while (true) {
         const idx = candidate.lastIndexOf('-')
-        if (idx <= 0) break
+
+        if (idx <= 0) {
+          break
+        }
+
         candidate = candidate.slice(0, idx)
-        if (names.has(candidate)) stems.add(candidate)
+
+        if (names.has(candidate)) {
+          stems.add(candidate)
+        }
       }
     }
   }
+
   return Array.from(stems).sort()
 }
 
@@ -614,12 +671,18 @@ function buildStemRegistry(utilityRegistry, utilityStems) {
 
   for (const entry of utilityRegistry) {
     const stem = findLongestPrefixStem(entry.name, stemSet)
-    if (!stem) continue
+
+    if (!stem) {
+      continue
+    }
+
     let group = groups.get(stem)
+
     if (!group) {
       group = []
       groups.set(stem, group)
     }
+
     group.push(entry)
   }
 
@@ -630,6 +693,7 @@ function buildStemRegistry(utilityRegistry, utilityStems) {
   const minRank = (es) => (es.length === 0 ? null : [Math.min(...es.map((e) => e.order[0]))])
 
   const out = []
+
   for (const [stem, entries] of groups) {
     const colorShaped = entries.filter((e) => e.shape === 'color')
     const sizeShaped = entries.filter((e) => e.shape === 'size')
@@ -659,6 +723,7 @@ function buildStemRegistry(utilityRegistry, utilityStems) {
   // changes (a new stem, a flipped dominant tuple) rather than noise
   // from Map iteration order shifting between Node versions.
   out.sort((a, b) => (a.stem < b.stem ? -1 : a.stem > b.stem ? 1 : 0))
+
   return out
 }
 
@@ -730,31 +795,27 @@ const sizePropertyNames = new Set([
   'transition-duration', 'transition-delay',
 ])
 
-function dominantTuple(entries) {
-  if (entries.length === 0) return null
-  const tally = new Map()
-  for (const e of entries) {
-    const key = `${JSON.stringify(e.order)}|${e.count}`
-    const existing = tally.get(key) ?? { order: e.order, count: e.count, n: 0 }
-    existing.n++
-    tally.set(key, existing)
-  }
-  let best = null
-  for (const t of tally.values()) {
-    if (!best || t.n > best.n) best = t
-  }
-  return best
-}
-
 function findLongestPrefixStem(name, stemSet) {
-  if (stemSet.has(name)) return name
+  if (stemSet.has(name)) {
+    return name
+  }
+
   let candidate = name
+
   while (true) {
     const idx = candidate.lastIndexOf('-')
-    if (idx <= 0) break
+
+    if (idx <= 0) {
+      break
+    }
+
     candidate = candidate.slice(0, idx)
-    if (stemSet.has(candidate)) return candidate
+
+    if (stemSet.has(candidate)) {
+      return candidate
+    }
   }
+
   return null
 }
 
@@ -762,15 +823,23 @@ function findLongestPrefixStem(name, stemSet) {
 // one from its selector text.
 function buildVariantRegistry(design) {
   const entries = []
+
   for (const [root, variant] of design.variants.entries()) {
-    if (variant.kind === 'arbitrary') continue
+    if (variant.kind === 'arbitrary') {
+      continue
+    }
+
     entries.push({ root })
   }
 
   entries.sort((a, b) => {
     const av = design.parseVariant(a.root) ?? design.parseVariant(`${a.root}-`)
     const bv = design.parseVariant(b.root) ?? design.parseVariant(`${b.root}-`)
-    if (!av || !bv) return 0
+
+    if (!av || !bv) {
+      return 0
+    }
+
     return design.variants.compare(av, bv)
   })
 
@@ -800,16 +869,22 @@ function appendChunkedMap(
 
   lines.push(`func ${buildName}() map[string]${valueType} {`)
   lines.push(`\tm := make(map[string]${valueType}, ${entries.length})`)
-  for (let i = 0; i < chunkCount; i++) lines.push(`\t${registerPrefix}${i}(m)`)
+
+  for (let i = 0; i < chunkCount; i++) {
+    lines.push(`\t${registerPrefix}${i}(m)`)
+  }
+
   lines.push('\treturn m')
   lines.push('}')
   lines.push('')
 
   for (let i = 0; i < chunkCount; i++) {
     lines.push(`func ${registerPrefix}${i}(m map[string]${valueType}) {`)
+
     for (const e of entries.slice(i * chunkSize, (i + 1) * chunkSize)) {
       lines.push(`\t${renderAssign(e)}`)
     }
+
     lines.push('}')
     lines.push('')
   }
@@ -825,6 +900,7 @@ function renderGo({
   tailwindVersion,
 }) {
   const lines = []
+
   lines.push('// Code generated by scripts/generate-tailwind-registry. DO NOT EDIT.')
   lines.push(`// Source: Tailwind CSS v${tailwindVersion}`)
   lines.push('')
@@ -836,9 +912,11 @@ function renderGo({
   lines.push('// @utility sorts at the slot a utility emitting that property would.')
   lines.push('func buildPropertyRanks() map[string]int {')
   lines.push('\treturn map[string]int{')
+
   for (const p of Object.keys(propertyRanks)) {
     lines.push(`\t\t${quote(p)}: ${propertyRanks[p]},`)
   }
+
   lines.push('\t}')
   lines.push('}')
   lines.push('')
@@ -847,6 +925,7 @@ function renderGo({
   lines.push('// getClassOrder rank, on the same scale as buildPropertyRanks. A class')
   lines.push('// not in this map (an arbitrary value, a project theme token) falls')
   lines.push('// through to its stem in stemRegistry.')
+
   appendChunkedMap(lines, {
     buildName: 'buildUtilityRegistry',
     valueType: 'utilityEntry',
@@ -865,6 +944,7 @@ function renderGo({
   lines.push('// `bg-dark-bg` (a project theme token) sort as background-color the way')
   lines.push('// `bg-red-500` does. Its keys are also the roots the candidate parser')
   lines.push('// splits on by longest prefix (`text-red-500` has root `text`).')
+
   appendChunkedMap(lines, {
     buildName: 'buildStemRegistry',
     valueType: 'stemEntry',
@@ -873,14 +953,17 @@ function renderGo({
     renderAssign: (s) => {
       const order = s.order.length === 0 ? 'nil' : `[]int{${s.order.join(', ')}}`
       const fields = [`Order: ${order}`, `Count: ${s.count}`]
+
       if (s.colorOrder !== null) {
         fields.push(`ColorOrder: []int{${s.colorOrder.join(', ')}}`)
         fields.push(`ColorCount: ${s.colorCount}`)
       }
+
       if (s.sizeOrder !== null) {
         fields.push(`SizeOrder: []int{${s.sizeOrder.join(', ')}}`)
         fields.push(`SizeCount: ${s.sizeCount}`)
       }
+
       return `m[${quote(s.stem)}] = stemEntry{${fields.join(', ')}}`
     },
   })
@@ -890,11 +973,11 @@ function renderGo({
   lines.push('// Arbitrary variants are handled per-instance in the Go runtime.')
   lines.push('func buildVariantRegistry() map[string]variantEntry {')
   lines.push('\treturn map[string]variantEntry{')
+
   for (const v of variantRegistry) {
-    lines.push(
-      `\t\t${quote(v.root)}: {Priority: ${v.priority}},`,
-    )
+    lines.push(`\t\t${quote(v.root)}: {Priority: ${v.priority}},`)
   }
+
   lines.push('\t}')
   lines.push('}')
 

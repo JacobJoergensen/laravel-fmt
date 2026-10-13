@@ -23,9 +23,10 @@ const outputPath = resolve(
   'wideranges_generated.go',
 )
 
+const MAX = 0x10ffff
+
 // Surrogates have no width of their own, so they are skipped and never reach
 // the ranges.
-const MAX = 0x10ffff
 const SURROGATE_LO = 0xd800
 const SURROGATE_HI = 0xdfff
 
@@ -92,8 +93,15 @@ function render(ranges) {
   return lines.join('\n') + '\n'
 }
 
-const ranges = collectRanges()
-writeFileSync(outputPath, render(ranges), 'utf8')
-execFileSync('gofmt', ['-w', outputPath], { stdio: 'inherit' })
+function main() {
+  const ranges = collectRanges()
+  const source = render(ranges)
 
-console.log(`wrote ${ranges.length} ranges to ${outputPath}`)
+  writeFileSync(outputPath, source, { encoding: 'utf8' })
+
+  execFileSync('gofmt', ['-w', outputPath], { stdio: 'inherit' })
+
+  process.stderr.write(`Wrote ${outputPath} (${ranges.length} ranges)\n`)
+}
+
+main()
