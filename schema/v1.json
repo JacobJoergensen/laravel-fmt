@@ -87,7 +87,8 @@
         },
         "importOrder": {
           "type": "array",
-          "items": { "enum": ["class", "function", "const"] }
+          "items": { "enum": ["class", "function", "const"] },
+          "default": ["const", "class", "function"]
         }
       }
     },

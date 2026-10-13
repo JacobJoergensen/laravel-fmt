@@ -27,7 +27,9 @@ func TestSchemaMatchesStructs(t *testing.T) {
 	}{
 		{"root", reflect.TypeFor[File](), root.Properties},
 		{"php", reflect.TypeFor[PHP](), root.Properties["php"].Properties},
+		{"blade", reflect.TypeFor[Blade](), root.Properties["blade"].Properties},
 		{"markdown", reflect.TypeFor[Markdown](), root.Properties["markdown"].Properties},
+		{"tailwind", reflect.TypeFor[TailwindCS](), root.Properties["tailwind"].Properties},
 	}
 
 	for _, tc := range cases {
