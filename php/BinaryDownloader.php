@@ -221,7 +221,9 @@ final class BinaryDownloader
     private function extractZip(string $archiveFile, string $dir): void
     {
         if (! class_exists(ZipArchive::class)) {
-            throw new RuntimeException('The PHP zip extension is required to unpack the laravel-fmt binary on Windows.');
+            throw new RuntimeException(
+                'The PHP zip extension is required to unpack the laravel-fmt binary on Windows.',
+            );
         }
 
         $zip = new ZipArchive();

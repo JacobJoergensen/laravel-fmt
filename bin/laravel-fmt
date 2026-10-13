@@ -8,8 +8,8 @@ use JacobJoergensen\LaravelFmt\BinaryDownloader;
 (static function (): void {
     foreach ([
         $GLOBALS['_composer_autoload_path'] ?? null,
-        __DIR__ . '/../../../autoload.php', // installed as a dependency
-        __DIR__ . '/../vendor/autoload.php', // running from the package itself
+        __DIR__.'/../../../autoload.php', // installed as a dependency
+        __DIR__.'/../vendor/autoload.php', // running from the package itself
     ] as $autoload) {
         if (is_string($autoload) && is_file($autoload)) {
             require $autoload;
@@ -18,7 +18,7 @@ use JacobJoergensen\LaravelFmt\BinaryDownloader;
         }
     }
 
-    if (!class_exists(BinaryDownloader::class)) {
+    if (! class_exists(BinaryDownloader::class)) {
         fwrite(STDERR, "laravel-fmt: Composer autoloader not found. Run 'composer install'.\n");
 
         exit(1);
@@ -46,7 +46,7 @@ if (function_exists('pcntl_exec')) {
 
 $process = proc_open(array_merge([$binary], $args), [STDIN, STDOUT, STDERR], $pipes);
 
-if (!is_resource($process)) {
+if (! is_resource($process)) {
     fwrite(STDERR, "laravel-fmt: failed to start {$binary}\n");
 
     exit(1);
