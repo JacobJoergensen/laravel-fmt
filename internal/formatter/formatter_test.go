@@ -1,6 +1,9 @@
 package formatter
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestDetectLanguageByExtension(t *testing.T) {
 	cases := []struct {
@@ -29,7 +32,7 @@ func TestDetectLanguageByExtension(t *testing.T) {
 		{"Envoy.blade.php", LangUnknown},
 		{"deploy/envoy.blade.php", LangUnknown},
 		{".ai/guidelines/testing.blade.php", LangUnknown},
-		{`C:\app\.ai\skills\deploy\SKILL.blade.php`, LangUnknown},
+		{filepath.Join("app", ".ai", "skills", "deploy", "SKILL.blade.php"), LangUnknown},
 		{"vendor/acme/pkg/resources/boost/guidelines/core.blade.php", LangUnknown},
 		{"resources/views/boost.blade.php", LangBlade},
 		{"deploy.yml", LangYAML},
