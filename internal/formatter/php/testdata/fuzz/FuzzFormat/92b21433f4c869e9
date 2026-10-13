@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php it()->A->A(\n\n)->A")

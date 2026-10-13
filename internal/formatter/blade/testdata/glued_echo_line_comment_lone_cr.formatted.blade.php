@@ -1,0 +1,5 @@
+<span
+    >{{ $value
+        #
+    }}
+</span>

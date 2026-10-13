@@ -1,0 +1,10 @@
+.DS_Store
+.idea/
+*.exe
+*.test
+dist/
+go.work
+go.work.sum
+bin/laravel-fmt-*
+bin/.tmp-*
+node_modules/

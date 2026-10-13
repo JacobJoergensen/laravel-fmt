@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<X-emptY-stAte >\v\n</X-emptY-stAte>")

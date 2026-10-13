@@ -1,0 +1,16 @@
+@font-face {
+    font-family: "Bebas Neue";
+    font-style: normal;
+    font-weight: 400;
+    src:
+        url("../fonts/BebasNeueBook.woff2") format("woff2"),
+        url("../fonts/BebasNeueBook.woff") format("woff"),
+        url("../fonts/BebasNeueBook.eot?#iefix") format("embedded-opentype"),
+        url("../fonts/BebasNeueBook.eot");
+    font-display: swap;
+}
+
+.short {
+    font-family: "Bebas Neue", Arial, sans-serif;
+    transition: opacity 0.2s ease-in;
+}

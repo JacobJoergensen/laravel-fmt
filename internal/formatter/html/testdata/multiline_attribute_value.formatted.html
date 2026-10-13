@@ -1,0 +1,13 @@
+<section>
+    <div
+        x-data="{
+                count: 0,
+                inc() {
+                    this.count++;
+                },
+            }"
+        class="counter"
+    >
+        <span x-text="count"></span>
+    </div>
+</section>

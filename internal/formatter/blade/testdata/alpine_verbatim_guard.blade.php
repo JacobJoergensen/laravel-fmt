@@ -1,0 +1,9 @@
+<div x-data="panel(@js($config))">a</div>
+<div x-data="{ open: @entangle('show') }">b</div>
+<div x-data="{ id: {{ $id }}, open:  false }">c</div>
+<span x-show="a &amp;&amp; b">d</span>
+<span x-text="`a  ${ x }  b`">e</span>
+<input x-mask="99 99 99">
+<template x-teleport="#modals"></template>
+<div x-transition:enter-start="opacity-0  scale-90">f</div>
+<div x-data="{ open: 'unterminated }">g</div>

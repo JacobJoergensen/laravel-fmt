@@ -1,0 +1,10 @@
+.normal {
+    color: red;
+}
+
+/* laravel-fmt-ignore */
+.preserved   {  color  :   red ;  background  :   blue ;  }
+
+.another {
+    color: green;
+}

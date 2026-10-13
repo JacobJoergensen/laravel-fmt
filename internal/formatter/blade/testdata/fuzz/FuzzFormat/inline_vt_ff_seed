@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<div><span>a</span>\v<b>c</b>\f{{ $d }}</div>")

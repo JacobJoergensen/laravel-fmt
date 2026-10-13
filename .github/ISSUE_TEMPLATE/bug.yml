@@ -1,0 +1,80 @@
+name: Bug report
+description: Report a bug in laravel-fmt.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. Please fill out the details below.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce the bug?
+      description: The input that triggers it, the exact command you ran, and the output you got versus what you expected. Include your laravel-fmt.json if it is not the default.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: laravel-fmt version
+      description: Output of `laravel-fmt --version`.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: language
+    attributes:
+      label: Which language?
+      description: The file type being formatted.
+      options:
+        - PHP
+        - Blade
+        - Livewire
+        - HTML
+        - CSS
+        - Markdown
+        - JSON
+        - YAML
+        - XML
+        - Tailwind class sorting
+        - Not language-specific
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Which mode?
+      options:
+        - Format (write)
+        - --check
+        - --diff
+        - --staged
+        - --stdin-filepath
+        - init
+        - Not mode-specific
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything else worth knowing. Related issues, or things you have already ruled out.
+    validations:
+      required: false

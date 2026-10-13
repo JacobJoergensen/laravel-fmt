@@ -1,0 +1,32 @@
+{
+    "name": "jacobjoergensen/laravel-fmt",
+    "description": "Formatter for PHP, Blade, and Livewire 4 with first-class Tailwind class sorting. It also formats HTML, CSS, Markdown, JSON, YAML, and XML.",
+    "keywords": [
+        "formatter",
+        "php",
+        "blade",
+        "livewire",
+        "tailwind",
+        "laravel"
+    ],
+    "homepage": "https://laravel-fmt.com",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.3",
+        "ext-curl": "*",
+        "ext-phar": "*",
+        "composer-runtime-api": "^2.2",
+        "composer/ca-bundle": "^1.5"
+    },
+    "suggest": {
+        "ext-zip": "Required on Windows only, to unpack the release archive"
+    },
+    "autoload": {
+        "psr-4": {
+            "JacobJoergensen\\LaravelFmt\\": "php/"
+        }
+    },
+    "bin": [
+        "bin/laravel-fmt"
+    ]
+}

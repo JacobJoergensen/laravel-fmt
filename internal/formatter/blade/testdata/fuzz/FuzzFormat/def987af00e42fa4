@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<div><spAn><A0 0000000000/>\n0</spAn><spAn >0</spAn></div>")

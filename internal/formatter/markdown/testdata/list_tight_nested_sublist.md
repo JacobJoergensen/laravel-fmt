@@ -1,0 +1,3 @@
+- Always use single quotes for commands: `tinker`
+  - Double quotes for PHP strings inside: `"hi"`
+- Second item stays tight

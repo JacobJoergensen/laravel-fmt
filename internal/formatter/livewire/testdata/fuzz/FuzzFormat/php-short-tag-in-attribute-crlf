@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php ?><p><A<?\r\n?>/>0")

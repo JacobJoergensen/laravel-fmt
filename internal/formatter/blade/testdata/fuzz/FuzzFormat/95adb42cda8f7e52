@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<tH>0@A(/*\r\n*/0)")

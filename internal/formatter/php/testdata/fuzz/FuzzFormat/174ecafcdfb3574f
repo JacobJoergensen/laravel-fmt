@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php use A;use A;#\n//laravel-fmt-ignore\n;")

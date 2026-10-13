@@ -1,0 +1,11 @@
+{
+  "list": [
+    "a", // first
+    /* block */
+    "b"
+    // dangling in array
+  ],
+  "empty": {
+    // only a comment
+  }
+}

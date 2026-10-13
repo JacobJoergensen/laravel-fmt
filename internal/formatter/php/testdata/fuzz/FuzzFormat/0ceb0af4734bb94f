@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php ClAss A{ /**\n*@phpstan-type A A{}(\n*)*/}")

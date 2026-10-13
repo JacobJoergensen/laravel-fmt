@@ -1,0 +1,12 @@
+{
+  "str": "plain",
+  "esc": "line1\nline2",
+  "uni": "é",
+  "int": 42,
+  "float": 1.5,
+  "neg": -3,
+  "exp": 1e5,
+  "true": true,
+  "false": false,
+  "null": null
+}

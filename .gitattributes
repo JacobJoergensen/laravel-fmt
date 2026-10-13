@@ -1,0 +1,15 @@
+* text=auto eol=lf
+
+/.github            export-ignore
+/.gitattributes     export-ignore
+/.gitignore         export-ignore
+/.golangci.yml      export-ignore
+/.goreleaser.yaml   export-ignore
+/CHANGELOG.md       export-ignore
+/cmd                export-ignore
+/go.mod             export-ignore
+/go.sum             export-ignore
+/internal           export-ignore
+/laravel-fmt.go     export-ignore
+/schema             export-ignore
+/scripts            export-ignore

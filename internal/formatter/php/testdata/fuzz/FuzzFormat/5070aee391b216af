@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php if(0)if(0)#\n0")

@@ -1,0 +1,9 @@
+<root>
+    <!-- laravel-fmt-ignore -->
+    <kept>
+          <weird>value</weird>
+    </kept>
+    <normal>
+        <child>value</child>
+    </normal>
+</root>

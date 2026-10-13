@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php {{(0)->A(funCtion(){;})->A([],funCtion(A$A):A00{})%(fn():A=>(((string)000000%000)%000000((string)0000000000%000)));}}")

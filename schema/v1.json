@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/JacobJoergensen/laravel-fmt/main/schema/v1.json",
+  "title": "laravel-fmt configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "ignore": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Glob patterns excluded from formatting, in addition to .gitignore."
+    },
+    "printWidth": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 120,
+      "description": "Target maximum line width before the formatter wraps."
+    },
+    "indentStyle": {
+      "enum": ["space", "tab"],
+      "default": "space"
+    },
+    "indentWidth": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 4
+    },
+    "endOfLine": {
+      "enum": ["lf", "crlf", "auto"],
+      "default": "lf"
+    },
+    "quoteStyle": {
+      "enum": ["auto", "single", "double"],
+      "default": "auto",
+      "description": "auto canonicalizes per language (PHP single, CSS/HTML/XML double); single/double force that style where safe. JSON is always double; YAML and Markdown are untouched."
+    },
+    "php": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "removeTrailingCloseTag": { "type": "boolean", "default": true },
+        "sortUses": { "type": "boolean", "default": true },
+        "expandUseGroups": { "type": "boolean", "default": true },
+        "functionBraceStyle": { "enum": ["same-line", "next-line", "always-next-line"], "default": "next-line" },
+        "methodBraceStyle": { "enum": ["same-line", "next-line", "always-next-line"], "default": "next-line" },
+        "classBraceStyle": { "enum": ["same-line", "next-line", "always-next-line"], "default": "next-line" },
+        "anonymousClassBraceStyle": { "enum": ["same-line", "next-line", "always-next-line"], "default": "next-line" },
+        "controlBraceStyle": { "enum": ["same-line", "next-line", "always-next-line"], "default": "same-line" },
+        "concatSpace": { "type": "boolean", "default": false },
+        "notOperatorSpace": { "type": "boolean", "default": true },
+        "closureFnSpace": { "type": "boolean", "default": true },
+        "alignFatArrow": { "type": "boolean", "default": false },
+        "shortArray": { "type": "boolean", "default": true },
+        "blankLineBeforeStatements": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "break",
+              "continue",
+              "declare",
+              "do",
+              "for",
+              "foreach",
+              "goto",
+              "if",
+              "include",
+              "include_once",
+              "require",
+              "require_once",
+              "return",
+              "switch",
+              "throw",
+              "try",
+              "while",
+              "yield",
+              "yield_from"
+            ]
+          },
+          "default": ["continue", "return"]
+        },
+        "heredocIndentation": {
+          "enum": ["start_plus_one", "same_as_start", "none"],
+          "default": "none"
+        },
+        "importOrder": {
+          "type": "array",
+          "items": { "enum": ["class", "function", "const"] }
+        }
+      }
+    },
+    "blade": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "blockDirectives": {
+          "type": "array",
+          "description": "The project's own block directives (a Blade::if conditional, a Blade::directive pair), so their bodies indent like @if. close defaults to end + open.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["open"],
+            "properties": {
+              "open": { "type": "string", "pattern": "^\\w+$" },
+              "close": { "type": "string", "pattern": "^\\w+$" },
+              "branches": { "type": "array", "items": { "type": "string", "pattern": "^\\w+$" } }
+            }
+          }
+        }
+      }
+    },
+    "markdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "proseWrap": { "enum": ["always", "never", "preserve"], "default": "preserve" }
+      }
+    },
+    "tailwind": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stylesheet": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ],
+          "description": "Path to the Tailwind v4 entry point, relative to this file, or a list of them when the project builds several bundles. Each carries @theme, @utility and @custom-variant, which the class sorter needs; a list merges in order. Defaults to discovery under resources/css; prettier-plugin-tailwindcss's tailwindStylesheet is read when this is unset."
+        }
+      }
+    }
+  }
+}

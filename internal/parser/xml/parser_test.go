@@ -1,0 +1,93 @@
+package xml
+
+import "testing"
+
+func TestAttributeMustBeQuoted(t *testing.T) {
+	cases := []struct {
+		name    string
+		src     string
+		wantErr bool
+	}{
+		{"double quoted", `<a x="y"/>`, false},
+		{"single quoted", `<a x='y'/>`, false},
+		{"bare name", `<a x/>`, true},
+		{"unquoted value", `<a x=y/>`, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errs := Parse([]byte(tc.src))
+
+			if gotErr := len(errs) > 0; gotErr != tc.wantErr {
+				t.Fatalf("errors = %v, want error %v", errs, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDoctypeHoldsItsInternalSubset(t *testing.T) {
+	cases := []struct {
+		name     string
+		src      string
+		wantText string
+	}{
+		{"no subset", "<!DOCTYPE a SYSTEM \"a.dtd\"><a/>", " a SYSTEM \"a.dtd\""},
+		{"declaration in subset", "<!DOCTYPE a [<!ENTITY b \"c\">]><a/>", " a [<!ENTITY b \"c\">]"},
+		{"bracket and angle in a literal", "<!DOCTYPE a [<!ENTITY b \"]>\">]><a/>", " a [<!ENTITY b \"]>\">]"},
+		{"bracket in a comment", "<!DOCTYPE a [<!-- ]> -->]><a/>", " a [<!-- ]> -->]"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			file, errs := Parse([]byte(tc.src))
+			if len(errs) > 0 {
+				t.Fatalf("unexpected errors: %v", errs)
+			}
+
+			doctype, ok := file.Nodes[0].(*Doctype)
+			if !ok {
+				t.Fatalf("node 0 is %T, want *Doctype", file.Nodes[0])
+			}
+
+			if string(doctype.Text) != tc.wantText {
+				t.Fatalf("Text = %q, want %q", doctype.Text, tc.wantText)
+			}
+
+			if len(file.Nodes) != 2 {
+				t.Fatalf("got %d nodes, want 2", len(file.Nodes))
+			}
+		})
+	}
+}
+
+func TestUnclosedDoctypeSubsetIsAnError(t *testing.T) {
+	_, errs := Parse([]byte("<!DOCTYPE a [<!ENTITY b \"c\">"))
+
+	if len(errs) == 0 {
+		t.Fatal("want an error for a DOCTYPE left open")
+	}
+}
+
+func TestRawLessThanInTextIsAnError(t *testing.T) {
+	cases := []struct {
+		name    string
+		src     string
+		wantErr bool
+	}{
+		{"escaped", "<a>1 &lt; 2</a>", false},
+		{"inside CDATA", "<a><![CDATA[1 < 2]]></a>", false},
+		{"before a space", "<a>1 < 2</a>", true},
+		{"before a digit", "<a>1<2</a>", true},
+		{"at the end", "<a/><", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errs := Parse([]byte(tc.src))
+
+			if gotErr := len(errs) > 0; gotErr != tc.wantErr {
+				t.Fatalf("errors = %v, want error %v", errs, tc.wantErr)
+			}
+		})
+	}
+}

@@ -1,0 +1,9 @@
+@theme {
+    --font-sans: 'Example Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
+.card {
+    transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform;
+    font-family: var(--font-display, Georgia), 'Times New Roman', Times, serif, 'Apple Color Emoji', 'Segoe UI Emoji' !important;
+    transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out, box-shadow 0.3s ease-in-out, color 0.2s linear, outline-color 0.2s linear;
+}

@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<dd>0<A>\r0</A>@A")

@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php\n\nuse Livewire\\Component;\n\nnew class xtends Component {\n    public string $name = 'World';\n};\n?>\n\n<div>\n    <p>Hello {{ $name }}</p>\n\n    <p>Goodbye {{ $name }}</p>\n<EEEE/div>\n")

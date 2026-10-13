@@ -1,0 +1,4 @@
+<div x-data="{ open: false, toggle() { this.open = !this.open } }">content</div>
+<button @click="open = !open;">Toggle</button>
+<span x-show="open && count > 0">a</span>
+<input x-bind:class="{ 'is-active': open }">

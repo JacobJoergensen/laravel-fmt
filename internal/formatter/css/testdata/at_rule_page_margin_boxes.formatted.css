@@ -1,0 +1,14 @@
+@page {
+    size: A4;
+    margin: 12mm;
+    @top-right {
+        content: "Draft";
+        font-size: 8pt;
+    }
+    @bottom-center {
+        content: counter(page);
+    }
+    @left-middle {
+        content: "";
+    }
+}

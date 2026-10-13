@@ -1,0 +1,5 @@
+# laravel-fmt-ignore
+root:
+    child: value
+    nested:
+        deep: value

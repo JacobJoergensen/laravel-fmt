@@ -1,0 +1,13 @@
+{
+  "name": "@laravel-fmt/generate-textwidth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Generates internal/textwidth/wideranges_generated.go from the Unicode East_Asian_Width data.",
+  "scripts": {
+    "generate": "node generate.mjs"
+  },
+  "dependencies": {
+    "get-east-asian-width": "^1.7.0"
+  }
+}

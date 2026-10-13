@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<fluX 00000000='>'0={{>}}</fluX>")

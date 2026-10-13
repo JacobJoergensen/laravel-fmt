@@ -1,0 +1,5 @@
+outer:
+  # laravel-fmt-ignore
+  frozen:
+      deep:    value
+  b: 2

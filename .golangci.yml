@@ -1,0 +1,138 @@
+version: '2'
+
+run:
+  allow-parallel-runners: true
+
+linters:
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - contextcheck
+    - copyloopvar
+    - dupl
+    - dupword
+    - errcheck
+    - errname
+    - errorlint
+    - exhaustive
+    - exptostd
+    - fatcontext
+    - forbidigo
+    - forcetypeassert
+    - goconst
+    - gocritic
+    - godoclint
+    - godot
+    - gocheckcompilerdirectives
+    - gosec
+    - govet
+    - ineffassign
+    - intrange
+    - iotamixing
+    - makezero
+    - mirror
+    - misspell
+    - modernize
+    - nakedret
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - nolintlint
+    - perfsprint
+    - prealloc
+    - predeclared
+    - recvcheck
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - usetesting
+    - wastedassign
+    - whitespace
+    - wrapcheck
+  settings:
+    dupl:
+      threshold: 200
+    exhaustive:
+      default-signifies-exhaustive: true
+      ignore-enum-types: 'php\.Kind$'
+    forbidigo:
+      forbid:
+        - pattern: '^fmt\.Print(|f|ln)$'
+          msg: 'fmt.Print/Printf/Println writes directly to stdout; cmd/ uses cobra.Command.Print*, internal/ packages return strings or write to a passed io.Writer'
+        - pattern: '^print$|^println$'
+          msg: 'built-in print / println bypasses the project output convention and is unbuffered; use fmt.Errorf for errors and the cobra writer for CLI output'
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+      ignore-tests: true
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      settings:
+        hugeParam:
+          sizeThreshold: 128
+        rangeValCopy:
+          sizeThreshold: 128
+    gosec:
+      excludes:
+        - G304
+        - G404
+    misspell:
+      locale: US
+    wrapcheck:
+      ignore-package-globs:
+        - github.com/JacobJoergensen/laravel-fmt/*
+  exclusions:
+    # Generated Tailwind tables (~25k lines, never hand-edited);
+    # Skip: goconst/dupl choke on the repeated strings and slow runs to minutes.
+    paths:
+      - internal/formatter/tailwind/registry_generated\.go
+    # Skip goconst: these files are vocabulary tables (JS keywords, Tailwind
+    # namespaces, Blade directives, WHATWG end tags); the repeats are the table.
+    rules:
+      - linters:
+          - goconst
+        path: internal/formatter/alpine/(lexer|spacing)\.go
+      - linters:
+          - goconst
+        path: internal/formatter/tailwind/(registry|theme)\.go
+      - linters:
+          - goconst
+        path: internal/parser/blade/parser\.go
+      - linters:
+          - goconst
+        path: internal/parser/html/elements\.go
+      # Tests write throwaway fixtures under t.TempDir() with ordinary 0o644 and
+      # 0o755 permissions; G301/G306 guard files a user keeps, not those.
+      - linters:
+          - gosec
+        path: _test\.go
+        text: G30[16]
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - golines
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/JacobJoergensen/laravel-fmt)
+      custom-order: true
+    gofmt:
+      rewrite-rules:
+        - pattern: 'interface{}'
+          replacement: 'any'
+    golines:
+      max-len: 200
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

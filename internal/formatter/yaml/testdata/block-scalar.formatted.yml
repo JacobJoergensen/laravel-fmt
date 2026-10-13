@@ -1,0 +1,8 @@
+description: |
+  This is a literal block.
+  Indentation is preserved.
+    Even deeper.
+summary: >
+  Folded scalar
+  on multiple lines.
+done: true

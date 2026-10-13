@@ -1,0 +1,6 @@
+<config>
+    <script><![CDATA[
+        if (a < b && c > d) { run(); }
+    ]]></script>
+    <note>plain</note>
+</config>

@@ -1,0 +1,5 @@
+{
+  "phpdoc_separation": {
+    "groups": [["param"], ["return"], ["throws"]]
+  }
+}

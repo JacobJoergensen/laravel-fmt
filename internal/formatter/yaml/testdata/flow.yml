@@ -1,0 +1,5 @@
+matrix:
+  php: [8.2, 8.3, 8.4]
+  os: {linux: ubuntu, mac: macos}
+empty: []
+nested: [[1, 2], [3, 4]]

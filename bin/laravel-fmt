@@ -1,0 +1,55 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use JacobJoergensen\LaravelFmt\BinaryDownloader;
+
+(static function (): void {
+    foreach ([
+        $GLOBALS['_composer_autoload_path'] ?? null,
+        __DIR__ . '/../../../autoload.php', // installed as a dependency
+        __DIR__ . '/../vendor/autoload.php', // running from the package itself
+    ] as $autoload) {
+        if (is_string($autoload) && is_file($autoload)) {
+            require $autoload;
+
+            break;
+        }
+    }
+
+    if (!class_exists(BinaryDownloader::class)) {
+        fwrite(STDERR, "laravel-fmt: Composer autoloader not found. Run 'composer install'.\n");
+
+        exit(1);
+    }
+})();
+
+try {
+    $binary = (new BinaryDownloader())->ensure();
+} catch (RuntimeException $e) {
+    fwrite(STDERR, "laravel-fmt: {$e->getMessage()}\n");
+
+    exit(1);
+}
+
+$argv = $_SERVER['argv'] ?? [];
+$args = is_array($argv) ? array_values(array_filter(array_slice($argv, 1), is_string(...))) : [];
+
+if (function_exists('pcntl_exec')) {
+    pcntl_exec($binary, $args);
+
+    fwrite(STDERR, "laravel-fmt: failed to exec {$binary}\n");
+
+    exit(1);
+}
+
+$process = proc_open(array_merge([$binary], $args), [STDIN, STDOUT, STDERR], $pipes);
+
+if (!is_resource($process)) {
+    fwrite(STDERR, "laravel-fmt: failed to start {$binary}\n");
+
+    exit(1);
+}
+
+exit(proc_close($process));

@@ -1,0 +1,10 @@
+// Project TypeScript configuration
+{
+  "compilerOptions": {
+    "strict": true, // all strict checks
+    "target": "ES2022",
+    // path aliases
+    "paths": { "@/*": ["./resources/js/*"] }
+  },
+  "include": ["resources/js", "vite.config.ts"]
+}

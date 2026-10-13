@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php /**@phpstan-type A\r0 ? 0*/0")

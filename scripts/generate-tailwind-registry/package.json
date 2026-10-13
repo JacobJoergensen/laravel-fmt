@@ -1,0 +1,14 @@
+{
+  "name": "@laravel-fmt/generate-tailwind-registry",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Generates internal/formatter/tailwind/registry_generated.go from the Tailwind v4 engine.",
+  "scripts": {
+    "generate": "node generate.mjs"
+  },
+  "dependencies": {
+    "@tailwindcss/node": "^4.3.3",
+    "tailwindcss": "^4.3.3"
+  }
+}

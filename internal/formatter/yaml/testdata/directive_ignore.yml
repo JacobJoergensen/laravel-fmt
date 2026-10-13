@@ -1,0 +1,10 @@
+normal:
+  child: value
+  list:
+    - one
+# laravel-fmt-ignore
+kept:
+    child: value
+    list:
+        - one
+        - two

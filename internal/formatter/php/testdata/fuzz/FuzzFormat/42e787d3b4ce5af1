@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php\ncs){f::r>['','','','','',''],f::r=>['','']};}public function s():y{return[''>'',''>['','','','','','','','','','','','','','']];}public function s():y{return[''>''\n//\n];}public function a():y{return[''>a()>(1)>d(),''>a()>(s(e()))>d()>e(),''>[''>1],''>a()];}'")

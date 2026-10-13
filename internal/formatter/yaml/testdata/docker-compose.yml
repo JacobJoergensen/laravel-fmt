@@ -1,0 +1,12 @@
+services:
+  app:
+    image: "php:8.4-cli"
+    ports:
+      - "8080:80"
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "true"
+  cache:
+    image: redis:7
+volumes:
+  redis-data:

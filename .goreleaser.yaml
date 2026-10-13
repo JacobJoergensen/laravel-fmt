@@ -1,0 +1,57 @@
+version: 2
+
+project_name: laravel-fmt
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - goarch: [amd64, arm64]
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/JacobJoergensen/laravel-fmt/cmd.version={{.Version}} -X github.com/JacobJoergensen/laravel-fmt/cmd.commit={{.Commit}}
+
+archives:
+  - name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+sboms:
+  - artifacts: archive
+
+signs:
+  - id: checksum
+    cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - "sign-blob"
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+  - id: sbom
+    cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - "sign-blob"
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: sbom
+    output: true
+
+release:
+  prerelease: auto

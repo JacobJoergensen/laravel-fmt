@@ -1,0 +1,46 @@
+<style>
+    .late {
+        white-space: normal;
+        white-space: pre-line;
+    }
+    .forced {
+        white-space: pre-line !important;
+    }
+    @media print {
+        .printed {
+            white-space: pre-wrap;
+        }
+    }
+</style>
+<section>
+    <div style="white-space: pre-line !important"><b>Important</b>
+    indented line kept as written</div>
+    <div style="white-space: normal; white-space: pre-line"><b>Repeated</b>
+    indented line kept as written</div>
+    <div style="WHITE-SPACE:PRE-LINE/* note */"><b>Comment</b>
+    indented line kept as written</div>
+    <div style="white-space: preserve-breaks wrap"><b>Shorthand keywords</b>
+    indented line kept as written</div>
+    <div style="white-space-collapse: preserve"><b>Longhand</b>
+    indented line kept as written</div>
+    <div style="--mode: pre-line; white-space: var(--mode)"><b>Custom property</b>
+    indented line kept as written</div>
+    <div class="!whitespace-pre-line"><b>Important prefix</b>
+    indented line kept as written</div>
+    <div class="md:whitespace-pre-line!"><b>Important suffix</b>
+    indented line kept as written</div>
+    <div class="[white-space:preserve_nowrap]"><b>Arbitrary property</b>
+    indented line kept as written</div>
+    <div x-bind:style="{ whiteSpace: 'pre-line' }"><b>Bound style</b>
+    indented line kept as written</div>
+    <div class="late"><b>Page rule, repeated</b>
+    indented line kept as written</div>
+    <div class="forced"><b>Page rule, important</b>
+    indented line kept as written</div>
+    <div class="printed"><b>Page rule in media</b>
+    indented line kept as written</div>
+    <div class="whitespace-normal" style="white-space: nowrap; white-space-collapse: collapse">
+        <b>Collapsing</b>
+        line reflowed
+    </div>
+</section>

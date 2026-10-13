@@ -1,0 +1,17 @@
+<div class="mb-0 bg-(--brand) @md:flex">Hi</div>
+<div class="p-4 @lg:grid">Hi</div>
+<div class="p-2 @min-md:flex">Hi</div>
+<div class="p-2 @max-md:flex">Hi</div>
+<div class="p-2 @md/main:flex">Hi</div>
+<div class="p-1 @md:hover:flex">Hi</div>
+<div class="p-4 @2xl:grid">Hi</div>
+<div class="p-4 @[400px]:flex">Hi</div>
+<div class="p-4 group-@md:flex">Hi</div>
+<div class="p-4 hover:@md:flex">Hi</div>
+<div class="p-4 md:flex">Hi</div>
+<div class="@container mb-0 p-4">Hi</div>
+<div class="@container/main mb-0 p-4">Hi</div>
+<div class="p-4 @empty mb-0">Hi</div>
+<div class="p-4 @md:flex {{ $x }}">Hi</div>
+<div class="p-4 @if ($x) mb-0 @md:flex @endif">Hi</div>
+<div class="p-4 @md:flex bg-{{ $c }}-500">Hi</div>

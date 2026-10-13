@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php ClAss A{funCtion A(){A000->A(B0000)->A('',stAtiC funCtion($A)use($A):A000{;})(fn():A0=>0(A00%A0((string)A000%A000000000000%0%(string)B00000000)%0((string)B00000000)));}}")

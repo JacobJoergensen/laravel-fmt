@@ -1,0 +1,10 @@
+<div>
+    <span>alpha</span>
+    <span>bravo</span>
+    <span>charlie</span>
+    <span>delta</span>
+    <span>echo</span>
+    <span>foxtrot</span>
+    <span>golf</span>
+    <span>hotel</span>
+</div>

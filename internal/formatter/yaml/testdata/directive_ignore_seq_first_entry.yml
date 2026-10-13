@@ -1,0 +1,5 @@
+items:
+  -
+    # laravel-fmt-ignore
+    frozen:    value
+  - normal:   value

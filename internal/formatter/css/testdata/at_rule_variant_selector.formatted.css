@@ -1,0 +1,7 @@
+@custom-variant dark (&:where(.dark, .dark *));
+@variant hover (&:hover);
+@media (min-width: 768px) {
+    .box {
+        color: red;
+    }
+}
