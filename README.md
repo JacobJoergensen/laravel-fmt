@@ -87,18 +87,16 @@ name: format
 on:
   pull_request:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   laravel-fmt:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-
       - uses: ramsey/composer-install@v4
       - run: vendor/bin/laravel-fmt --check
 ```
