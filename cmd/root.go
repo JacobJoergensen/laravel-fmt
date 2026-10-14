@@ -29,8 +29,6 @@ type fmtFlags struct {
 	rangeEnd      int
 }
 
-// Flag names the code reads back through cobra's Changed, which is how an unset
-// offset is told from an explicit 0 and an unset ref from an empty one.
 const (
 	flagRangeStart = "range-start"
 	flagRangeEnd   = "range-end"
@@ -101,8 +99,6 @@ var (
 	commit  string
 )
 
-// releaseVersion is the version this binary was released as, or empty for a
-// development build.
 func releaseVersion() string {
 	if version != "" {
 		return version
@@ -145,9 +141,6 @@ func versionString() string {
 		out += " " + c
 	}
 
-	// The Go toolchain version says nothing about laravel-fmt and is not something
-	// a user can act on; the platform is, since the binaries ship per platform and
-	// some behavior differs there.
 	return fmt.Sprintf("%s %s/%s", out, runtime.GOOS, runtime.GOARCH)
 }
 
@@ -209,8 +202,6 @@ func outColor(out io.Writer) bool {
 	}
 }
 
-// options turns the bound flags into run.Options, leaving a flag the user did
-// not give nil.
 func (f fmtFlags) options(cmd *cobra.Command, args []string) run.Options {
 	opts := run.Options{
 		Paths:         args,
