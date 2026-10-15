@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<div>\n<{{ $as }}\n{{ $attributes->class(['a']) }} >\n<p>x</{{ $as }}>\na <{{ $b }} c </{{ $d }}> <{{-- e --}}>\n<p>f<{{ $as }}>g</{{ $as }}>h</p>\n<{{ $t }}<?php if ($u) : ?>=\"v\"<?php endif ?>>w</{{ $t }}>\n<{!! $t !!} class=\"x\" />\n</div>\n")

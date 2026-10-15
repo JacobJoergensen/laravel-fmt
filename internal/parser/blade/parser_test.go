@@ -974,6 +974,40 @@ func TestParseRejectsAByteGluedToATagName(t *testing.T) {
 	}
 }
 
+func TestParseReadsATagNamedByAnEchoOnlyWithItsClose(t *testing.T) {
+	cases := []struct {
+		name    string
+		src     string
+		element bool
+	}{
+		{"paired", `<{{ $a }} class="b">x</{{ $a }}>`, true},
+		{"self-closed", `<{{ $a }} class="b" />`, true},
+		{"empty close does not end it", `<{{ $a }}>{{ $b }}</></{{ $a }}>`, true},
+		{"close ends an open child", `<{{ $a }}><p>x</{{ $a }}>`, true},
+		{"no close in prose", `a <{{ $b }}> c`, false},
+		{"close of another echo", `<{{ $a }}>x</{{ $b }}>`, false},
+		{"attributes that do not parse", `<{{ $a }}<?php if ($b) : ?>="c"<?php endif ?>>x</{{ $a }}>`, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			file, errs := Parse([]byte(tc.src), nil)
+			if len(errs) > 0 {
+				t.Fatalf("errors: %v", errs)
+			}
+
+			el, ok := file.Nodes[0].(*html.Element)
+			if ok != tc.element {
+				t.Fatalf("first node is %T, want element %v", file.Nodes[0], tc.element)
+			}
+
+			if ok && !el.SelfClose && el.CloseNameEcho == nil {
+				t.Fatalf("closed by %q, want the echo close", tc.src[el.CloseOpen.Start.Offset:])
+			}
+		})
+	}
+}
+
 func TestParsePairsACloseTagByTheEchoGluedToItsName(t *testing.T) {
 	const unpaired = 2
 

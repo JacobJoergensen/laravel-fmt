@@ -192,13 +192,31 @@ func (p *bladeParser) parseNext(stack [][]byte) Node {
 		return p.parseElement(stack)
 	case p.isTagClose():
 		return p.parseStrayClose(stack)
+	case p.atDynamicTagClose():
+		return p.parseUnclaimedDynamicClose()
 	default:
 		return p.parseText()
 	}
 }
 
 func (p *bladeParser) isTagOpen() bool {
-	return p.Peek() == '<' && isNameStart(p.PeekAt(1))
+	return p.Peek() == '<' && (isNameStart(p.PeekAt(1)) || p.atDynamicTagOpen())
+}
+
+func (p *bladeParser) atDynamicTagOpen() bool {
+	return p.StartsWith("<{{") || p.StartsWith("<{!!")
+}
+
+func (p *bladeParser) atDynamicTagClose() bool {
+	return p.StartsWith("</{{") || p.StartsWith("</{!!")
+}
+
+// Takes only the `</`: the echo may hold a `>`, so it parses as an echo next.
+func (p *bladeParser) parseUnclaimedDynamicClose() Node {
+	start := p.Pos
+	p.AdvanceN(len("</"))
+
+	return &html.Text{Start: start, End: p.Pos, Text: p.Src[start.Offset:p.Pos.Offset]}
 }
 
 func (p *bladeParser) isTagClose() bool {
@@ -421,7 +439,7 @@ func (p *bladeParser) isBladeMarker() bool {
 	case '{':
 		return p.PeekAt(1) == '{' || (p.PeekAt(1) == '!' && p.PeekAt(2) == '!')
 	case '<':
-		return p.isTagOpen() || p.isTagClose() || p.StartsWith("<?") ||
+		return p.isTagOpen() || p.isTagClose() || p.atDynamicTagClose() || p.StartsWith("<?") ||
 			p.StartsWith("<!--") || p.StartsWithFold("<!doctype")
 	}
 
@@ -1110,6 +1128,7 @@ func (p *bladeParser) parseDoctype() Node {
 // using void names with content round-trip cleanly.
 func (p *bladeParser) parseElement(stack [][]byte) Node {
 	openStart := p.Pos
+	openErrCount := len(p.errors)
 	p.Advance()
 	open := Span{Start: openStart, End: p.Pos}
 
@@ -1139,6 +1158,18 @@ func (p *bladeParser) parseElement(stack [][]byte) Node {
 		p.addError(p.Pos, "expected > or /> to close element tag")
 	}
 
+	entry := p.stackEntry(name, nameEcho)
+
+	// A `<` before an echo is a tag only when its attributes parse and a close
+	// with the same echo follows (stillat/blade-parser pairs these names by
+	// equality too); otherwise it stays the text it always formatted as.
+	if len(name) == 0 && (len(p.errors) > openErrCount || !selfClose && !p.hasDynamicCloseAhead(entry)) {
+		p.Pos = open.End
+		p.errors = p.errors[:openErrCount]
+
+		return &html.Text{Start: open.Start, End: open.End, Text: p.Src[open.Start.Offset:open.End.Offset]}
+	}
+
 	el := &html.Element{
 		Open: open, Name: name,
 		NameEcho:    nameEcho,
@@ -1160,7 +1191,6 @@ func (p *bladeParser) parseElement(stack [][]byte) Node {
 
 	savedPos := p.Pos
 	savedErrCount := len(p.errors)
-	entry := p.stackEntry(name, nameEcho)
 
 	if html.IsRawTextElement(name) || html.IsRcdataElement(name) || IsRawBodyComponent(name) {
 		el.Children = p.parseRawContent(name)
@@ -1291,7 +1321,7 @@ func (p *bladeParser) atContainerBoundary(stack [][]byte) bool {
 		return true
 	}
 
-	if p.isTagClose() {
+	if p.isTagClose() || p.atDynamicTagClose() {
 		if slices.ContainsFunc(stack[:len(stack)-1], p.closesElement) {
 			return true
 		}
@@ -1523,7 +1553,7 @@ func (p *bladeParser) matchesCloseTag(name []byte) bool {
 
 func (p *bladeParser) closesElement(entry []byte) bool {
 	name := entryName(entry)
-	if p.matchesCloseTag(name) || p.closesDynamicName(name, entry) {
+	if len(name) > 0 && p.matchesCloseTag(name) || p.closesDynamicName(name, entry) {
 		return true
 	}
 
@@ -1572,9 +1602,31 @@ func entryName(entry []byte) []byte {
 	return name
 }
 
+func (p *bladeParser) hasDynamicCloseAhead(entry []byte) bool {
+	save := p.Pos
+	defer func() { p.Pos = save }()
+
+	name := entryName(entry)
+
+	for {
+		i := bytes.Index(p.Src[p.Pos.Offset:], []byte("</{"))
+		if i < 0 {
+			return false
+		}
+
+		p.AdvanceN(i)
+
+		if p.closesDynamicName(name, entry) {
+			return true
+		}
+
+		p.AdvanceN(len("</{"))
+	}
+}
+
 // Neither the cursor nor errors from parsing the close's echo survive the call.
 func (p *bladeParser) closesDynamicName(name, entry []byte) bool {
-	if len(name) == len(entry) || !p.isTagClose() {
+	if len(name) == len(entry) || !p.StartsWith("</") {
 		return false
 	}
 

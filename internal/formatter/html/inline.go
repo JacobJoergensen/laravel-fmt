@@ -24,10 +24,10 @@ func Gluable(node any) bool {
 }
 
 // IsInlineContainer reports whether an element keeps the whitespace at its body
-// edges: an inline-level element, or a custom element or component, whose
-// rendering is unknown.
+// edges: an inline-level element, or one whose rendering is unknown: a custom
+// element, a component, or a Blade tag named wholly by an echo (empty name).
 func IsInlineContainer(name []byte) bool {
-	return parser.IsInlineLevelElement(name) || bytes.ContainsAny(name, "-:")
+	return parser.IsInlineLevelElement(name) || bytes.ContainsAny(name, "-:") || len(name) == 0
 }
 
 // RunAuthoredOnOneLine reports whether no line break sits beside an element of

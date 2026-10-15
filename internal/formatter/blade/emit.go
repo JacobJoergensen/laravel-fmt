@@ -3240,14 +3240,18 @@ func runElement(n parser.Node) bool {
 		return true
 	}
 
-	return el.SelfClose && (htmlparser.IsInlineBlockElement(el.Name) || parser.IsComponentTag(el.Name))
+	return el.SelfClose && (htmlparser.IsInlineBlockElement(el.Name) || displayUnknown(el))
+}
+
+func displayUnknown(el *htmlparser.Element) bool {
+	return parser.IsComponentTag(el.Name) || len(el.Name) == 0
 }
 
 // That boundary renders, so a glued element flows in the run and breaks
 // inside its tags, never beside them.
 func gluedElement(nodes []parser.Node, i int) bool {
 	el, ok := nodes[i].(*htmlparser.Element)
-	if !ok || !parser.IsComponentTag(el.Name) {
+	if !ok || !displayUnknown(el) {
 		return false
 	}
 
@@ -3262,7 +3266,7 @@ func gluedElement(nodes []parser.Node, i int) bool {
 
 func isRunNeighbor(n parser.Node) bool {
 	if el, ok := n.(*htmlparser.Element); ok {
-		return runElement(el) || parser.IsComponentTag(el.Name)
+		return runElement(el) || displayUnknown(el)
 	}
 
 	return isInlineNode(n) && nodeHasContent(n)
@@ -4052,7 +4056,7 @@ func (e *emitter) isInlineContent(children []htmlparser.Node, inlineBlock bool) 
 			// reads as inline too where the author kept the run on one line, as
 			// Pint's Prettier keeps it; a layout wrapper holds block children.
 			admitted := inlineBlock && (htmlparser.IsInlineBlockElement(n.Name) ||
-				parser.IsComponentTag(n.Name) && !allWhitespaceChildren(n.Children) && e.isInlineContent(n.Children, false))
+				displayUnknown(n) && !allWhitespaceChildren(n.Children) && e.isInlineContent(n.Children, false))
 			if !htmlparser.IsInlineElement(n.Name) && !n.SelfClose && !admitted {
 				return false
 			}

@@ -3338,6 +3338,18 @@ func TestFormatKeepsAnEchoGluedToTheTagName(t *testing.T) {
 		{"echo spacing normalized", "<img{!!$attributes!!} src=\"a\">\n", "<img{!! $attributes !!} src=\"a\">\n"},
 		{"glued comment", "<img{{-- note --}} src=\"a\">\n", "<img{{-- note --}} src=\"a\">\n"},
 		{"dynamic tag pairs and normalizes both echoes", "<h{{$a}} class=\"b\">{{ $c }}</h{{$a}}>\n", "<h{{ $a }} class=\"b\">{{ $c }}</h{{ $a }}>\n"},
+		{
+			"tag named wholly by an echo lays out its attributes and body",
+			"<{{ $as }}\n{{ $attributes->class(['a']) }} >\n@if ($b)\n<span>c</span>\n@endif\n</{{ $as }}>\n",
+			"<{{ $as }} {{ $attributes->class(['a']) }}>\n    @if ($b)\n        <span>c</span>\n    @endif\n</{{ $as }}>\n",
+		},
+		{
+			"tag named wholly by an echo keeps its glued edges past the width",
+			"<div><{{ $as }}>" + strings.Repeat("word ", 30) + "end</{{ $as }}></div>\n",
+			"<div>\n    <{{ $as }}>" + strings.Repeat("word ", 30) + "end</{{ $as }}>\n</div>\n",
+		},
+		{"unclaimed close still normalizes its echo", "a </{{$as}}> b\n", "a </{{ $as }}> b\n"},
+		{"tag named wholly by an echo flows in its paragraph", "<p><{{ $as }} class=\"b\">x</{{ $as }}> y</p>\n", "<p><{{ $as }} class=\"b\">x</{{ $as }}> y</p>\n"},
 		{"block child still closes the paragraph", "<div><p{!! $a !!}>x<div>y</div></div>\n", "<div>\n    <p{!! $a !!}>x</p>\n    <div>y</div>\n</div>\n"},
 		{"close echo inside pre keeps its lone CR", "<pre><b{{ \"a\rb\" }}>x</b{{ \"a\rb\" }}></pre>\n", "<pre><b{{ \"a\rb\" }}>x</b{{ \"a\rb\" }}></pre>\n"},
 		{"echo inside pre keeps its lone CR", "<pre><span{{ \"a\rb\" }}>x</span></pre>\n", "<pre><span{{ \"a\rb\" }}>x</span></pre>\n"},
