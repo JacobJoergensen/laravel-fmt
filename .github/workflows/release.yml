@@ -32,12 +32,41 @@ jobs:
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
 
+      - name: Extract release notes from CHANGELOG.md
+        env:
+          TAG: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          notes="$RUNNER_TEMP/release-notes.md"
+
+          if ! awk -v header="## Version $TAG" '
+            $0 == header || index($0, header " (") == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+            END { exit !found }
+          ' CHANGELOG.md > "$notes"; then
+            echo "::error file=CHANGELOG.md::No '## Version $TAG' heading in CHANGELOG.md"
+            exit 1
+          fi
+
+          if ! grep -q '[^[:space:]]' "$notes"; then
+            echo "::error file=CHANGELOG.md::No entries under '## Version $TAG' in CHANGELOG.md"
+            exit 1
+          fi
+
+          previous=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+          if [ -n "$previous" ]; then
+            printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' "$REPOSITORY" "$previous" "$TAG" >> "$notes"
+          fi
+
+          echo "RELEASE_NOTES=$notes" >> "$GITHUB_ENV"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: '~> v2'
-          args: release --clean
+          args: release --clean --release-notes=${{ env.RELEASE_NOTES }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
