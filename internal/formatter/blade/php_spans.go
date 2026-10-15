@@ -82,6 +82,7 @@ func appendPHPSpans(spans []htmlparser.Span, n any) []htmlparser.Span {
 		return append(spans, node.PHP...)
 	case *htmlparser.Element:
 		component := parser.IsComponentTag(node.Name)
+		spans = appendPHPSpans(spans, node.NameEcho)
 
 		for _, a := range node.Attributes {
 			spans = appendAttrPHPSpans(spans, a, component)

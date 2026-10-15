@@ -3323,3 +3323,33 @@ func TestFormatKeepsOneBlankLineAboveConfiguredDirectives(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatKeepsAnEchoGluedToTheTagName(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			"attributes break onto their own lines",
+			`<img{!! $attributes !!}@if($a) loading="lazy"@endif src="{{ $b->cccccccccccc('dddddddddddd') }}" alt="{{ $b->eeeeeeee }}">` + "\n",
+			"<img{!! $attributes !!}\n    @if ($a) loading=\"lazy\" @endif\n    src=\"{{ $b->cccccccccccc('dddddddddddd') }}\"\n    alt=\"{{ $b->eeeeeeee }}\"\n>\n",
+		},
+		{"echo spacing normalized", "<img{!!$attributes!!} src=\"a\">\n", "<img{!! $attributes !!} src=\"a\">\n"},
+		{"glued comment", "<img{{-- note --}} src=\"a\">\n", "<img{{-- note --}} src=\"a\">\n"},
+		{"echo inside pre keeps its lone CR", "<pre><span{{ \"a\rb\" }}>x</span></pre>\n", "<pre><span{{ \"a\rb\" }}>x</span></pre>\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got:\n%q\nwant:\n%q", got, tc.want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
+	}
+}

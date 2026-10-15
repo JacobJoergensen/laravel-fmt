@@ -28,8 +28,12 @@ type File struct {
 // (<br>, <img>) gets SelfClose without a /, unless a matching close tag in
 // scope pairs it.
 type Element struct {
-	Open       Span
-	Name       []byte
+	Open Span
+	Name []byte
+	// NameEcho is a Blade echo or comment glued to the tag name
+	// (`<img{!! $attrs !!}>`). It may print part of the name, so it stays
+	// glued; only Blade sets it.
+	NameEcho   Node
 	Attributes []*Attr
 	OpenClose  Span
 	SelfClose  bool

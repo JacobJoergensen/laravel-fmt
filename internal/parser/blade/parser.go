@@ -1114,7 +1114,13 @@ func (p *bladeParser) parseElement(stack [][]byte) Node {
 	open := Span{Start: openStart, End: p.Pos}
 
 	name := p.readTagName()
-	if !p.Eof() && html.GluedToTagName(p.Peek()) {
+
+	// Laravel's component compiler wants whitespace before every attribute, so
+	// a glued echo leaves a component tag uncompiled.
+	var nameEcho Node
+	if !IsComponentTag(name) && p.atAttrEcho() {
+		nameEcho = p.parseAttrEcho()
+	} else if !p.Eof() && html.GluedToTagName(p.Peek()) {
 		p.addError(p.Pos, "unexpected character after tag name")
 	}
 
@@ -1135,6 +1141,7 @@ func (p *bladeParser) parseElement(stack [][]byte) Node {
 
 	el := &html.Element{
 		Open: open, Name: name,
+		NameEcho:    nameEcho,
 		Attributes:  attrs,
 		OpenClose:   Span{Start: openCloseStart, End: p.Pos},
 		SelfClose:   selfClose,
@@ -1656,17 +1663,8 @@ func (p *bladeParser) parseAttr(component bool) *html.Attr {
 	// An echo the author followed with an `=` is the other construct: the name
 	// itself is composed with an echo (`{{ $name }}="v"`, which Blade compiles to
 	// `<?php echo e($name); ?>="v"`), so it takes the ordinary name path below.
-	if (p.StartsWith("{{") || p.StartsWith("{!!")) && !p.echoOpensAttrName() {
-		var node Node
-
-		switch {
-		case p.StartsWith("{{--"):
-			node = p.parseComment()
-		case p.StartsWith("{!!"):
-			node = p.parseRawEcho()
-		default:
-			node = p.parseEcho()
-		}
+	if p.atAttrEcho() {
+		node := p.parseAttrEcho()
 
 		return &html.Attr{Start: start, End: p.Pos, Directive: node}
 	}
@@ -1890,6 +1888,21 @@ func (p *bladeParser) readAttrName() []byte {
 	}
 
 	return p.Src[startOff:p.Pos.Offset]
+}
+
+func (p *bladeParser) atAttrEcho() bool {
+	return (p.StartsWith("{{") || p.StartsWith("{!!")) && !p.echoOpensAttrName()
+}
+
+func (p *bladeParser) parseAttrEcho() Node {
+	switch {
+	case p.StartsWith("{{--"):
+		return p.parseComment()
+	case p.StartsWith("{!!"):
+		return p.parseRawEcho()
+	default:
+		return p.parseEcho()
+	}
 }
 
 // echoOpensAttrName reports whether the echo at the cursor opens an attribute

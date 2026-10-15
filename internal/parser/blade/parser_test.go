@@ -949,7 +949,7 @@ func TestParseRejectsAByteGluedToATagName(t *testing.T) {
 		want int
 	}{
 		{`<span">@lang('a')</span>`, 5},
-		{`<div{{ $a }}>x</div>`, 4},
+		{`<div{{ $a }}="v">x</div>`, 4},
 		{`<x-alert{{ $attributes }}>x</x-alert>`, 8},
 		{`<x-slot:title>x</x-slot:title>`, noError},
 		{`<flux:icon.check />`, noError},

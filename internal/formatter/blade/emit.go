@@ -1446,8 +1446,7 @@ func (e *emitter) emitOpenTag(el *htmlparser.Element, selfClose, hangBracket boo
 		if opens, closes, branch := e.attrDirectiveRole(attrs[0]); !opens && !closes && !branch {
 			start := len(e.w.Bytes())
 
-			e.w.Write("<")
-			e.w.WriteBytes(el.Name)
+			e.writeOpenTagName(el)
 			e.w.Space()
 			e.emitAttr(attrs[0], parser.IsComponentTag(el.Name))
 
@@ -1552,7 +1551,7 @@ func (e *emitter) foldsLoneAttribute(el *htmlparser.Element, selfClose bool) boo
 	ownLine := e.w.IndentColumn()
 	e.w.Dedent()
 
-	tagLine := e.w.IndentColumn() + len("<") + len(el.Name) + len(" ")
+	tagLine := e.w.IndentColumn() + e.openTagNameWidth(el) + len(" ")
 
 	savedWidth := e.w.PrintWidth()
 	e.w.SetPrintWidth(savedWidth + tagLine - ownLine)
@@ -1583,9 +1582,32 @@ func attrsMustBreak(attrs []*htmlparser.Attr) bool {
 	return false
 }
 
-func (e *emitter) emitOpenTagFlat(el *htmlparser.Element, attrs []*htmlparser.Attr, selfClose, hangBracket bool) {
+func (e *emitter) writeOpenTagName(el *htmlparser.Element) {
 	e.w.Write("<")
 	e.w.WriteBytes(el.Name)
+
+	if n, ok := el.NameEcho.(parser.Node); ok {
+		e.emitNode(n)
+	}
+}
+
+func (e *emitter) openTagNameWidth(el *htmlparser.Element) int {
+	width := len("<") + len(el.Name)
+
+	if n, ok := el.NameEcho.(parser.Node); ok {
+		start := e.w.CursorColumn()
+
+		e.w.MeasureOneLine(func() {
+			e.emitNode(n)
+			width += e.w.CursorColumn() - start
+		})
+	}
+
+	return width
+}
+
+func (e *emitter) emitOpenTagFlat(el *htmlparser.Element, attrs []*htmlparser.Attr, selfClose, hangBracket bool) {
+	e.writeOpenTagName(el)
 
 	for _, attr := range attrs {
 		e.w.Space()
@@ -1605,8 +1627,7 @@ func (e *emitter) emitOpenTagFlat(el *htmlparser.Element, attrs []*htmlparser.At
 }
 
 func (e *emitter) emitOpenTagMultiline(el *htmlparser.Element, attrs []*htmlparser.Attr, selfClose, hangBracket bool) {
-	e.w.Write("<")
-	e.w.WriteBytes(el.Name)
+	e.writeOpenTagName(el)
 	e.w.Indent()
 
 	// A block directive in attribute position (`@if ($cond) style="…" @endif`)
