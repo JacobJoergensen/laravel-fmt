@@ -3337,6 +3337,9 @@ func TestFormatKeepsAnEchoGluedToTheTagName(t *testing.T) {
 		},
 		{"echo spacing normalized", "<img{!!$attributes!!} src=\"a\">\n", "<img{!! $attributes !!} src=\"a\">\n"},
 		{"glued comment", "<img{{-- note --}} src=\"a\">\n", "<img{{-- note --}} src=\"a\">\n"},
+		{"dynamic tag pairs and normalizes both echoes", "<h{{$a}} class=\"b\">{{ $c }}</h{{$a}}>\n", "<h{{ $a }} class=\"b\">{{ $c }}</h{{ $a }}>\n"},
+		{"block child still closes the paragraph", "<div><p{!! $a !!}>x<div>y</div></div>\n", "<div>\n    <p{!! $a !!}>x</p>\n    <div>y</div>\n</div>\n"},
+		{"close echo inside pre keeps its lone CR", "<pre><b{{ \"a\rb\" }}>x</b{{ \"a\rb\" }}></pre>\n", "<pre><b{{ \"a\rb\" }}>x</b{{ \"a\rb\" }}></pre>\n"},
 		{"echo inside pre keeps its lone CR", "<pre><span{{ \"a\rb\" }}>x</span></pre>\n", "<pre><span{{ \"a\rb\" }}>x</span></pre>\n"},
 	}
 

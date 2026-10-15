@@ -973,3 +973,30 @@ func TestParseRejectsAByteGluedToATagName(t *testing.T) {
 		})
 	}
 }
+
+func TestParsePairsACloseTagByTheEchoGluedToItsName(t *testing.T) {
+	const unpaired = 2
+
+	cases := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"spacing inside the echo differs", `<h{{$a}}>x</h{{ $a }}>`, 0},
+		{"echo was an attribute bag", `<div{!! $a !!}>x</div>`, 0},
+		{"close ends an open child", `<h{{ $a }}><p>x</h{{ $a }}>`, 0},
+		{"other expression", `<h{{ $a }}>x</h{{ $b }}>`, unpaired},
+		{"raw echo against escaped", `<h{{ $a }}>x</h{!! $a !!}>`, unpaired},
+		{"unparsable close echo reports no PHP error", `<h{{ $a }}><p>x</h{{ $a + }}>`, unpaired},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errs := Parse([]byte(tc.src), nil)
+
+			if len(errs) != tc.want {
+				t.Fatalf("got %d errors, want %d: %v", len(errs), tc.want, errs)
+			}
+		})
+	}
+}

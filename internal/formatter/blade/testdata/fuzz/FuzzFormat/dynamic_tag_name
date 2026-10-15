@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<div>\n<h{{$a}} class=\"b\"><p>x</h{{ $a }}>\n<h{!! $a !!}>y\n</h{!! $a !!}>\n<div{!! $a !!}><p>z<div>w</div></div>\n</div>\n")

@@ -1066,7 +1066,7 @@ func (e *emitter) gluedTagWrap(el *htmlparser.Element, selfClose bool) (inlineRu
 			e.emitOpenTag(el, false, false, nil)
 			e.emitInlineRun(el, run)
 			e.w.Write("</")
-			e.w.WriteBytes(e.closeTagName(el))
+			e.writeCloseTagName(el)
 			e.w.Write(">")
 		}) {
 			return inlineRun{}, false
@@ -1143,7 +1143,7 @@ func (e *emitter) emitGluedTagWrapped(el *htmlparser.Element, run inlineRun) {
 
 	closeTag := func() {
 		e.w.Write("</")
-		e.w.WriteBytes(e.closeTagName(el))
+		e.writeCloseTagName(el)
 		e.w.Write(">")
 	}
 
@@ -1200,7 +1200,7 @@ func (e *emitter) foldsSingleAttribute(el *htmlparser.Element) bool {
 		return false
 	}
 
-	var out, openTag []byte
+	var out, openTag, closeTag []byte
 
 	e.folding = true
 	e.w.MeasureOneLine(func() {
@@ -1213,11 +1213,17 @@ func (e *emitter) foldsSingleAttribute(el *htmlparser.Element) bool {
 			start := len(e.w.Bytes())
 			e.emitOpenTagFlat(el, el.Attributes, false, true)
 			openTag = bytes.Clone(bytes.TrimSpace(e.w.Bytes()[start:]))
+
+			start = len(e.w.Bytes())
+			e.w.Write("</")
+			e.writeCloseTagName(el)
+			e.w.Write(">")
+			closeTag = bytes.Clone(e.w.Bytes()[start:])
 		})
 	}
 	e.folding = false
 
-	line, ok := collapseSingleAttribute(out, openTag, e.closeTagName(el))
+	line, ok := collapseSingleAttribute(out, openTag, closeTag)
 	if !ok {
 		return false
 	}
@@ -1246,14 +1252,13 @@ func (e *emitter) foldableBody(el *htmlparser.Element) bool {
 // does; output already on one line is returned as it is. openTag is the open
 // tag as written without its `>`: a line is that tag only when it equals it,
 // since an attribute name may hold a quote that hides a `>` from a scan.
-func collapseSingleAttribute(out, openTag, name []byte) ([]byte, bool) {
+func collapseSingleAttribute(out, openTag, closeTag []byte) ([]byte, bool) {
 	// A lone CR is a line break in HTML content; the unfolded layout owns it.
 	if bytes.IndexByte(out, '\r') >= 0 {
 		return nil, false
 	}
 
 	lines := bytes.Split(out, []byte("\n"))
-	closeTag := append(append([]byte("</"), name...), '>')
 
 	if len(lines) == 1 {
 		return out, true
@@ -1502,7 +1507,7 @@ func (e *emitter) gluedBodyTail(el *htmlparser.Element) func() {
 	if len(el.Children) == 0 || allWhitespaceChildren(el.Children) {
 		return func() {
 			e.w.Write("</")
-			e.w.WriteBytes(e.closeTagName(el))
+			e.writeCloseTagName(el)
 			e.w.Write(">")
 		}
 	}
@@ -1592,16 +1597,22 @@ func (e *emitter) writeOpenTagName(el *htmlparser.Element) {
 }
 
 func (e *emitter) openTagNameWidth(el *htmlparser.Element) int {
-	width := len("<") + len(el.Name)
+	return len("<") + len(el.Name) + e.gluedEchoWidth(el.NameEcho)
+}
 
-	if n, ok := el.NameEcho.(parser.Node); ok {
-		start := e.w.CursorColumn()
-
-		e.w.MeasureOneLine(func() {
-			e.emitNode(n)
-			width += e.w.CursorColumn() - start
-		})
+func (e *emitter) gluedEchoWidth(echo htmlparser.Node) int {
+	n, ok := echo.(parser.Node)
+	if !ok {
+		return 0
 	}
+
+	start := e.w.CursorColumn()
+	width := 0
+
+	e.w.MeasureOneLine(func() {
+		e.emitNode(n)
+		width = e.w.CursorColumn() - start
+	})
 
 	return width
 }
@@ -2348,7 +2359,7 @@ func isASCIILetter(c byte) bool {
 
 func (e *emitter) emitCloseTag(el *htmlparser.Element) {
 	e.w.Write("</")
-	e.w.WriteBytes(e.closeTagName(el))
+	e.writeCloseTagName(el)
 
 	if e.hangClose != el {
 		e.w.Write(">")
@@ -2382,7 +2393,16 @@ func (e *emitter) writeHungCloser(el *htmlparser.Element, closer string) {
 }
 
 func (e *emitter) closeTagWidth(el *htmlparser.Element) int {
-	return len("</") + len(e.closeTagName(el)) + len(">")
+	return len("</") + len(e.closeTagName(el)) + e.gluedEchoWidth(el.CloseNameEcho) + len(">")
+}
+
+func (e *emitter) writeCloseTagName(el *htmlparser.Element) {
+	name := e.closeTagName(el)
+	e.w.WriteBytes(name)
+
+	if n, ok := el.CloseNameEcho.(parser.Node); ok {
+		e.emitNode(n)
+	}
 }
 
 // closeTagName is the author's spelling of the close tag, or the open tag's name
@@ -4288,7 +4308,7 @@ func (e *emitter) fitsAsSpacedText(el *htmlparser.Element, run inlineRun) bool {
 		e.emitOpenTagFlat(el, el.Attributes, false, false)
 		e.emitInlineRun(el, run)
 		e.w.Write("</")
-		e.w.WriteBytes(e.closeTagName(el))
+		e.writeCloseTagName(el)
 		e.w.Write(">")
 	})
 }

@@ -91,6 +91,8 @@ func appendPHPSpans(spans []htmlparser.Span, n any) []htmlparser.Span {
 		for _, c := range node.Children {
 			spans = appendPHPSpans(spans, c)
 		}
+
+		return appendPHPSpans(spans, node.CloseNameEcho)
 	}
 
 	return spans

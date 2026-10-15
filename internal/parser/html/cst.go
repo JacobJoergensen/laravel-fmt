@@ -45,9 +45,10 @@ type Element struct {
 	// CloseOpen is the `</` of the close tag, and its Start is where the body
 	// ends. For an end tag the author omitted it is zero-width at that point, so
 	// the body reads the same with the tag written or not; CloseFinal stays zero.
-	CloseOpen  Span
-	CloseName  []byte
-	CloseFinal Span
+	CloseOpen     Span
+	CloseName     []byte
+	CloseNameEcho Node
+	CloseFinal    Span
 	// Loose marks a deferred-open element: opened inside a Blade block whose
 	// matching close tag lives in a sibling branch or later iteration. The
 	// emitter renders the open tag alone and must not synthesize a close.

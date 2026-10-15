@@ -1150,7 +1150,7 @@ func (p *bladeParser) parseElement(stack [][]byte) Node {
 
 	var parentClose []byte
 	if len(stack) > 0 {
-		parentClose = stack[len(stack)-1]
+		parentClose = entryName(stack[len(stack)-1])
 	}
 
 	if selfClose || (html.IsVoidElement(name) && !p.hasPairedClose(name, parentClose)) {
@@ -1160,18 +1160,24 @@ func (p *bladeParser) parseElement(stack [][]byte) Node {
 
 	savedPos := p.Pos
 	savedErrCount := len(p.errors)
+	entry := p.stackEntry(name, nameEcho)
 
 	if html.IsRawTextElement(name) || html.IsRcdataElement(name) || IsRawBodyComponent(name) {
 		el.Children = p.parseRawContent(name)
 	} else {
-		el.Children = p.parseElementChildren(append(stack, name))
+		el.Children = p.parseElementChildren(append(stack, entry))
 	}
 
-	if p.closesElement(name) {
+	if p.closesElement(entry) {
 		closeOpenStart := p.Pos
 		p.AdvanceN(2)
 		el.CloseOpen = Span{Start: closeOpenStart, End: p.Pos}
 		el.CloseName = p.readTagName()
+
+		if p.StartsWith("{{") || p.StartsWith("{!!") {
+			el.CloseNameEcho = p.parseAttrEcho()
+		}
+
 		p.skipTagWhitespace()
 
 		closeFinalStart := p.Pos
@@ -1291,7 +1297,7 @@ func (p *bladeParser) atContainerBoundary(stack [][]byte) bool {
 		}
 	}
 
-	if p.isTagOpen() && html.StartTagClosesCurrent(current, p.peekTagName()) {
+	if p.isTagOpen() && html.StartTagClosesCurrent(entryName(current), p.peekTagName()) {
 		return true
 	}
 
@@ -1515,8 +1521,9 @@ func (p *bladeParser) matchesCloseTag(name []byte) bool {
 	return p.matchesCloseTagAt(p.Pos.Offset, name)
 }
 
-func (p *bladeParser) closesElement(name []byte) bool {
-	if p.matchesCloseTag(name) {
+func (p *bladeParser) closesElement(entry []byte) bool {
+	name := entryName(entry)
+	if p.matchesCloseTag(name) || p.closesDynamicName(name, entry) {
 		return true
 	}
 
@@ -1528,6 +1535,67 @@ func (p *bladeParser) closesElement(name []byte) bool {
 	closeName := p.tagNameAt(p.Pos.Offset + 2)
 
 	return componentFamily(closeName) == family && p.matchesCloseTagName(p.Pos.Offset, closeName)
+}
+
+// stackEntry keys an open element for its closers. A glued echo may be an
+// attribute bag (`<div{!! $a !!}>…</div>`) or part of the name
+// (`<h{{ $l }}>…</h{{ $l }}>`), and only the close tells which, so the entry
+// keeps the echo's opener and PHP tokens; spacing inside it does not count.
+func (p *bladeParser) stackEntry(name []byte, nameEcho Node) []byte {
+	var open Span
+
+	var tokens []php.Token
+
+	switch echo := nameEcho.(type) {
+	case *EchoNode:
+		open, tokens = echo.Open, echo.Tokens
+	case *RawEchoNode:
+		open, tokens = echo.Open, echo.Tokens
+	default:
+		return name
+	}
+
+	entry := append(bytes.ToLower(name), p.Src[open.Start.Offset:open.End.Offset]...)
+
+	for _, tok := range tokens {
+		entry = append(entry, ' ')
+		entry = append(entry, tok.Text...)
+	}
+
+	return entry
+}
+
+// A tag name never holds a `{`, so the first one ends an entry's name.
+func entryName(entry []byte) []byte {
+	name, _, _ := bytes.Cut(entry, []byte("{"))
+
+	return name
+}
+
+// Neither the cursor nor errors from parsing the close's echo survive the call.
+func (p *bladeParser) closesDynamicName(name, entry []byte) bool {
+	if len(name) == len(entry) || !p.isTagClose() {
+		return false
+	}
+
+	save, errCount := p.Pos, len(p.errors)
+
+	defer func() {
+		p.Pos = save
+		p.errors = p.errors[:errCount]
+	}()
+
+	p.AdvanceN(len("</"))
+	closeName := p.readTagName()
+
+	if !p.StartsWith("{{") && !p.StartsWith("{!!") {
+		return false
+	}
+
+	closeEntry := p.stackEntry(closeName, p.parseAttrEcho())
+	p.skipTagWhitespace()
+
+	return p.Peek() == '>' && bytes.Equal(closeEntry, entry)
 }
 
 func (p *bladeParser) matchesCloseTagAt(offset int, name []byte) bool {
