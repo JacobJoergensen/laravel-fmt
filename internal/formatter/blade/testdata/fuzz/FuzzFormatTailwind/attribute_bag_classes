@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<div {{ $attributes->merge(['class' => 'text-white flex alert-'.$a, 'id' => 'b a'])->class(['p-4 flex', 'm-2 block' => $b === 'c d']) }}>\n<span {!! $attributes->except('x')->class('text-white flex') !!}></span>\n<i {{ $attributes->get('a')->class('b a') }} {{ $c->class('b a') }} {{ $attributes->class() }}></i>\n</div>\n")

@@ -1228,6 +1228,74 @@ func TestFormatTailwindBindClass(t *testing.T) {
 	}
 }
 
+func TestFormatTailwindSortsAttributeBagClasses(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			"class() sorts its list but not its conditions",
+			`<div {{ $attributes->class(['text-white flex', 'font-bold bg-red-500' => $a === 'p-4 flex']) }}></div>`,
+			`<div {{ $attributes->class(['flex text-white', 'bg-red-500 font-bold' => $a === 'p-4 flex']) }}></div>`,
+		},
+		{
+			"merge() class value only",
+			`<div {{ $attributes->merge(['class' => 'text-white flex', 'title' => 'text-white flex']) }}></div>`,
+			`<div {{ $attributes->merge(['class' => 'flex text-white', 'title' => 'text-white flex']) }}></div>`,
+		},
+		{
+			"through a bag-returning chain",
+			`<div {{ $attributes->except('a')->class(['text-white flex']) }}></div>`,
+			`<div {{ $attributes->except('a')->class(['flex text-white']) }}></div>`,
+		},
+		{
+			"a slot's attributes",
+			`<div {{ $a->attributes->class('text-white flex') }}></div>`,
+			`<div {{ $a->attributes->class('flex text-white') }}></div>`,
+		},
+		{
+			"another property's class()",
+			`<div {{ $a->b->class('text-white flex') }}></div>`,
+			`<div {{ $a->b->class('text-white flex') }}></div>`,
+		},
+		{
+			"another object's class()",
+			`<div {{ $a->class('text-white flex') }}></div>`,
+			`<div {{ $a->class('text-white flex') }}></div>`,
+		},
+		{
+			"a chain through a non-bag result",
+			`<div {{ $attributes->get('a')->class('text-white flex') }}></div>`,
+			`<div {{ $attributes->get('a')->class('text-white flex') }}></div>`,
+		},
+		{"class() without arguments", `<div {{ $attributes->class() }}></div>`, `<div {{ $attributes->class() }}></div>`},
+	}
+
+	cfg := config.Default()
+	cfg.Tailwind = true
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src+"\n"), cfg)
+			if string(got) != tc.want+"\n" {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+
+			if twice := mustFormat(t, got, cfg); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
+	}
+
+	t.Run("Tailwind off", func(t *testing.T) {
+		src := cases[0].src + "\n"
+		if got := mustFormat(t, []byte(src), config.Default()); string(got) != src {
+			t.Fatalf("got:\n%s\nwant:\n%s", got, src)
+		}
+	})
+}
+
 func TestFormatTailwindGluedHole(t *testing.T) {
 	input := formattertest.ReadFixture(t, "tailwind_class_glued_hole_input.blade.php")
 	want := formattertest.ReadFixture(t, "tailwind_class_glued_hole.formatted.blade.php")

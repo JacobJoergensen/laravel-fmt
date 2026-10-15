@@ -262,6 +262,10 @@ func (e *emitter) emitEchoArgs(open, closeTag parser.Span, tokens []php.Token, a
 	broken := false
 
 	for _, arg := range args {
+		if e.cfg.Tailwind {
+			e.sortAttributeBagClasses(arg)
+		}
+
 		b := phpfmt.BuildEchoExpr(content, tokens, arg, e.cfg, bodyCols)
 		built = append(built, b)
 		broken = broken || (lines && bytes.IndexByte(b, '\n') >= 0)
@@ -421,7 +425,7 @@ func (e *emitter) emitDirective(n *parser.DirectiveNode) {
 		// `@class([...])` is a class list, so its string literals are Tailwind-sorted
 		// like a `class="..."` attribute (the array's bare values and keyed keys hold
 		// classes; keyed values are conditions and stay put).
-		sortClasses := e.cfg.Tailwind && string(n.Name) == "class"
+		sortClasses := e.cfg.Tailwind && string(n.Name) == classList
 
 		args := make([][]byte, len(n.Args))
 
@@ -2147,6 +2151,103 @@ func (e *emitter) writeRebasedAttrText(text []byte, naturalIndent int, php bool)
 
 func (e *emitter) sortPinned(classes string, pinFirst, pinLast bool) string {
 	return tailwind.SortPinned(e.cfg.TailwindTheme, classes, pinFirst, pinLast)
+}
+
+const classList = "class"
+
+// attributeBagMethods are the ComponentAttributeBag methods that return the bag,
+// so a chain of them from `$attributes` still ends in Laravel's class() and merge().
+var attributeBagMethods = []string{
+	classList, "except", "exceptProps", "filter", "merge", "only", "onlyProps",
+	"style", "thatStartWith", "whereDoesntStartWith", "whereStartsWith",
+}
+
+// sortAttributeBagClasses sorts the classes Laravel's attribute bag takes as a
+// class list: class()'s argument, which it hands to Arr::toCssClasses as @class
+// does, and the `'class'` value of merge()'s defaults. Only a chain rooted at a
+// bag qualifies, `$attributes` or a slot's `$slot->attributes`; another object's
+// class() is another method.
+func (e *emitter) sortAttributeBagClasses(expr php.Expr) {
+	type bagCall struct {
+		method string
+		args   []php.Expr
+	}
+
+	var calls []bagCall
+
+	for {
+		call, ok := expr.(*php.CallExpr)
+		if !ok {
+			break
+		}
+
+		member, ok := call.Callee.(*php.MemberExpr)
+		if !ok {
+			return
+		}
+
+		method, ok := attributeBagMethod(member.Property)
+		if !ok {
+			return
+		}
+
+		calls = append(calls, bagCall{method, call.Args})
+		expr = member.Object
+	}
+
+	if !isAttributeBag(expr) {
+		return
+	}
+
+	for _, call := range calls {
+		if len(call.args) == 0 {
+			continue
+		}
+
+		switch call.method {
+		case classList:
+			phpfmt.SortClassExpr(call.args[0], e.sortPinned)
+		case "merge":
+			e.sortMergedClass(call.args[0])
+		}
+	}
+}
+
+func isAttributeBag(expr php.Expr) bool {
+	switch e := expr.(type) {
+	case *php.VariableExpr:
+		return string(e.Token.Text) == "$attributes"
+	case *php.MemberExpr:
+		_, onVariable := e.Object.(*php.VariableExpr)
+		property, ok := e.Property.(*php.IdentExpr)
+
+		return onVariable && ok && string(property.Token.Text) == "attributes"
+	}
+
+	return false
+}
+
+func attributeBagMethod(property php.Expr) (string, bool) {
+	ident, ok := property.(*php.IdentExpr)
+	if !ok || !slices.Contains(attributeBagMethods, string(ident.Token.Text)) {
+		return "", false
+	}
+
+	return string(ident.Token.Text), true
+}
+
+func (e *emitter) sortMergedClass(defaults php.Expr) {
+	array, ok := defaults.(*php.ArrayExpr)
+	if !ok {
+		return
+	}
+
+	for _, el := range array.Elements {
+		key, ok := el.Key.(*php.StringExpr)
+		if ok && (string(key.Token.Text) == `'class'` || string(key.Token.Text) == `"class"`) {
+			phpfmt.SortClassExpr(el.Value, e.sortPinned)
+		}
+	}
 }
 
 // sortClassSegment runs tailwind.Sort on a text segment's inner content,
