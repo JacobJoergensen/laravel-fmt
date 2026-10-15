@@ -1812,14 +1812,15 @@ func (e *emitter) emitAttr(a *htmlparser.Attr, component bool) {
 
 	// An unquoted value adopts a delimiter, so every pass a quoted value gets
 	// runs on it in the same pass, or `x-data={open:false}` would take two
-	// passes to settle. A value that cannot adopt one goes out byte-exact, so
-	// no pass below can add a space and move the end of the value.
+	// passes to settle. A value that cannot adopt one goes out as written, minus
+	// the CRs PHP eats, so no pass below can add a space and move the end of the
+	// value.
 	quote := a.Quote
 	if quote == 0 {
 		quote = e.unquotedDelimiter(a)
 
 		if quote == 0 {
-			e.w.WriteBytes(a.Value)
+			e.w.WriteBytes(e.withoutSwallowedCRs(a))
 
 			return
 		}
@@ -1933,6 +1934,35 @@ func (e *emitter) emitAttr(a *htmlparser.Attr, component bool) {
 // adopted there only when the source has no quote at all. Every other value
 // passes through untouched apart from Alpine and Tailwind, neither of which
 // introduces a quote, so it can also take the alternative delimiter.
+// PHP eats the lone CR an echo owns after `?>`, so it never renders. Copied, a
+// line break written after the value makes it a CRLF the next pass reads as a
+// line ending.
+func (e *emitter) withoutSwallowedCRs(a *htmlparser.Attr) []byte {
+	var out []byte
+
+	from := a.ValueStart
+
+	for _, part := range a.Parts {
+		if _, text := part.(*htmlparser.Text); text {
+			continue
+		}
+
+		end := part.Span().End.Offset
+		if e.src[end-1] != '\r' {
+			continue
+		}
+
+		out = append(out, e.src[from:end-1]...)
+		from = end
+	}
+
+	if out == nil {
+		return a.Value
+	}
+
+	return append(out, e.src[from:a.ValueStart+len(a.Value)]...)
+}
+
 func (e *emitter) unquotedDelimiter(a *htmlparser.Attr) byte {
 	if a.KeepUnquoted {
 		return 0

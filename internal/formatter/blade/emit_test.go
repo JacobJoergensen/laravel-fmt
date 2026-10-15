@@ -393,11 +393,14 @@ func TestFormatReadsALoneCRAsItsLFTwin(t *testing.T) {
 // illuminate/view's BladeCompiler and PHP's lexer.
 func TestFormatLoneCRAfterAnEchoRendersAsNothing(t *testing.T) {
 	cases := map[string]struct{ src, want string }{
-		"in text":          {"<p>{{ $a }}\rb</p>", "<p>{{ $a }}b</p>\n"},
-		"after a raw echo": {"<p>{!! $a !!}\rb</p>", "<p>{!! $a !!}b</p>\n"},
-		"in an inline run": {"<div>x {{ $a }}\rb <b>y</b></div>", "<div>x {{ $a }}b <b>y</b></div>\n"},
-		"in an attribute":  {"<div class=\"a {{ $x }}\r  b\"></div>", "<div class=\"a {{ $x }}  b\"></div>\n"},
-		"ending a script":  {"<script>let a = {{ $a }}\r</script>", "<script>\n    let a = {{ $a }}\n</script>\n"},
+		"in text":                         {"<p>{{ $a }}\rb</p>", "<p>{{ $a }}b</p>\n"},
+		"after a raw echo":                {"<p>{!! $a !!}\rb</p>", "<p>{!! $a !!}b</p>\n"},
+		"in an inline run":                {"<div>x {{ $a }}\rb <b>y</b></div>", "<div>x {{ $a }}b <b>y</b></div>\n"},
+		"in an attribute":                 {"<div class=\"a {{ $x }}\r  b\"></div>", "<div class=\"a {{ $x }}  b\"></div>\n"},
+		"in an unquoted value":            {"<span a={{''}}\rb>x</span>", "<span a={{''}}b>x</span>\n"},
+		"ending an unquoted value":        {"<span a={{''}}\r>x\ny</span>", "<span a={{''}}\n    >x\n    y</span>\n"},
+		"two echoes in an unquoted value": {"<span a={{''}}\r{{''}}\rb>x</span>", "<span a={{''}}{{''}}b>x</span>\n"},
+		"ending a script":                 {"<script>let a = {{ $a }}\r</script>", "<script>\n    let a = {{ $a }}\n</script>\n"},
 	}
 
 	for name, tc := range cases {
