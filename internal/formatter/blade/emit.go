@@ -2307,11 +2307,18 @@ func sortAroundDirectives(theme *tailwind.Theme, inner []byte, pinFirst, pinLast
 
 	sawDirective := false
 
+	// Blade reads a `(` after a bare `@name` as its argument list, so sorting
+	// must not slide one against the name.
+	afterBare := false
+
 	flush := func() {
 		if len(run) > 0 {
-			parts = append(parts, tailwind.Sort(theme, string(run)))
+			pinFirst := afterBare && bytes.Contains(run, []byte(" ("))
+			parts = append(parts, tailwind.SortPinned(theme, string(run), pinFirst, false))
 			run = run[:0]
 		}
+
+		afterBare = false
 	}
 
 	i := 0
@@ -2328,6 +2335,7 @@ func sortAroundDirectives(theme *tailwind.Theme, inner []byte, pinFirst, pinLast
 			flush()
 			parts = append(parts, string(inner[i:end]))
 			sawDirective = true
+			afterBare = inner[end-1] != ')'
 			i = end
 
 			continue

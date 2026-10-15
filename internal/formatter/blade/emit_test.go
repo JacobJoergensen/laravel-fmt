@@ -1228,6 +1228,17 @@ func TestFormatTailwindBindClass(t *testing.T) {
 	}
 }
 
+func TestFormatTailwindKeepsAParenAwayFromABareDirective(t *testing.T) {
+	cfg := config.Default()
+	cfg.Tailwind = true
+
+	src := "<div class=\"p-4 @a flex ( m-2\"></div>\n"
+
+	if got := mustFormat(t, []byte(src), cfg); string(got) != src {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, src)
+	}
+}
+
 func TestFormatTailwindSortsAttributeBagClasses(t *testing.T) {
 	cases := []struct {
 		name string

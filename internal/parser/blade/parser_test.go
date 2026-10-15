@@ -97,6 +97,9 @@ func TestDirectiveArgumentErrors(t *testing.T) {
 	}{
 		{"line comment swallows the paren", "@if($a // c)\nx\n@endif", "1:8: a line comment swallows the directive's ), which Blade reads the same way"},
 		{"line comment swallows the paren in an unquoted value", "<div class=a@x(0 # c\">0)</div>", "1:13: a line comment swallows the directive's ), which Blade reads the same way"},
+		{"line comment swallows the paren in a quoted value", "<div class=\"a @x (0 # c\">0)</div>", "1:15: a line comment swallows the directive's ), which Blade reads the same way"},
+		{"paren never closed in a quoted value", "<div class=\"a @x(\"b=c></div>", "1:15: the directive's ( is never closed"},
+		{"paren never closed in an unquoted value", "<div class=@x( b=c></div>", "1:12: the directive's ( is never closed"},
 		{"laravel directive with non-PHP argument", "@hasSection(x y)", "1:15: unexpected token after arguments"},
 		{"js argument that is not PHP", "@js(x y)", "1:7: unexpected token after arguments"},
 	}

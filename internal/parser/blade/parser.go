@@ -985,7 +985,7 @@ func (p *bladeParser) unclosedDirectiveAt(content []byte, base Position) (Positi
 			if tr.Kind == php.TriviaLineComment && bytes.IndexByte(tr.Text, ')') >= 0 {
 				errs := rehomeErrors([]Error{{Pos: tr.Span.Start}}, base)
 
-				return errs[0].Pos, "a line comment swallows the directive's ), which Blade reads the same way"
+				return errs[0].Pos, errArgsHiddenByComment
 			}
 		}
 	}
@@ -2210,8 +2210,8 @@ func (p *bladeParser) parseAttrParts(endQuote byte) (parts []html.Node, keep boo
 			// `class="…"` attribute), so quoting the value around it would break the
 			// expansion out of its own delimiters.
 			keep = true
-		case endQuote == 0 && p.unquotedArgsHiddenByComment():
-			p.addError(p.Pos, "a line comment swallows the directive's ), which Blade reads the same way")
+		case endQuote == 0 && p.directiveParenAt(false) >= 0:
+			p.addError(p.Pos, p.unclosedArgsError(p.directiveParenAt(false)))
 			p.Advance()
 			literal(from)
 		case p.StartsWith("{{") && !p.StartsWith("{{--") && p.hasCloseAhead("}}"):
@@ -2235,6 +2235,9 @@ func (p *bladeParser) parseAttrParts(endQuote byte) (parts []html.Node, keep boo
 			switch {
 			case p.atQuotedDirectiveArgs():
 				p.skipDirectiveArgs()
+			case p.directiveParenAt(true) >= 0:
+				p.addError(p.Pos, p.unclosedArgsError(p.directiveParenAt(true)))
+				p.Advance()
 			case p.atPHPOpenTag() && p.hasCloseAhead("?>"):
 				p.skipRegion("<?", "?>")
 			default:
@@ -2262,6 +2265,11 @@ func (p *bladeParser) parseAttrParts(endQuote byte) (parts []html.Node, keep boo
 // backtick are parse errors there but are appended to the value, so they do not
 // belong here.
 const attrValueBreakers = " \t\n\r\f>"
+
+const (
+	errArgsHiddenByComment = "a line comment swallows the directive's ), which Blade reads the same way"
+	errArgsNeverClose      = "the directive's ( is never closed"
+)
 
 // rawPhpCloseAt returns the offset of the `?>` that ends the raw PHP opened by
 // the `<?` at the cursor, or -1 when PHP runs to the end of the source.
@@ -2341,34 +2349,21 @@ func (p *bladeParser) atPHPOpenTag() bool {
 }
 
 func (p *bladeParser) atQuotedDirectiveArgs() bool {
-	if p.Peek() != '@' || !isNameStart(p.PeekAt(1)) {
-		return false
-	}
-
-	off := p.Pos.Offset + 1
-	for off < len(p.Src) && (isNameStart(p.Src[off]) || isDigit(p.Src[off])) {
-		off++
-	}
-
-	for off < len(p.Src) && (p.Src[off] == ' ' || p.Src[off] == '\t') {
-		off++
-	}
-
-	if off >= len(p.Src) || p.Src[off] != '(' {
-		return false
-	}
-
-	_, rpEnd := p.findDirectiveClose(off)
-
-	return rpEnd >= 0
+	return p.hasDirectiveClose(p.directiveParenAt(true))
 }
 
 // atUnquotedDirectiveArgs reports whether the cursor is at a `@name(` whose
 // argument list has a matching `)`. Only the argument list needs skipping: a bare
 // `@name` ends on the same bytes an unquoted value does.
 func (p *bladeParser) atUnquotedDirectiveArgs() bool {
+	return p.hasDirectiveClose(p.directiveParenAt(false))
+}
+
+// spaced allows the blanks Blade's pattern takes before the `(`, which an
+// unquoted value cannot hold; -1 means no `(`.
+func (p *bladeParser) directiveParenAt(spaced bool) int {
 	if p.Peek() != '@' || !isNameStart(p.PeekAt(1)) {
-		return false
+		return -1
 	}
 
 	off := p.Pos.Offset + 1
@@ -2376,37 +2371,43 @@ func (p *bladeParser) atUnquotedDirectiveArgs() bool {
 		off++
 	}
 
+	for spaced && off < len(p.Src) && (p.Src[off] == ' ' || p.Src[off] == '\t') {
+		off++
+	}
+
 	if off >= len(p.Src) || p.Src[off] != '(' {
+		return -1
+	}
+
+	return off
+}
+
+func (p *bladeParser) hasDirectiveClose(lp int) bool {
+	if lp < 0 {
 		return false
 	}
 
-	_, rpEnd := p.findDirectiveClose(off)
+	_, rpEnd := p.findDirectiveClose(lp)
 
 	return rpEnd >= 0
 }
 
-// unquotedArgsHiddenByComment reports whether the `@name(` at the cursor stays
-// open only because a PHP line comment takes the rest of its line. Blade's
-// compiler tokenizes the list the same way, so where it ends would move with
-// any line break, and no layout of it keeps its meaning.
-func (p *bladeParser) unquotedArgsHiddenByComment() bool {
-	if p.Peek() != '@' || !isNameStart(p.PeekAt(1)) {
-		return false
+// Blade's compiler checks the list with PHP's tokenizer too, so where an
+// unclosed list would end moves with the bytes after it, and the formatter
+// rewrites those.
+func (p *bladeParser) unclosedArgsError(lp int) string {
+	if p.argsHiddenByComment(lp) {
+		return errArgsHiddenByComment
 	}
 
-	off := p.Pos.Offset + 1
-	for off < len(p.Src) && (isNameStart(p.Src[off]) || isDigit(p.Src[off])) {
-		off++
-	}
+	return errArgsNeverClose
+}
 
-	if off >= len(p.Src) || p.Src[off] != '(' {
-		return false
-	}
-
+func (p *bladeParser) argsHiddenByComment(lp int) bool {
 	depth := 0
 	hidden := false
 
-	php.LexBareFunc(p.Src[off:], func(tok php.Token) bool {
+	php.LexBareFunc(p.Src[lp:], func(tok php.Token) bool {
 		for _, t := range tok.Leading {
 			if t.Kind == php.TriviaLineComment {
 				hidden = true
