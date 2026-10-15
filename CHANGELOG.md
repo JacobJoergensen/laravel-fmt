@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.2.0 (2026-10-15)
 * Added `blade.blankLineBeforeDirectives` to put a blank line before the Blade block directives you list, like `@if` and `@foreach`
 * Added support for Pint's `blank_line_before_statement` Blade rule in `pint.json`
 * Added Tailwind class sorting in `$attributes->class(...)` and `$attributes->merge(['class' => ...])`, slot attributes included
