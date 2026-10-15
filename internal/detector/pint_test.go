@@ -506,6 +506,38 @@ func TestApplyPintBlankLineBeforeStatement(t *testing.T) {
 	})
 }
 
+func TestPintBladeBlankLineRuleSetsBladeDirectives(t *testing.T) {
+	cases := []struct {
+		name  string
+		blade string
+		want  []string
+	}{
+		{"listed statements", `{"blank_line_before_statement": {"statements": ["php", "if", "foreach"]}}`, []string{"php", "if", "foreach"}},
+		{"values Pint rejects and duplicates dropped", `{"blank_line_before_statement": {"statements": ["if", "section", "else", "if"]}}`, []string{"if"}},
+		{"rule switched on without options", `true`, nil},
+		{"options without the key", `{}`, nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			seedFileAt(t, dir, "pint.json", `{"rules": {"Pint/laravel_blade": `+tc.blade+`}}`)
+
+			pint, _, err := detectPint(dir)
+			if err != nil {
+				t.Fatalf("detectPint: %v", err)
+			}
+
+			cfg := config.Default()
+			applyPint(cfg, &pint)
+
+			if !reflect.DeepEqual(cfg.Blade.BlankLineBeforeDirectives, tc.want) {
+				t.Fatalf("BlankLineBeforeDirectives = %v, want %v", cfg.Blade.BlankLineBeforeDirectives, tc.want)
+			}
+		})
+	}
+}
+
 // Values differ from config.Default(), so a no-op cannot pass.
 func TestApplyPintBracesPositionAliasFlowsThrough(t *testing.T) {
 	cfg := config.Default()

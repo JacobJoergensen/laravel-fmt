@@ -34,6 +34,7 @@ type Pint struct {
 	FunctionDeclaration           *FunctionDeclaration
 	BinaryOperatorSpaces          *BinaryOperatorSpaces
 	BlankLineBeforeStatement      *BlankLineBeforeStatement
+	BladeBlankLineBeforeStatement *BlankLineBeforeStatement
 	OrderedImports                *OrderedImports
 	ArraySyntax                   *ArraySyntax
 
@@ -96,6 +97,14 @@ type OrderedImports struct {
 type SingleImportOptions struct {
 	GroupToSingleImports *bool `json:"group_to_single_imports"`
 }
+
+// LaravelBladeOptions is the options object of Pint's Pint/laravel_blade rule.
+type LaravelBladeOptions struct {
+	BlankLineBeforeStatement *BlankLineBeforeStatement `json:"blank_line_before_statement"`
+}
+
+// A snapshot of Pint's BlankLineBeforeControlStructures::STATEMENTS.
+var pintBladeStatements = []string{"if", "foreach", "forelse", "for", "while", "switch", config.BladeDirectivePHP}
 
 // ArraySyntax is Pint's array_syntax rule.
 type ArraySyntax struct {
@@ -212,6 +221,10 @@ func rulesToPint(rules map[string]json.RawMessage) Pint {
 
 	if on := ruleEnabled(rules, "blank_line_before_statement"); on != nil && !*on {
 		pint.BlankLineBeforeStatement = &BlankLineBeforeStatement{}
+	}
+
+	if blade := rule[LaravelBladeOptions](rules, "Pint/laravel_blade"); blade != nil {
+		pint.BladeBlankLineBeforeStatement = blade.BlankLineBeforeStatement
 	}
 
 	pint.SortImports = ruleEnabled(rules, "ordered_imports")
@@ -397,6 +410,7 @@ func applyPint(cfg *config.File, p *Pint) {
 	applyFunctionDeclaration(cfg, effective.FunctionDeclaration)
 	applyBinaryOperatorSpaces(cfg, effective.BinaryOperatorSpaces)
 	applyBlankLineBeforeStatement(cfg, effective.BlankLineBeforeStatement)
+	applyBladeBlankLineBeforeStatement(cfg, effective.BladeBlankLineBeforeStatement)
 	applyHeredocIndentation(cfg, effective.HeredocIndentation)
 	applyOrderedImports(cfg, effective.OrderedImports)
 	setIfPresent(&cfg.PHP.SortUses, effective.SortImports)
@@ -443,6 +457,10 @@ func mergePint(base *Pint, overlay *Pint) {
 
 	if overlay.BlankLineBeforeStatement != nil {
 		base.BlankLineBeforeStatement = overlay.BlankLineBeforeStatement
+	}
+
+	if overlay.BladeBlankLineBeforeStatement != nil {
+		base.BladeBlankLineBeforeStatement = overlay.BladeBlankLineBeforeStatement
 	}
 
 	if overlay.HeredocIndentation != nil {
@@ -563,6 +581,22 @@ func applyBlankLineBeforeStatement(cfg *config.File, blbs *BlankLineBeforeStatem
 	}
 
 	cfg.PHP.BlankLineBeforeStatements = kept
+}
+
+func applyBladeBlankLineBeforeStatement(cfg *config.File, blbs *BlankLineBeforeStatement) {
+	if blbs == nil {
+		return
+	}
+
+	var kept []string
+
+	for _, stmt := range blbs.Statements {
+		if slices.Contains(pintBladeStatements, stmt) && !slices.Contains(kept, stmt) {
+			kept = append(kept, stmt)
+		}
+	}
+
+	cfg.Blade.BlankLineBeforeDirectives = kept
 }
 
 func applyHeredocIndentation(cfg *config.File, mode *string) {
