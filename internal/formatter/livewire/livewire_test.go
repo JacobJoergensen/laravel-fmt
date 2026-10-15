@@ -2,6 +2,7 @@ package livewire
 
 import (
 	"bytes"
+	"fmt"
 	"regexp"
 	"slices"
 	"testing"
@@ -195,5 +196,39 @@ func TestLivewireViewUsesDeclaredBlockDirectives(t *testing.T) {
 
 	if !bytes.Contains(got, []byte("@feature('a')\n    <p>A</p>\n@endfeature\n")) {
 		t.Fatalf("the declared block did not nest in the view:\n%s", got)
+	}
+}
+
+func TestFormatBlankLineOptionsStayInTheirHalf(t *testing.T) {
+	const class = "<?php\n\nuse Livewire\\Component;\n\nnew class extends Component\n{\n    public function go(): void\n    {\n        $a = 1;\n%s        if ($a) {\n            $a = 2;\n        }\n    }\n};\n?>\n\n"
+	const view = "<div>\n    <p>A</p>\n%s    @if ($a)\n        <p>B</p>\n    @endif\n</div>\n"
+
+	src := fmt.Sprintf(class, "") + fmt.Sprintf(view, "")
+
+	bladeOnly := config.Default()
+	bladeOnly.PHP.BlankLineBeforeStatements = nil
+	bladeOnly.Blade.BlankLineBeforeDirectives = []string{"if"}
+
+	phpOnly := config.Default()
+	phpOnly.PHP.BlankLineBeforeStatements = []string{config.StmtIf}
+
+	cases := []struct {
+		name string
+		cfg  *config.File
+		want string
+	}{
+		{"blade option", bladeOnly, fmt.Sprintf(class, "") + fmt.Sprintf(view, "\n")},
+		{"php option", phpOnly, fmt.Sprintf(class, "\n") + fmt.Sprintf(view, "")},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(src), tc.cfg)
+			if string(got) != tc.want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+
+			formattertest.CheckIdempotent(t, func(b []byte) ([]byte, error) { return Format(b, tc.cfg) }, got)
+		})
 	}
 }

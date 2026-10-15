@@ -3242,3 +3242,84 @@ func TestFormatDirectiveArgumentLaysOutWhereItLands(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatKeepsOneBlankLineAboveConfiguredDirectives(t *testing.T) {
+	cfg := config.Default()
+	cfg.Blade.BlockDirectives = []config.BladeBlockDirective{{Open: "feature"}}
+	cfg.Blade.BlankLineBeforeDirectives = []string{"if", "foreach", "empty", "section", "php", "feature"}
+
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			"after a sibling element",
+			"<div>\n<p>A</p>\n@if ($a)\n<p>B</p>\n@endif\n</div>\n",
+			"<div>\n    <p>A</p>\n\n    @if ($a)\n        <p>B</p>\n    @endif\n</div>\n",
+		},
+		{
+			"an authored blank line counts",
+			"<p>A</p>\n\n\n@if ($a)\n<p>B</p>\n@endif\n",
+			"<p>A</p>\n\n@if ($a)\n    <p>B</p>\n@endif\n",
+		},
+		{
+			"between consecutive blocks",
+			"@if ($a)\n<p>A</p>\n@endif\n@foreach ($xs as $x)\n<p>{{ $x }}</p>\n@endforeach\n",
+			"@if ($a)\n    <p>A</p>\n@endif\n\n@foreach ($xs as $x)\n    <p>{{ $x }}</p>\n@endforeach\n",
+		},
+		{
+			"forelse empty branch stays, standalone empty block gets one",
+			"<p>A</p>\n\n@forelse ($xs as $x)\n<p>{{ $x }}</p>\n@empty\n<p>None</p>\n@endforelse\n<p>B</p>\n@empty($ys)\n<p>No ys</p>\n@endempty\n",
+			"<p>A</p>\n\n@forelse ($xs as $x)\n    <p>{{ $x }}</p>\n@empty\n    <p>None</p>\n@endforelse\n<p>B</p>\n\n@empty($ys)\n    <p>No ys</p>\n@endempty\n",
+		},
+		{
+			"php block",
+			"<p>A</p>\n@php\n$a = 1;\n@endphp\n",
+			"<p>A</p>\n\n@php\n    $a = 1;\n@endphp\n",
+		},
+		{
+			"declared block",
+			"<p>A</p>\n@feature('x')\n<p>B</p>\n@endfeature\n",
+			"<p>A</p>\n\n@feature('x')\n    <p>B</p>\n@endfeature\n",
+		},
+		{
+			"the blank goes above an attached comment",
+			"<p>A</p>\n{{-- Filters --}}\n@if ($a)\n<p>B</p>\n@endif\n",
+			"<p>A</p>\n\n{{-- Filters --}}\n@if ($a)\n    <p>B</p>\n@endif\n",
+		},
+		{"first child of an element", "<div>\n@if ($a)\n<p>B</p>\n@endif\n</div>\n", ""},
+		{"first item in a directive body", "@foreach ($xs as $x)\n@if ($x)\n<p>B</p>\n@endif\n@endforeach\n", ""},
+		{"branches", "<p>A</p>\n\n@if ($a)\n<p>B</p>\n@elseif ($b)\n<p>C</p>\n@else\n<p>D</p>\n@endif\n", ""},
+		{"comment separated by its own blank line", "<p>A</p>\n{{-- note --}}\n\n@if ($a)\n<p>B</p>\n@endif\n", ""},
+		{"inline forms", "<p>A</p>\n@section('title', 'Home')\n@php($x = 1)\n", ""},
+		{"a text run above", "Hello {{ $name }}\n@if ($a)\n<p>B</p>\n@endif\n", ""},
+		{"attribute position", "<div class=\"a\" @if ($a) data-a=\"1\" @endif></div>\n", ""},
+		{"glued", "<span>A</span>@if ($a)<span>B</span>@endif\n", ""},
+		{"pre", "<pre>\n<b>A</b>\n@if ($a)\nB\n@endif\n</pre>\n", ""},
+		{"textarea", "<textarea>\nA\n@if ($a)\nB\n@endif\n</textarea>\n", ""},
+		{"whitespace-pre-line class", "<div class=\"whitespace-pre-line\">\n<p>A</p>\n@if ($a)\n<p>B</p>\n@endif\n</div>\n", ""},
+		{"white-space inline style", "<div style=\"white-space: pre-line\">\n<p>A</p>\n@if ($a)\n<p>B</p>\n@endif\n</div>\n", ""},
+		{"white-space page style", "<style>.notes { white-space: pre-line }</style>\n<div class=\"notes\">\n<p>A</p>\n@if ($a)\n<p>B</p>\n@endif\n</div>\n", ""},
+		{"mail component", "<x-mail::message>\n# Hi\n<p>A</p>\n@if ($a)\nBody\n@endif\n</x-mail::message>\n", ""},
+		{"mail directive", "@component('mail::message')\n# Hi\n<p>A</p>\n@if ($a)\nBody\n@endif\n@endcomponent\n", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want := tc.want
+			if want == "" {
+				want = string(mustFormat(t, []byte(tc.src), config.Default()))
+			}
+
+			got := mustFormat(t, []byte(tc.src), cfg)
+			if string(got) != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+
+			if twice := mustFormat(t, got, cfg); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
+	}
+}

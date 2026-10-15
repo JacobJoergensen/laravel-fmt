@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	bladeparser "github.com/JacobJoergensen/laravel-fmt/internal/parser/blade"
 )
 
 type schemaNode struct {
@@ -45,6 +47,40 @@ func TestSchemaMatchesStructs(t *testing.T) {
 	}
 }
 
+func TestSchemaBlankLineDirectivesMatchParser(t *testing.T) {
+	var schema struct {
+		Properties struct {
+			Blade struct {
+				Properties struct {
+					BlankLineBeforeDirectives struct {
+						Items struct {
+							AnyOf []struct {
+								Enum []string `json:"enum"`
+							} `json:"anyOf"`
+						} `json:"items"`
+					} `json:"blankLineBeforeDirectives"`
+				} `json:"properties"`
+			} `json:"blade"`
+		} `json:"properties"`
+	}
+
+	if err := json.Unmarshal(schemaBytes(t), &schema); err != nil {
+		t.Fatalf("parse schema: %v", err)
+	}
+
+	var got []string
+
+	for _, alt := range schema.Properties.Blade.Properties.BlankLineBeforeDirectives.Items.AnyOf {
+		got = append(got, alt.Enum...)
+	}
+
+	want := append(bladeparser.BuiltinOpeners(), BladeDirectivePHP)
+
+	if !slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values(want))) {
+		t.Errorf("blankLineBeforeDirectives enum drift:\n  parser: %v\n  schema: %v", want, got)
+	}
+}
+
 func structJSONFields(t reflect.Type) []string {
 	var names []string
 
@@ -64,6 +100,18 @@ func structJSONFields(t reflect.Type) []string {
 }
 
 func readSchema(t *testing.T) schemaNode {
+	t.Helper()
+
+	var root schemaNode
+
+	if err := json.Unmarshal(schemaBytes(t), &root); err != nil {
+		t.Fatalf("parse schema: %v", err)
+	}
+
+	return root
+}
+
+func schemaBytes(t *testing.T) []byte {
 	t.Helper()
 
 	dir, err := os.Getwd()
@@ -89,11 +137,5 @@ func readSchema(t *testing.T) schemaNode {
 		t.Fatalf("read schema: %v", err)
 	}
 
-	var root schemaNode
-
-	if err := json.Unmarshal(raw, &root); err != nil {
-		t.Fatalf("parse schema: %v", err)
-	}
-
-	return root
+	return raw
 }

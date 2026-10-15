@@ -2982,7 +2982,18 @@ func (e *emitter) emitInterleaved(nodes []parser.Node, leadFirst bool) bool {
 	// become a blank line above the close tag that the next pass trims away.
 	wantBlank := false
 
+	// Unlike an authored blank, this yields to a glued boundary, where a line
+	// break would render.
+	forceBlank := false
+
+	// A text run before the directive keeps its spacing: in a body Laravel
+	// renders as Markdown, a blank line there is a paragraph break.
+	prevText := false
+
 	lead := func(next parser.Node) {
+		force := forceBlank
+		forceBlank = false
+
 		if next == nil {
 			if emitted || leadFirst {
 				e.w.Newline()
@@ -3010,6 +3021,10 @@ func (e *emitter) emitInterleaved(nodes []parser.Node, leadFirst bool) bool {
 			return
 		}
 
+		if force && emitted {
+			e.w.RequestBlankLine()
+		}
+
 		if emitted || leadFirst {
 			e.w.Newline()
 		}
@@ -3032,6 +3047,7 @@ func (e *emitter) emitInterleaved(nodes []parser.Node, leadFirst bool) bool {
 		}
 
 		prev = node
+		prevText = false
 		emitted = true
 	}
 
@@ -3081,6 +3097,7 @@ func (e *emitter) emitInterleaved(nodes []parser.Node, leadFirst bool) bool {
 
 		prevEnd = runEndForGlue(run, broke)
 		prev = run[len(run)-1]
+		prevText = true
 		emitted = true
 		run = nil
 	}
@@ -3111,6 +3128,9 @@ func (e *emitter) emitInterleaved(nodes []parser.Node, leadFirst bool) bool {
 				e.w.Dedent()
 				bodyIndent--
 			}
+
+			_, afterComment := prev.(*parser.CommentNode)
+			forceBlank = !prevText && !afterComment && e.blankBeforeDirective(nodes[i:])
 
 			emitItem(node)
 
@@ -3285,6 +3305,33 @@ func breakBesideElement(children []htmlparser.Node) bool {
 
 		trail := t.Text[len(bytes.TrimRight(t.Text, htmlfmt.CollapsibleSpace)):]
 		prev, broken = c, htmlfmt.HasLineBreak(trail)
+	}
+
+	return false
+}
+
+// A comment written directly over a block belongs to it, so the blank goes
+// above the comment.
+func (e *emitter) blankBeforeDirective(nodes []parser.Node) bool {
+	names := e.cfg.Blade.BlankLineBeforeDirectives
+	if len(names) == 0 {
+		return false
+	}
+
+	for _, node := range nodes {
+		switch n := node.(type) {
+		case *parser.CommentNode:
+		case *htmlparser.Text:
+			if isBlankSeparator(n) || nodeHasContent(n) {
+				return false
+			}
+		case *parser.DirectiveBlockNode:
+			return slices.Contains(names, string(n.Opener.Name))
+		case *parser.PhpBlockNode:
+			return slices.Contains(names, config.BladeDirectivePHP)
+		default:
+			return false
+		}
 	}
 
 	return false

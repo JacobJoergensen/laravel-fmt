@@ -42,6 +42,18 @@ func FuzzFormatTailwind(f *testing.F) {
 	})
 }
 
+func FuzzFormatBlankLineBeforeDirectives(f *testing.F) {
+	formattertest.AddFuzzSeeds(f, ".blade.php")
+	cfg := config.Default()
+	cfg.Blade.BlankLineBeforeDirectives = append(parser.BuiltinOpeners(), config.BladeDirectivePHP)
+
+	f.Fuzz(func(t *testing.T, src []byte) {
+		formattertest.CheckIdempotent(t, func(b []byte) ([]byte, error) {
+			return Format(b, cfg)
+		}, src)
+	})
+}
+
 // A close edge at the end of the file matches either way.
 func sameGlue(a, b string) bool {
 	if a == b {

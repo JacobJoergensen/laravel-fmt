@@ -109,6 +109,62 @@
               "branches": { "type": "array", "items": { "type": "string", "pattern": "^\\w+$" } }
             }
           }
+        },
+        "blankLineBeforeDirectives": {
+          "type": "array",
+          "description": "Block directives kept one blank line below a preceding sibling, named without the @. Blade's own blocks are listed; an open name from blockDirectives works too.",
+          "items": {
+            "anyOf": [
+              {
+                "enum": [
+                  "assets",
+                  "auth",
+                  "can",
+                  "canany",
+                  "cannot",
+                  "component",
+                  "componentFirst",
+                  "context",
+                  "empty",
+                  "env",
+                  "error",
+                  "for",
+                  "foreach",
+                  "forelse",
+                  "fragment",
+                  "guest",
+                  "hasSection",
+                  "hasStack",
+                  "hasstack",
+                  "if",
+                  "island",
+                  "isset",
+                  "once",
+                  "persist",
+                  "php",
+                  "placeholder",
+                  "prepend",
+                  "prependOnce",
+                  "production",
+                  "push",
+                  "pushIf",
+                  "pushOnce",
+                  "script",
+                  "section",
+                  "sectionMissing",
+                  "session",
+                  "slot",
+                  "switch",
+                  "teleport",
+                  "unless",
+                  "volt",
+                  "while"
+                ]
+              },
+              { "type": "string", "pattern": "^\\w+$" }
+            ]
+          },
+          "default": []
         }
       }
     },

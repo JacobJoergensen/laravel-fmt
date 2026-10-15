@@ -2,6 +2,7 @@ package blade
 
 import (
 	"maps"
+	"slices"
 	"strings"
 )
 
@@ -59,6 +60,11 @@ func NewDirectives(declared []BlockDirective) *Directives {
 // Blade's own block directives, which a project cannot declare again.
 func IsBuiltinOpenerOrCloser(name string) bool {
 	return builtinDirectives.IsOpener(name) || builtinDirectives.IsCloser(name)
+}
+
+// BuiltinOpeners returns the names of Blade's own block directives, sorted.
+func BuiltinOpeners() []string {
+	return slices.Sorted(maps.Keys(blockDirectiveClosers))
 }
 
 // IsOpener reports whether name opens a block directive (if, foreach, …).

@@ -170,6 +170,38 @@ func TestLoadFileBladeBlockDirectives(t *testing.T) {
 	})
 }
 
+func TestLoadFileAcceptsOnlyBlockOpenersBeforeBlankLines(t *testing.T) {
+	cases := []struct {
+		name    string
+		json    string
+		wantErr bool
+	}{
+		{"built-in block", `{"blade": {"blankLineBeforeDirectives": ["if", "foreach", "pushOnce"]}}`, false},
+		{"php block", `{"blade": {"blankLineBeforeDirectives": ["php"]}}`, false},
+		{"declared block", `{"blade": {"blockDirectives": [{"open": "feature"}], "blankLineBeforeDirectives": ["feature"]}}`, false},
+		{"undeclared block", `{"blade": {"blankLineBeforeDirectives": ["feature"]}}`, true},
+		{"standalone directive", `{"blade": {"blankLineBeforeDirectives": ["include"]}}`, true},
+		{"branch", `{"blade": {"blankLineBeforeDirectives": ["else"]}}`, true},
+		{"closer", `{"blade": {"blankLineBeforeDirectives": ["endif"]}}`, true},
+		{"written with the at sign", `{"blade": {"blankLineBeforeDirectives": ["@if"]}}`, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), FileName)
+
+			if err := os.WriteFile(path, []byte(tc.json), 0o600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+
+			_, err := LoadFile(Default(), path)
+			if gotErr := err != nil; gotErr != tc.wantErr {
+				t.Fatalf("LoadFile error = %v, want error %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoadFileValidationErrorNamesPath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "my-config.json")
 

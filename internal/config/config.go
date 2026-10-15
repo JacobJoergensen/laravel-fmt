@@ -172,7 +172,13 @@ type Blade struct {
 	// Boost's @boostsnippet and Envoy's @task share that shape, and their
 	// bodies are code and shell an indent would change.
 	BlockDirectives []BladeBlockDirective `json:"blockDirectives,omitempty"`
+	// Empty by default: whether a block belongs with the markup above it is
+	// the author's call.
+	BlankLineBeforeDirectives []string `json:"blankLineBeforeDirectives,omitempty"`
 }
+
+// BladeDirectivePHP is the name `@php` takes in BlankLineBeforeDirectives.
+const BladeDirectivePHP = "php"
 
 // BladeBlockDirective is one declared block directive.
 type BladeBlockDirective struct {
@@ -386,6 +392,14 @@ func (b *Blade) validate() error {
 		}
 
 		opens[d.Open] = true
+	}
+
+	builtins := bladeparser.BuiltinOpeners()
+
+	for _, name := range b.BlankLineBeforeDirectives {
+		if name != BladeDirectivePHP && !opens[name] && !slices.Contains(builtins, name) {
+			return fmt.Errorf("blankLineBeforeDirectives: @%s is not a block directive (Blade's own, or one declared in blockDirectives)", name)
+		}
 	}
 
 	return nil
