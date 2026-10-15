@@ -9,6 +9,7 @@
 * Fixed dynamic headings like `<h{{ $level }}>…</h{{ $level }}>` failing to format
 * Fixed a `@name(` with no closing `)` in an attribute value being rewritten into markup that no longer parses; it now fails with an error
 * Fixed Tailwind sorting moving a `(` class next to a bare directive in `class`, where Blade reads it as the directive's arguments
+* Fixed an assignment chain after a multi-line list like `[...] = $a = $b` changing layout on a second run
 
 ## Version 0.1.0 (2026-10-14)
 * Initial release

@@ -224,6 +224,34 @@ func TestChainedAssignmentMeasuresFromItsRealColumn(t *testing.T) {
 	}
 }
 
+func TestChainedAssignmentMeasuresABrokenListTargetFlat(t *testing.T) {
+	cases := []struct {
+		name string
+		long string
+		tail string
+		want string
+	}{
+		{"tail stays beside the closing line", "$" + strings.Repeat("a", 97), "[] = [][]", "] = [] = [][],"},
+		{"tail the first pass put below stays below", "$" + strings.Repeat("a", 103), "[] = []", "] = [] =\n        [],"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "<?php\n\nf($b = [" + tc.long + "] = " + tc.tail + ");\n"
+			want := "<?php\n\nf(\n    $b = [\n        " + tc.long + ",\n    " + tc.want + "\n);\n"
+
+			got := string(mustFormat(t, []byte(src), config.Default()))
+			if got != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+
+			if twice := string(mustFormat(t, []byte(got), config.Default())); twice != got {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
+	}
+}
+
 func TestTernaryElseBlockCountsTheEntryTerminator(t *testing.T) {
 	long := "$" + strings.Repeat("a", 107)
 	src := "<?php\n\nA([0 ? 0 : [" + long + "]]);\n"

@@ -1589,7 +1589,7 @@ func (b *builder) assign(n *parser.AssignExpr, stmtLevel, continued bool) *docum
 	}
 
 	flatTarget := !document.CanBreak(left)
-	lead := b.chainStmtLead + flatWidth(left, b.cfg.TabWidth) + len(" ") + len(op)
+	lead := b.targetEnd(left) + len(" ") + len(op)
 
 	broken := b.authorBroke(n.Op.Span.Start.Offset) ||
 		stmtLevel && flatTarget && b.binaryHeadOverflows(n.Right, lead, op)
@@ -1655,6 +1655,16 @@ func (b *builder) assign(n *parser.AssignExpr, stmtLevel, continued bool) *docum
 	b.depth--
 
 	return document.Concat(left, document.Indent(document.Concat(document.HardLine(), document.Text(op), value)))
+}
+
+// Measured flat even when the author broke the target: the first pass cannot
+// see whether the printer will break it, so both passes must measure it alike.
+func (b *builder) targetEnd(left *document.Doc) int {
+	if document.HasForcedBreak(left) {
+		return b.chainStmtLead + document.FlatWidth(left, b.cfg.TabWidth)
+	}
+
+	return b.chainStmtLead + flatWidth(left, b.cfg.TabWidth)
 }
 
 func (b *builder) valueBelowList(n *parser.AssignExpr, left *document.Doc) bool {
