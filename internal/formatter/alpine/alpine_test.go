@@ -12,8 +12,8 @@ func TestNormalizeCanonicalSpacing(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"flat object", "{open:false,toggle(){this.open=!this.open}}", "{ open: false, toggle() { this.open = !this.open } }"},
-		{"binary and unary", "a&&b||!c", "a && b || !c"},
+		{"flat object", "{open:false,toggle(){this.open=!this.open}}", "{ open: false, toggle() { this.open = ! this.open } }"},
+		{"binary and unary", "a&&b||!c", "a && b || ! c"},
 		{"ternary vs key colon", "{label:x?'on':'off'}", "{ label: x ? 'on' : 'off' }"},
 		{"keyword before paren", "if(x){y=1}", "if (x) { y = 1 }"},
 		{"call stays tight", "toggle( a , b )", "toggle(a, b)"},
@@ -21,12 +21,11 @@ func TestNormalizeCanonicalSpacing(t *testing.T) {
 		{"arrow function", "items.filter( i=>i.active )", "items.filter(i => i.active)"},
 		{"template interior untouched", "`a  ${ x }  b`", "`a  ${ x }  b`"},
 		{"string interior untouched", "'a  b'+x", "'a  b' + x"},
-		{"prefix bang tight", "! open", "!open"},
 		{"unary minus after assign", "x=-1", "x = -1"},
 		{"postfix increment tight", "count ++", "count++"},
 		{"optional chain tight", "a ?. b ?? c", "a?.b ?? c"},
 		{"spread tight", "f( ...args )", "f(...args)"},
-		{"surrounding whitespace trimmed", "  open = !open  ", "open = !open"},
+		{"surrounding whitespace trimmed", "  open = !open  ", "open = ! open"},
 		{"division spaced", "total /count/ 2", "total / count / 2"},
 		{"regex interior untouched", "s.replace(/  +/g,' ')", "s.replace(/  +/g, ' ')"},
 		{"await call", "posts=await fetch('/posts')", "posts = await fetch('/posts')"},
@@ -42,7 +41,7 @@ func TestNormalizeCanonicalSpacing(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, ok := Normalize([]byte(c.in))
+			got, ok := Normalize([]byte(c.in), true)
 
 			if !ok {
 				t.Fatalf("Normalize(%q) refused, want %q", c.in, c.want)
@@ -55,25 +54,60 @@ func TestNormalizeCanonicalSpacing(t *testing.T) {
 	}
 }
 
-func TestNormalizeIsIdempotent(t *testing.T) {
-	for _, src := range corpus {
-		t.Run(src, func(t *testing.T) {
-			once, ok := Normalize([]byte(src))
+func TestNormalizeSpacesTheNotOperatorOnlyWhenAsked(t *testing.T) {
+	cases := []struct {
+		name   string
+		in     string
+		spaced string
+		glued  string
+	}{
+		{"glued operand", "open=!open", "open = ! open", "open = !open"},
+		{"before a group", "!(a&&b)", "! (a && b)", "!(a && b)"},
+		{"boolean cast", "!!open", "!!open", "!!open"},
+		{"strict inequality", "a!==b", "a !== b", "a !== b"},
+	}
 
-			if !ok {
-				t.Fatalf("Normalize(%q) refused; corpus entries must normalize", src)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			settings := []struct {
+				spaceAfterNot bool
+				want          string
+			}{
+				{true, c.spaced},
+				{false, c.glued},
 			}
 
-			twice, ok := Normalize(once)
-
-			if !ok {
-				t.Fatalf("Normalize refused its own output %q", once)
-			}
-
-			if !bytes.Equal(twice, once) {
-				t.Fatalf("not idempotent: %q became %q", once, twice)
+			for _, s := range settings {
+				got, ok := Normalize([]byte(c.in), s.spaceAfterNot)
+				if !ok || string(got) != s.want {
+					t.Fatalf("Normalize(%q, %v) = %q, %v; want %q", c.in, s.spaceAfterNot, got, ok, s.want)
+				}
 			}
 		})
+	}
+}
+
+func TestNormalizeIsIdempotent(t *testing.T) {
+	for _, spaceAfterNot := range []bool{true, false} {
+		for _, src := range corpus {
+			t.Run(fmt.Sprint(spaceAfterNot, "/", src), func(t *testing.T) {
+				once, ok := Normalize([]byte(src), spaceAfterNot)
+
+				if !ok {
+					t.Fatalf("Normalize(%q) refused; corpus entries must normalize", src)
+				}
+
+				twice, ok := Normalize(once, spaceAfterNot)
+
+				if !ok {
+					t.Fatalf("Normalize refused its own output %q", once)
+				}
+
+				if !bytes.Equal(twice, once) {
+					t.Fatalf("not idempotent: %q became %q", once, twice)
+				}
+			})
+		}
 	}
 }
 
@@ -87,7 +121,7 @@ func TestNormalizePreservesTokenStream(t *testing.T) {
 				t.Fatalf("lex(%q) failed", src)
 			}
 
-			out, ok := Normalize(input)
+			out, ok := Normalize(input, true)
 
 			if !ok {
 				t.Fatalf("Normalize(%q) refused", src)
@@ -138,7 +172,7 @@ func TestNormalizeRefusesUnsafeValues(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if out, ok := Normalize([]byte(c.in)); ok {
+			if out, ok := Normalize([]byte(c.in), true); ok {
 				t.Fatalf("Normalize(%q) = %q, want refusal", c.in, out)
 			}
 		})
@@ -189,10 +223,10 @@ func TestIsAlpineJSAttrAllowlist(t *testing.T) {
 }
 
 func BenchmarkNormalize(b *testing.B) {
-	value := []byte("{ open: false, query: '', items: [], toggle() { this.open = !this.open }, async load() { this.items = await (await fetch('/items')).json() } }")
+	value := []byte("{ open: false, query: '', items: [], toggle() { this.open = ! this.open }, async load() { this.items = await (await fetch('/items')).json() } }")
 
 	for b.Loop() {
-		if _, ok := Normalize(value); !ok {
+		if _, ok := Normalize(value, true); !ok {
 			b.Fatal("Normalize refused benchmark value")
 		}
 	}
@@ -213,7 +247,7 @@ func TestNormalizeRefusesEveryJSWhitespace(t *testing.T) {
 			for _, tmpl := range []string{"return%c/re/.test(x)", "i%cin [1, 2]", "a%cb"} {
 				in := fmt.Sprintf(tmpl, r)
 
-				if out, ok := Normalize([]byte(in)); ok {
+				if out, ok := Normalize([]byte(in), true); ok {
 					t.Fatalf("Normalize(%q) = %q, want refusal", in, out)
 				}
 			}
@@ -230,7 +264,7 @@ func TestNormalizeStillRunsOnASCIIWhitespace(t *testing.T) {
 	}
 
 	for in, want := range cases {
-		out, ok := Normalize([]byte(in))
+		out, ok := Normalize([]byte(in), true)
 		if !ok {
 			t.Fatalf("Normalize(%q) refused; want %q", in, want)
 		}
@@ -245,7 +279,7 @@ func TestNormalizeRefusesHTMLLikeComment(t *testing.T) {
 	// `a < !--b` is deliberately absent: with the space it holds no `<!--` at all
 	// and really is a comparison against a decrement, so normalizing it is correct.
 	for _, in := range []string{"a<!--b", "x<!-- rest", "count<!--", "a<!--"} {
-		if out, ok := Normalize([]byte(in)); ok {
+		if out, ok := Normalize([]byte(in), true); ok {
 			t.Errorf("Normalize(%q) = %q, want refusal", in, out)
 		}
 	}

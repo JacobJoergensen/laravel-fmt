@@ -23,13 +23,14 @@ var parenSpaceKeywords = map[string]bool{
 }
 
 type normalizer struct {
-	src     []byte
-	toks    []token
-	classes []tokenClass
+	src           []byte
+	toks          []token
+	classes       []tokenClass
+	spaceAfterNot bool
 }
 
-func render(src []byte, toks []token) []byte {
-	n := &normalizer{src: src, toks: toks, classes: classify(src, toks)}
+func render(src []byte, toks []token, spaceAfterNot bool) []byte {
+	n := &normalizer{src: src, toks: toks, classes: classify(src, toks), spaceAfterNot: spaceAfterNot}
 	out := make([]byte, 0, len(src))
 
 	for i, t := range toks {
@@ -139,6 +140,9 @@ func (n *normalizer) gap(a, b int) bool {
 		return true
 	case n.is(a, "."), n.is(b, "."), n.is(a, "?."), n.is(b, "?."):
 		return false
+	case n.is(a, "!"):
+		// `!!x` is a boolean cast and stays one unit.
+		return n.spaceAfterNot && !n.is(b, "!") && (a == 0 || !n.is(a-1, "!"))
 	case n.classes[a].prefixUnary:
 		// `- -x` must keep its space or the pair re-lexes as `--`.
 		return n.fuses(a, b)

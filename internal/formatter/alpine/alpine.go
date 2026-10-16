@@ -19,7 +19,7 @@ var jsAttrNames = []string{
 // ok is false when the value must stay verbatim instead: it is empty or
 // multi-line, may hold Blade or HTML-entity syntax, or does not tokenize
 // with confidence.
-func Normalize(value []byte) ([]byte, bool) {
+func Normalize(value []byte, spaceAfterNot bool) ([]byte, bool) {
 	if !normalizable(value) {
 		return nil, false
 	}
@@ -30,7 +30,7 @@ func Normalize(value []byte) ([]byte, bool) {
 		return nil, false
 	}
 
-	out := render(value, toks)
+	out := render(value, toks, spaceAfterNot)
 
 	if !sameTokens(value, toks, out) {
 		return nil, false

@@ -14,11 +14,12 @@ func FuzzNormalize(f *testing.F) {
 		"`template ${value} string`",
 		"",
 	} {
-		f.Add([]byte(seed))
+		f.Add([]byte(seed), true)
+		f.Add([]byte(seed), false)
 	}
 
-	f.Fuzz(func(t *testing.T, value []byte) {
-		out, ok := Normalize(value)
+	f.Fuzz(func(t *testing.T, value []byte, spaceAfterNot bool) {
+		out, ok := Normalize(value, spaceAfterNot)
 		if !ok {
 			return
 		}
@@ -27,7 +28,7 @@ func FuzzNormalize(f *testing.F) {
 			t.Fatalf("changed more than spacing: %q -> %q", value, out)
 		}
 
-		out2, ok := Normalize(out)
+		out2, ok := Normalize(out, spaceAfterNot)
 		if !ok {
 			t.Fatalf("normalized value rejected on second pass: %q", out)
 		}

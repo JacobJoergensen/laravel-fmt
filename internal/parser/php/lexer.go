@@ -650,29 +650,10 @@ func (l *lexer) consumeDigits(accept func(byte) bool) {
 func (l *lexer) scanSingleQuotedString(start Position) {
 	l.Advance()
 
-	for !l.Eof() {
-		c := l.Peek()
-
-		if c == '\\' {
-			l.Advance()
-
-			if !l.Eof() {
-				l.Advance()
-			}
-
-			continue
-		}
-
-		if c == '\'' {
-			l.Advance()
-			l.emit(KindString, start, l.Pos, l.Src[start.Offset:l.Pos.Offset])
-			return
-		}
-
-		l.Advance()
+	if !l.skipSingleQuotedBody() {
+		l.addError(start, "unterminated single-quoted string")
 	}
 
-	l.addError(start, "unterminated single-quoted string")
 	l.emit(KindString, start, l.Pos, l.Src[start.Offset:l.Pos.Offset])
 }
 
@@ -682,30 +663,115 @@ func (l *lexer) scanSingleQuotedString(start Position) {
 func (l *lexer) scanDoubleQuotedString(start Position) {
 	l.Advance()
 
+	if !l.skipDoubleQuotedBody() {
+		l.addError(start, "unterminated double-quoted string")
+	}
+
+	l.emit(KindString, start, l.Pos, l.Src[start.Offset:l.Pos.Offset])
+}
+
+func (l *lexer) skipSingleQuotedBody() bool {
+	for !l.Eof() {
+		switch l.Peek() {
+		case '\\':
+			l.AdvanceN(2)
+		case '\'':
+			l.Advance()
+
+			return true
+		default:
+			l.Advance()
+		}
+	}
+
+	return false
+}
+
+// A `{$` or `${` opens PHP code that runs to its matching `}`, so a quote
+// inside it, as in "{$a->f("x")}", belongs to that code.
+func (l *lexer) skipDoubleQuotedBody() bool {
 	for !l.Eof() {
 		c := l.Peek()
 
-		if c == '\\' {
+		switch {
+		case c == '\\':
+			l.AdvanceN(2)
+		case c == '"':
 			l.Advance()
 
-			if !l.Eof() {
-				l.Advance()
+			return true
+		case c == '{' && l.PeekAt(1) == '$':
+			if !l.skipInterpolation() {
+				return false
 			}
-
-			continue
-		}
-
-		if c == '"' {
+		case c == '$' && l.PeekAt(1) == '{':
 			l.Advance()
-			l.emit(KindString, start, l.Pos, l.Src[start.Offset:l.Pos.Offset])
-			return
-		}
 
-		l.Advance()
+			if !l.skipInterpolation() {
+				return false
+			}
+		default:
+			l.Advance()
+		}
 	}
 
-	l.addError(start, "unterminated double-quoted string")
-	l.emit(KindString, start, l.Pos, l.Src[start.Offset:l.Pos.Offset])
+	return false
+}
+
+func (l *lexer) skipInterpolation() bool {
+	depth := 0
+
+	for !l.Eof() {
+		c := l.Peek()
+
+		switch {
+		case c == '{':
+			depth++
+			l.Advance()
+		case c == '}':
+			depth--
+			l.Advance()
+
+			if depth == 0 {
+				return true
+			}
+		case c == '"':
+			l.Advance()
+
+			if !l.skipDoubleQuotedBody() {
+				return false
+			}
+		case c == '\'':
+			l.Advance()
+
+			if !l.skipSingleQuotedBody() {
+				return false
+			}
+		case c == '/' && l.PeekAt(1) == '*':
+			if !l.skipPast("*/") {
+				return false
+			}
+		case c == '#' && l.PeekAt(1) != '[', c == '/' && l.PeekAt(1) == '/':
+			l.skipPast("\n")
+		default:
+			l.Advance()
+		}
+	}
+
+	return false
+}
+
+func (l *lexer) skipPast(end string) bool {
+	i := bytes.Index(l.Src[l.Pos.Offset:], []byte(end))
+	if i < 0 {
+		l.AdvanceN(len(l.Src) - l.Pos.Offset)
+
+		return false
+	}
+
+	l.AdvanceN(i + len(end))
+
+	return true
 }
 
 // scanShellExec emits the whole backtick literal as one KindShellExec token; a

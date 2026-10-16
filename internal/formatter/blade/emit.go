@@ -1908,7 +1908,7 @@ func (e *emitter) emitAttr(a *htmlparser.Attr, component bool) {
 	}
 
 	if !a.Bound && alpine.IsAlpineJSAttr(a.Name) {
-		if out, ok := alpine.Normalize(value); ok {
+		if out, ok := alpine.Normalize(value, e.cfg.PHP.NotOperatorSpace); ok {
 			value = out
 		}
 	}

@@ -3450,3 +3450,24 @@ func TestFormatKeepsAnEchoGluedToTheTagName(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatSpacesAlpineNotOperatorOnlyWithNotOperatorSpace(t *testing.T) {
+	src := []byte("<button @click=\"open = ! open\">Toggle</button>\n")
+
+	cases := []struct {
+		notOperatorSpace bool
+		want             string
+	}{
+		{true, "<button @click=\"open = ! open\">Toggle</button>\n"},
+		{false, "<button @click=\"open = !open\">Toggle</button>\n"},
+	}
+
+	for _, c := range cases {
+		cfg := config.Default()
+		cfg.PHP.NotOperatorSpace = c.notOperatorSpace
+
+		if got := mustFormat(t, src, cfg); string(got) != c.want {
+			t.Errorf("NotOperatorSpace=%v: got %q, want %q", c.notOperatorSpace, got, c.want)
+		}
+	}
+}

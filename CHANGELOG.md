@@ -2,6 +2,8 @@
 
 ## Unreleased
 * Added `--reporter gitlab` to write a GitLab Code Quality report with `--check`, so unformatted files show up in merge requests
+* Improved `!` in Alpine attributes to keep a space after it (`open = ! open`), following `php.notOperatorSpace` like PHP and Blade echoes
+* Fixed strings like `"{$a->f("x")}"` failing to format when the code inside `{$...}` has its own quoted string
 
 ## Version 0.2.0 (2026-10-15)
 * Added `blade.blankLineBeforeDirectives` to put a blank line before the Blade block directives you list, like `@if` and `@foreach`

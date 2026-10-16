@@ -269,7 +269,7 @@ func emitAttr(w *formatter.Writer, src []byte, a *parser.Attr, cfg *config.File)
 	}
 
 	if !a.Bound && alpine.IsAlpineJSAttr(a.Name) {
-		if out, ok := alpine.Normalize(value); ok {
+		if out, ok := alpine.Normalize(value, cfg.PHP.NotOperatorSpace); ok {
 			value = out
 		}
 	}
