@@ -54,10 +54,10 @@ type runner struct {
 	start   time.Time
 }
 
-// Format runs one invocation. Only a diff and formatted stdin go to Out, so
-// either can be piped. It returns ErrSilentFailure after reporting its own
+// Format runs one invocation. Only a diff, a report and formatted stdin go to
+// Out, so each can be piped. It returns ErrSilentFailure after reporting its own
 // failure, and ErrDrift when --check or --diff found unformatted files.
-func Format(opts Options, streams Streams) error {
+func Format(opts *Options, streams Streams) error {
 	if err := opts.validate(); err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func Format(opts Options, streams Streams) error {
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
 
-	r := &runner{opts: opts, streams: streams, workDir: workDir, start: start}
+	r := &runner{opts: *opts, streams: streams, workDir: workDir, start: start}
 
 	// Config is searched from what is being formatted, not where the process
 	// stands; the walk still resolves relative arguments against the working
@@ -134,7 +134,7 @@ type fileResultOrErr struct {
 func (r *runner) batch(files []string, projects *detector.Resolver) error {
 	failed := 0
 
-	var changed []string
+	var changed []ci.Change
 
 	var failures []ci.Failure
 
@@ -189,7 +189,7 @@ func (r *runner) batch(files []string, projects *detector.Resolver) error {
 			r.renderCheckPath(shown)
 
 			if ci.OnGitHubActions() {
-				ci.GitHubError(r.streams.Err, path, 0, 0, "File is not formatted; run laravel-fmt to fix")
+				ci.GitHubError(r.streams.Err, path, 0, 0, ci.UnformattedMessage)
 			}
 		default:
 			if err := rewrite.Rewrite(path, res.res.src, res.res.formatted); err != nil {
@@ -201,17 +201,30 @@ func (r *runner) batch(files []string, projects *detector.Resolver) error {
 			r.renderCheckPath(shown)
 		}
 
-		changed = append(changed, shown)
+		changed = append(changed, ci.Change{
+			Path: shown,
+			Line: diff.FirstChangedLine(res.res.src, res.res.formatted),
+		})
 	})
 
 	unchanged := len(files) - len(changed) - failed
 
-	writeJobSummary(ci.Summary{
+	summary := ci.Summary{
 		Check:     r.opts.Check || r.opts.Diff,
 		Changed:   changed,
 		Unchanged: unchanged,
 		Failures:  failures,
-	})
+	}
+
+	writeJobSummary(summary)
+
+	// Unlike the job summary, the report is what the user asked for, so a
+	// report that did not reach its reader fails the run.
+	if r.opts.Reporter == ReporterGitLab {
+		if err := ci.WriteGitLabReport(r.streams.Out, summary, r.workDir, ci.GitLabProjectDir()); err != nil {
+			return err
+		}
+	}
 
 	return r.finish(failed, len(changed), unchanged, time.Since(r.start))
 }

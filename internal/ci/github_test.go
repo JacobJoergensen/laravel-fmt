@@ -156,9 +156,9 @@ func TestWriteGitHubSummary(t *testing.T) {
 			name: "check drift and failure",
 			summary: Summary{
 				Check:     true,
-				Changed:   []string{"app/Models/User.php"},
+				Changed:   []Change{{Path: "app/Models/User.php", Line: 1}},
 				Unchanged: 12,
-				Failures:  []Failure{{Path: "app/Broken.php", Location: "3:5", Message: "unexpected token"}},
+				Failures:  []Failure{{Path: "app/Broken.php", Line: 3, Column: 5, Message: "unexpected token"}},
 			},
 			contains: []string{
 				"#### ✗ Failed to format (1)",
@@ -170,7 +170,7 @@ func TestWriteGitHubSummary(t *testing.T) {
 		{
 			name: "write mode",
 			summary: Summary{
-				Changed:   []string{"app/Models/User.php"},
+				Changed:   []Change{{Path: "app/Models/User.php", Line: 1}},
 				Unchanged: 2,
 			},
 			contains: []string{"#### ✓ Formatted (1) · 2 already formatted"},

@@ -1,6 +1,9 @@
 package diff
 
-import "strings"
+import (
+	"bytes"
+	"strings"
+)
 
 // LineEdit replaces lines [Start, End) of strings.Split(old, "\n") with
 // Lines; an insertion has Start == End.
@@ -73,6 +76,23 @@ func LineStarts(old []byte) []int {
 	}
 
 	return starts
+}
+
+// FirstChangedLine returns the 1-based line of old where updated first differs
+// from it. A change past old's final newline lands on its last line, since old
+// has no line after it.
+func FirstChangedLine(old, updated []byte) int {
+	i := 0
+
+	for i < len(old) && i < len(updated) && old[i] == updated[i] {
+		i++
+	}
+
+	if i == len(old) && i > 0 && old[i-1] == '\n' {
+		i--
+	}
+
+	return bytes.Count(old[:i], []byte{'\n'}) + 1
 }
 
 // Replacement returns the byte range of old that e replaces and its new text.

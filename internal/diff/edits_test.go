@@ -134,3 +134,25 @@ func TestApplyInRangeWidensUntilTheResultIsValid(t *testing.T) {
 		t.Fatalf("without widening = %q, want the unbalanced splice %q", unwidened, want)
 	}
 }
+
+func TestFirstChangedLineFindsTheLineOfTheFirstDifference(t *testing.T) {
+	cases := []struct {
+		name    string
+		old     string
+		updated string
+		want    int
+	}{
+		{"later line", "a\nb\nc\n", "a\nb\nC\n", 3},
+		{"trailing newline added", "a\nb", "a\nb\n", 2},
+		{"text added after the final newline", "a\nb\n", "a\nb\n\nc\n", 2},
+		{"empty input", "", "a\n", 1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := FirstChangedLine([]byte(tc.old), []byte(tc.updated)); got != tc.want {
+				t.Fatalf("FirstChangedLine(%q, %q) = %d, want %d", tc.old, tc.updated, got, tc.want)
+			}
+		})
+	}
+}

@@ -1,4 +1,3 @@
-// Package ci emits GitHub Actions annotations and job summaries.
 package ci
 
 import (
@@ -38,19 +37,12 @@ func GitHubSummaryPath() string {
 	return os.Getenv("GITHUB_STEP_SUMMARY")
 }
 
-// Summary is one run's contribution to the GitHub Actions job summary.
-type Summary struct {
-	Check     bool
-	Changed   []string
-	Unchanged int
-	Failures  []Failure
-}
+func (f Failure) location() string {
+	if f.Line <= 0 {
+		return ""
+	}
 
-// Failure is one row of the summary's failure table.
-type Failure struct {
-	Path     string
-	Location string
-	Message  string
+	return fmt.Sprintf("%d:%d", f.Line, f.Column)
 }
 
 // WriteGitHubSummary renders s as Markdown to w, listing every file: GitHub
@@ -64,7 +56,7 @@ func WriteGitHubSummary(w io.Writer, s Summary) {
 		ew.printf("| File | Location | Message |\n| --- | --- | --- |\n")
 
 		for _, f := range s.Failures {
-			ew.printf("| `%s` | %s | %s |\n", escapeCell(f.Path), escapeCell(f.Location), escapeCell(f.Message))
+			ew.printf("| `%s` | %s | %s |\n", escapeCell(f.Path), f.location(), escapeCell(f.Message))
 		}
 
 		ew.printf("\n")
@@ -89,8 +81,8 @@ func writeChangedSection(ew *errWriter, s Summary) {
 	ew.printf("#### %s · %d already formatted\n\n", heading, s.Unchanged)
 	ew.printf("| File |\n| --- |\n")
 
-	for _, path := range s.Changed {
-		ew.printf("| `%s` |\n", escapeCell(path))
+	for _, c := range s.Changed {
+		ew.printf("| `%s` |\n", escapeCell(c.Path))
 	}
 
 	ew.printf("\n")

@@ -19,6 +19,7 @@ var colorMode = "auto"
 type fmtFlags struct {
 	check         bool
 	diff          bool
+	reporter      string
 	staged        bool
 	since         string
 	config        string
@@ -163,6 +164,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&colorMode, "color", "auto", "color output: auto, never, always")
 	rootCmd.Flags().BoolVar(&fmtOpts.check, "check", false, "check if files are formatted; print the paths that would change without writing")
 	rootCmd.Flags().BoolVar(&fmtOpts.diff, "diff", false, "print a line-level diff of the changes without writing")
+	rootCmd.Flags().StringVar(&fmtOpts.reporter, "reporter", "", "with --check, write a report to stdout for CI: gitlab (Code Quality)")
 	rootCmd.Flags().BoolVar(&fmtOpts.staged, "staged", false, "format only files staged in git and re-stage them, leaving unstaged changes untouched")
 	rootCmd.Flags().StringVar(&fmtOpts.since, flagSince, "", "format only files changed since the given git ref branched off, including uncommitted and untracked ones")
 	rootCmd.Flags().StringVar(&fmtOpts.config, "config", "", "path to a laravel-fmt.json; overrides auto-discovery")
@@ -186,7 +188,7 @@ func runFmt(cmd *cobra.Command, args []string) error {
 		OutColor: outColor(cmd.OutOrStdout()),
 	}
 
-	return run.Format(opts, streams)
+	return run.Format(&opts, streams)
 }
 
 // outColor decides color for stdout the way --color decides it for stderr, but
@@ -207,6 +209,7 @@ func (f fmtFlags) options(cmd *cobra.Command, args []string) run.Options {
 		Paths:         args,
 		Check:         f.check,
 		Diff:          f.diff,
+		Reporter:      f.reporter,
 		Staged:        f.staged,
 		Config:        f.config,
 		NoConfig:      f.noConfig,

@@ -191,9 +191,10 @@ func collectFailures(path string, err error) []ci.Failure {
 
 	for _, pe := range parseErrors {
 		failures = append(failures, ci.Failure{
-			Path:     path,
-			Location: fmt.Sprintf("%d:%d", pe.Pos.Line, pe.Pos.Column),
-			Message:  pe.Msg,
+			Path:    path,
+			Line:    pe.Pos.Line,
+			Column:  pe.Pos.Column,
+			Message: pe.Msg,
 		})
 	}
 

@@ -5,12 +5,16 @@ import (
 	"fmt"
 )
 
+// ReporterGitLab writes a GitLab Code Quality report.
+const ReporterGitLab = "gitlab"
+
 // Options are one run's flag values. A nil pointer is a flag not given, so an
 // unset --since differs from an empty one and an unset offset from 0.
 type Options struct {
 	Paths         []string
 	Check         bool
 	Diff          bool
+	Reporter      string
 	Staged        bool
 	Since         *string
 	Config        string
@@ -21,12 +25,16 @@ type Options struct {
 	RangeEnd      *int
 }
 
-func (o Options) validate() error {
+func (o *Options) validate() error {
 	if o.Config != "" && o.NoConfig {
 		return errors.New("--config and --no-config are mutually exclusive")
 	}
 
 	if err := o.validateRange(); err != nil {
+		return err
+	}
+
+	if err := o.validateReporter(); err != nil {
 		return err
 	}
 
@@ -65,7 +73,7 @@ func (o Options) validate() error {
 	return nil
 }
 
-func (o Options) validateStaged() error {
+func (o *Options) validateStaged() error {
 	if o.StdinFilepath != "" {
 		return errors.New("--staged does not combine with --stdin-filepath")
 	}
@@ -91,7 +99,7 @@ func (o Options) validateStaged() error {
 
 // validateSince refuses an empty ref: CI passing an unset variable would
 // otherwise run over the whole repository instead of the changed files.
-func (o Options) validateSince() error {
+func (o *Options) validateSince() error {
 	if *o.Since == "" {
 		return errors.New("--since needs a git ref, such as origin/main")
 	}
@@ -107,7 +115,28 @@ func (o Options) validateSince() error {
 	return nil
 }
 
-func (o Options) validateRange() error {
+// --staged, --stdin-filepath and --show-config refuse --check on their own.
+func (o *Options) validateReporter() error {
+	if o.Reporter == "" {
+		return nil
+	}
+
+	if o.Reporter != ReporterGitLab {
+		return fmt.Errorf("--reporter must be %s (got %q)", ReporterGitLab, o.Reporter)
+	}
+
+	if !o.Check {
+		return errors.New("--reporter requires --check")
+	}
+
+	if o.Diff {
+		return errors.New("--reporter does not combine with --diff")
+	}
+
+	return nil
+}
+
+func (o *Options) validateRange() error {
 	if !o.ranged() {
 		return nil
 	}
@@ -132,11 +161,11 @@ func (o Options) validateRange() error {
 	return nil
 }
 
-func (o Options) ranged() bool {
+func (o *Options) ranged() bool {
 	return o.RangeStart != nil || o.RangeEnd != nil
 }
 
-func (o Options) rangeStart() int {
+func (o *Options) rangeStart() int {
 	if o.RangeStart == nil {
 		return 0
 	}
@@ -146,7 +175,7 @@ func (o Options) rangeStart() int {
 
 // An editor's offsets may come from a buffer that has moved on, so one past
 // the end narrows the range instead of failing the run.
-func (o Options) resolveRange(size int) (int, int) {
+func (o *Options) resolveRange(size int) (int, int) {
 	end := size
 
 	if o.RangeEnd != nil {
@@ -158,7 +187,7 @@ func (o Options) resolveRange(size int) (int, int) {
 
 // --staged and --since name no paths, so the anchor falls back to the
 // working directory, the repository git resolves against anyway.
-func (o Options) configAnchorPaths() []string {
+func (o *Options) configAnchorPaths() []string {
 	if o.ShowConfig != "" {
 		return []string{o.ShowConfig}
 	}

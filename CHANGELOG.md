@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+* Added `--reporter gitlab` to write a GitLab Code Quality report with `--check`, so unformatted files show up in merge requests
 
 ## Version 0.2.0 (2026-10-15)
 * Added `blade.blankLineBeforeDirectives` to put a blank line before the Blade block directives you list, like `@if` and `@foreach`
