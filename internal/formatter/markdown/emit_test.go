@@ -561,7 +561,7 @@ func TestIgnoreDirectivePreservesProse(t *testing.T) {
 }
 
 // A fence with no closing line is valid CommonMark; the output writes the
-// closer, which re-parses as the same document.
+// closer, which reparses as the same document.
 func TestFormatClosesAnUnterminatedFence(t *testing.T) {
 	out, err := Format([]byte("```\nstill open"), config.Default())
 	if err != nil {
@@ -1132,7 +1132,7 @@ func TestFormatKeepsListItemTabColumnsAndFencedBytes(t *testing.T) {
 		// opened further down does: the item's first line carries no indent to strip,
 		// but the block it opens still decides that the tab below is content.
 		{"fence opens on the marker line", "* ~~~\n  \t0\n  ~~~\n", "* ~~~\n  \t0\n  ~~~\n"},
-		// The closer the source left out is written, so the output re-parses; the
+		// The closer the source left out is written, so the output reparses; the
 		// tab inside the fence is still content and survives byte for byte.
 		{"unterminated fence", "- a\n\t```\n\t\tx\n", "- a\n  ```\n  \tx\n  ```\n"},
 		{

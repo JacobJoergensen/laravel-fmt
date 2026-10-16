@@ -1753,7 +1753,7 @@ func TestUnquotedAttrValueKeepsBladeRegionsWhole(t *testing.T) {
 		// A directive expands to unescaped markup (`@class([…])` becomes a whole
 		// `class="…"` attribute), so the value keeps its bytes rather than gaining a
 		// delimiter the expansion would break out of. What matters is that the `>` of
-		// `=>` no longer ends the start tag and re-parses the rest as content.
+		// `=>` no longer ends the start tag and reparses the rest as content.
 		{"directive arg with fat arrow", `<div a=@class(["x" => $y])>t</div>` + "\n", `<div a=@class(["x" => $y])>t</div>`},
 		{"anchor", "<a href={{ $u }}>go</a>\n", `<a href="{{ $u }}">go</a>`},
 	}
@@ -2820,7 +2820,7 @@ func TestCarriageReturnDoesNotChangeLayout(t *testing.T) {
 		// Control-flow condition spanning lines: a condition carrying its own
 		// newlines can never be laid out flat, so it wraps whatever its width. Both
 		// widths land on 7 because there is no width decision left to tip, which is
-		// the point: an interior CR cannot move this path at all any more.
+		// the point: an interior CR cannot move this path at all anymore.
 		{"multi-line condition wraps regardless", "@if(0%[" + zeros(100) + "\n     ,,])\nx\n@endif\n", 7},
 		{"multi-line condition, wider", "@if(0%[" + zeros(102) + "\n     ,,])\nx\n@endif\n", 7},
 	}

@@ -7,7 +7,7 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/formattertest"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/blade"
 	htmlparser "github.com/JacobJoergensen/laravel-fmt/internal/parser/html"
-	php "github.com/JacobJoergensen/laravel-fmt/internal/parser/php"
+	"github.com/JacobJoergensen/laravel-fmt/internal/parser/php"
 )
 
 func TestParseCoversAllContentBytes(t *testing.T) {

@@ -78,7 +78,7 @@ func (e *emitter) livewireTagColumn(el *htmlparser.Element) (zero bool, prefix [
 
 // voidNamePaired reports whether a </name> close tag appears anywhere in src. A
 // self-closed void element keeps its `/>` when its name is also used paired:
-// emitted bare (`<link>`), it would re-pair with that close on re-parse and the
+// emitted bare (`<link>`), it would re-pair with that close on reparse and the
 // output would not round-trip.
 func (e *emitter) voidNamePaired(name []byte) bool {
 	if e.closeIndex == nil {
@@ -1830,7 +1830,7 @@ func (e *emitter) emitAttr(a *htmlparser.Attr, component bool) {
 
 	// A formatted expression value is redelimited to a quote it does not contain,
 	// since HTML has no escape for the delimiter inside the value: emitting `''`
-	// inside `'...'` would fuse into `''''` and re-parse as an empty value.
+	// inside `'...'` would fuse into `''''` and reparse as an empty value.
 	if a.Expr != nil {
 		// A bound `:class` value is a class expression, so Tailwind-sort the classes
 		// in its string literals like a `class="..."` attribute (the whole value
@@ -2011,14 +2011,14 @@ func attrDelimiterFor(quote byte, val []byte) byte {
 // attribute instead of stranding at its source column. Sort is skipped there, as
 // it is for the echo-free case: it is single-line only. naturalIndent is the
 // attribute's own source indent, the amount stripped from each continuation line.
-func (e *emitter) emitAttrParts(a *htmlparser.Attr, sortClasses, php bool) {
+func (e *emitter) emitAttrParts(a *htmlparser.Attr, sortClasses, compilesToPHP bool) {
 	// Re-home only when a text run spans lines: that newline is the attribute's
 	// layout. A newline inside an echo is content the echo emitter re-lays onto one
 	// line, so keying rehome off the whole value flips the decision between passes
 	// (pass one keeps the run verbatim, pass two sorts it) once the echo collapses.
 	rehome := false
 	for _, p := range a.Parts {
-		if t, ok := p.(*htmlparser.Text); ok && hasValueLineBreak(t.Text, php) {
+		if t, ok := p.(*htmlparser.Text); ok && hasValueLineBreak(t.Text, compilesToPHP) {
 			rehome = true
 
 			break
@@ -2026,14 +2026,14 @@ func (e *emitter) emitAttrParts(a *htmlparser.Attr, sortClasses, php bool) {
 	}
 
 	if rehome && !htmlfmt.ValueReflows(a) {
-		e.w.WithoutIndent(func() { e.emitAttrPartsAsWritten(a.Parts, php) })
+		e.w.WithoutIndent(func() { e.emitAttrPartsAsWritten(a.Parts, compilesToPHP) })
 
 		return
 	}
 
 	naturalIndent := 0
 	if rehome {
-		naturalIndent = attrPartsStrip(a.Parts, formatter.NaturalIndentBefore(e.src, a.Start.Offset), php)
+		naturalIndent = attrPartsStrip(a.Parts, formatter.NaturalIndentBefore(e.src, a.Start.Offset), compilesToPHP)
 	}
 
 	// The closing line keeps its offset, as in EmitMultilineAttrValue.
@@ -2048,7 +2048,7 @@ func (e *emitter) emitAttrParts(a *htmlparser.Attr, sortClasses, php bool) {
 		switch pp := p.(type) {
 		case *htmlparser.Text:
 			if rehome && closerOffset < 0 && i == len(a.Parts)-1 {
-				e.writeRebasedAttrText(pp.Text[:bytes.LastIndexByte(pp.Text, '\n')+1], naturalIndent, php)
+				e.writeRebasedAttrText(pp.Text[:bytes.LastIndexByte(pp.Text, '\n')+1], naturalIndent, compilesToPHP)
 
 				column := max(e.w.IndentColumn()+closerOffset, 0)
 				e.w.WithoutIndent(func() { e.w.Write(strings.Repeat(" ", column)) })
@@ -2057,7 +2057,7 @@ func (e *emitter) emitAttrParts(a *htmlparser.Attr, sortClasses, php bool) {
 			}
 
 			if rehome {
-				e.writeRebasedAttrText(pp.Text, naturalIndent, php)
+				e.writeRebasedAttrText(pp.Text, naturalIndent, compilesToPHP)
 
 				continue
 			}
@@ -2081,7 +2081,7 @@ func (e *emitter) emitAttrParts(a *htmlparser.Attr, sortClasses, php bool) {
 // the attribute's own, or less when a line sits left of it (a closer at the
 // tag's column), so the lines keep their shape as the echo-free path keeps it.
 // A line an echo starts counts with the whitespace before the echo.
-func attrPartsStrip(parts []htmlparser.Node, natural int, php bool) int {
+func attrPartsStrip(parts []htmlparser.Node, natural int, compilesToPHP bool) int {
 	strip := natural
 
 	for i, p := range parts {
@@ -2092,7 +2092,7 @@ func attrPartsStrip(parts []htmlparser.Node, natural int, php bool) int {
 
 		text := t.Text
 		for {
-			nl, width := valueLineBreak(text, php)
+			nl, width := valueLineBreak(text, compilesToPHP)
 			if nl < 0 {
 				break
 			}
@@ -2104,7 +2104,7 @@ func attrPartsStrip(parts []htmlparser.Node, natural int, php bool) int {
 				ws++
 			}
 
-			next, _ := valueLineBreak(text, php)
+			next, _ := valueLineBreak(text, compilesToPHP)
 			lineHasContent := ws < len(text) && next != ws || next < 0 && ws == len(text) && i < len(parts)-1
 			if lineHasContent {
 				strip = min(strip, ws)
@@ -2123,10 +2123,10 @@ func attrPartsStrip(parts []htmlparser.Node, natural int, php bool) int {
 // indent-only trailing whitespace survives), but the run's final tail is preserved
 // verbatim: it abuts an echo or the closing quote, where a space is part of the
 // value, not layout, and trimming it would corrupt the value (`'x {{ $n }}'`).
-func (e *emitter) emitAttrPartsAsWritten(parts []htmlparser.Node, php bool) {
+func (e *emitter) emitAttrPartsAsWritten(parts []htmlparser.Node, compilesToPHP bool) {
 	for _, p := range parts {
 		if t, ok := p.(*htmlparser.Text); ok {
-			e.writeAttrTextAsWritten(t.Text, php)
+			e.writeAttrTextAsWritten(t.Text, compilesToPHP)
 		} else {
 			e.emitInlineEcho(p)
 		}
@@ -2134,9 +2134,9 @@ func (e *emitter) emitAttrPartsAsWritten(parts []htmlparser.Node, php bool) {
 }
 
 // The caller clears the writer's indent first.
-func (e *emitter) writeAttrTextAsWritten(text []byte, php bool) {
+func (e *emitter) writeAttrTextAsWritten(text []byte, compilesToPHP bool) {
 	for {
-		nl, width := valueLineBreak(text, php)
+		nl, width := valueLineBreak(text, compilesToPHP)
 		if nl < 0 {
 			e.w.WriteBytes(text)
 
@@ -2151,9 +2151,9 @@ func (e *emitter) writeAttrTextAsWritten(text []byte, php bool) {
 	}
 }
 
-func (e *emitter) writeRebasedAttrText(text []byte, naturalIndent int, php bool) {
+func (e *emitter) writeRebasedAttrText(text []byte, naturalIndent int, compilesToPHP bool) {
 	for {
-		nl, width := valueLineBreak(text, php)
+		nl, width := valueLineBreak(text, compilesToPHP)
 		if nl < 0 {
 			if len(text) > 0 {
 				e.w.WriteBytes(text)
@@ -2848,9 +2848,9 @@ func (e *emitter) emitRehomedGluedBody(el *htmlparser.Element) {
 	// line break.
 	if !e.emitGluedBodyNormalized(el.Children, start, end, true, 0) {
 		body := e.src[start:end]
-		php := phpSpansFor(body, el.Children)
-		lines := htmlfmt.NormalizeLineBreaksIn(body, start, php)
-		nested := linesInsideChildElements(body, start, php, el.Children)
+		phpSpans := phpSpansFor(body, el.Children)
+		lines := htmlfmt.NormalizeLineBreaksIn(body, start, phpSpans)
+		nested := linesInsideChildElements(body, start, phpSpans, el.Children)
 
 		formatter.EmitVerbatimRehomed(e.w, lines, formatter.NaturalIndentBefore(e.src, start), func(n int) bool {
 			return nested[n]
@@ -2864,11 +2864,11 @@ func (e *emitter) emitRehomedGluedBody(el *htmlparser.Element) {
 // linesInsideChildElements reports, per line of body (source offset base), whether
 // the line starts inside one of children's elements, where that element's own
 // layout placed it.
-func linesInsideChildElements(body []byte, base int, php []htmlparser.Span, children []htmlparser.Node) []bool {
+func linesInsideChildElements(body []byte, base int, phpSpans []htmlparser.Span, children []htmlparser.Node) []bool {
 	inside := []bool{false}
 
 	for pos := 0; ; {
-		at, width := htmlfmt.LineBreakIn(body[pos:], base+pos, php)
+		at, width := htmlfmt.LineBreakIn(body[pos:], base+pos, phpSpans)
 		if at < 0 {
 			return inside
 		}
@@ -4360,7 +4360,7 @@ func (e *emitter) bodyHasLineBreak(el *htmlparser.Element) bool {
 // render, and is gone once the tag is rebuilt flat; an echo is rebuilt on one
 // line too, and one whose PHP still prints a break is caught where it prints.
 func (e *emitter) lineBreakOutsideTags(children []htmlparser.Node, start, end int, nodes []htmlparser.Node) bool {
-	php := phpSpansFor(e.src[start:end], children)
+	phpSpans := phpSpansFor(e.src[start:end], children)
 	cursor := start
 
 	// Collected on the first break found: most bodies have none.
@@ -4387,19 +4387,19 @@ func (e *emitter) lineBreakOutsideTags(children []htmlparser.Node, start, end in
 			continue
 		}
 
-		if lineBreakOutsidePHP(e.src[cursor:from], cursor, php, directives) {
+		if lineBreakOutsidePHP(e.src[cursor:from], cursor, phpSpans, directives) {
 			return true
 		}
 
 		cursor = to
 	}
 
-	return lineBreakOutsidePHP(e.src[cursor:end], cursor, php, directives)
+	return lineBreakOutsidePHP(e.src[cursor:end], cursor, phpSpans, directives)
 }
 
-func lineBreakOutsidePHP(b []byte, base int, php []htmlparser.Span, directives func() []htmlparser.Span) bool {
+func lineBreakOutsidePHP(b []byte, base int, phpSpans []htmlparser.Span, directives func() []htmlparser.Span) bool {
 	for {
-		at, width := htmlfmt.LineBreakIn(b, base, php)
+		at, width := htmlfmt.LineBreakIn(b, base, phpSpans)
 		if at < 0 {
 			return false
 		}

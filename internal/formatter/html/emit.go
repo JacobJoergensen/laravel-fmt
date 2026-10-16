@@ -135,7 +135,7 @@ func emitElement(w *formatter.Writer, src []byte, idx *docIndex, el *parser.Elem
 
 // voidNamePaired reports whether a </name> close tag appears anywhere in the
 // document. A self-closed void element keeps its `/>` when its name is also used
-// paired: emitted bare (`<link>`), it would re-pair with that close on re-parse
+// paired: emitted bare (`<link>`), it would re-pair with that close on reparse
 // and the output would not round-trip.
 func voidNamePaired(idx *docIndex, name []byte) bool {
 	return len(idx.closeTags[string(bytes.ToLower(name))]) > 0

@@ -179,8 +179,8 @@ func attrSpansLines(src []byte, a *htmlparser.Attr, component bool) bool {
 	return htmlfmt.HasLineBreakIn(raw, a.Start.Offset, php)
 }
 
-func hasValueLineBreak(b []byte, php bool) bool {
-	at, _ := valueLineBreak(b, php)
+func hasValueLineBreak(b []byte, compilesToPHP bool) bool {
+	at, _ := valueLineBreak(b, compilesToPHP)
 
 	return at >= 0
 }
@@ -188,8 +188,8 @@ func hasValueLineBreak(b []byte, php bool) bool {
 // valueLineBreak returns the offset and width of the first line break in part
 // of an attribute value, or -1 and 0. A value that compiles into PHP breaks on
 // an LF or a CRLF only: a lone CR there is a byte of the string.
-func valueLineBreak(b []byte, php bool) (int, int) {
-	if !php {
+func valueLineBreak(b []byte, compilesToPHP bool) (int, int) {
+	if !compilesToPHP {
 		return htmlfmt.LineBreak(b)
 	}
 

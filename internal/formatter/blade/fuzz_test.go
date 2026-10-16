@@ -66,7 +66,7 @@ func sameGlue(a, b string) bool {
 }
 
 // Only inline containers holding inline HTML count. A block element strips its
-// edge whitespace, as Laravel does a component slot's, and a raw-body mail component (markdown) or raw-text element
+// edge whitespace, as Laravel does a component slot's, and a raw-body mail component (Markdown) or raw-text element
 // (JS/CSS) has no inline box to pad, so reflowing those is layout, not content.
 func glueProfile(src []byte) (profile []string, ok bool) {
 	file, errs := parser.Parse(src, nil)

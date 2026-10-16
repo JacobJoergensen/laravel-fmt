@@ -108,13 +108,13 @@ func IgnoreFilter(root, runAnchor string, runCfg *config.File, projectOf Project
 	}, nil
 }
 
-// IgnoresFile reports whether a walk from anchor would leave out path by its
+// IgnoresFile reports whether a walk from anchor would leave out file by its
 // ignore rules, every .gitignore down to it included. The walk's hidden-name
 // skip does not apply: a dotfile being edited is formatted on save.
-func IgnoresFile(anchor string, cfg *config.File, path string) (bool, error) {
-	absPath, err := filepath.Abs(path)
+func IgnoresFile(anchor string, cfg *config.File, file string) (bool, error) {
+	absPath, err := filepath.Abs(file)
 	if err != nil {
-		return false, fmt.Errorf("resolve %s: %w", path, err)
+		return false, fmt.Errorf("resolve %s: %w", file, err)
 	}
 
 	dir := filepath.Dir(absPath)
@@ -183,13 +183,13 @@ func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf P
 			return nil, statError(arg, err)
 		}
 
-		path, err := filepath.Abs(arg)
+		abs, err := filepath.Abs(arg)
 		if err != nil {
 			return nil, fmt.Errorf("resolve %s: %w", arg, err)
 		}
 
 		if info.IsDir() {
-			more, err := walkTree(path, ignoreRoot, matcher, projectOf)
+			more, err := walkTree(abs, ignoreRoot, matcher, projectOf)
 			if err != nil {
 				return nil, err
 			}
@@ -199,13 +199,13 @@ func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf P
 			continue
 		}
 
-		if formatter.DetectLanguage(path) == formatter.LangUnknown {
+		if formatter.DetectLanguage(abs) == formatter.LangUnknown {
 			continue
 		}
 
 		// An explicitly named file bypasses the ignore matcher; only
 		// tool-assembled sets (the walk, globs, --staged) respect ignore.
-		out = appendUnseen(out, seen, path)
+		out = appendUnseen(out, seen, abs)
 	}
 
 	return out, nil
@@ -214,10 +214,10 @@ func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf P
 // Every path here is absolute and clean, so the path itself identifies the
 // file.
 func appendUnseen(out []string, seen map[string]bool, paths ...string) []string {
-	for _, path := range paths {
-		if !seen[path] {
-			seen[path] = true
-			out = append(out, path)
+	for _, abs := range paths {
+		if !seen[abs] {
+			seen[abs] = true
+			out = append(out, abs)
 		}
 	}
 
@@ -274,11 +274,11 @@ func walkGlobBase(pattern, base, ignoreRoot string, matcher ignoreRules, project
 func matchGlob(pattern, base string, segments, candidates []string) ([]string, error) {
 	var out []string
 
-	for _, path := range candidates {
-		rel := relSlash(base, path)
+	for _, candidate := range candidates {
+		rel := relSlash(base, candidate)
 
 		if matchSegments(segments, strings.Split(rel, "/")) {
-			out = append(out, path)
+			out = append(out, candidate)
 		}
 	}
 
@@ -308,12 +308,12 @@ func walkTree(dir, ignoreRoot string, cfg ignoreRules, projectOf ProjectIgnore) 
 
 	var out []string
 
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(dir, func(abs string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 
-		rel := relSlash(dir, path)
+		rel := relSlash(dir, abs)
 
 		if d.IsDir() {
 			if rel == "." {
@@ -324,15 +324,15 @@ func walkTree(dir, ignoreRoot string, cfg ignoreRules, projectOf ProjectIgnore) 
 				return filepath.SkipDir
 			}
 
-			if set.match(prefix+rel, true) || set.matchProject(path, true) {
+			if set.match(prefix+rel, true) || set.matchProject(abs, true) {
 				return filepath.SkipDir
 			}
 
-			if err := set.enterProject(projectOf, path, true); err != nil {
+			if err := set.enterProject(projectOf, abs, true); err != nil {
 				return err
 			}
 
-			return set.enterGitignoreDir(path, prefix+rel)
+			return set.enterGitignoreDir(abs, prefix+rel)
 		}
 
 		// Only regular files: a write follows a link, so a symlink found by
@@ -348,15 +348,15 @@ func walkTree(dir, ignoreRoot string, cfg ignoreRules, projectOf ProjectIgnore) 
 			return nil
 		}
 
-		if formatter.DetectLanguage(path) == formatter.LangUnknown {
+		if formatter.DetectLanguage(abs) == formatter.LangUnknown {
 			return nil
 		}
 
-		if set.match(prefix+rel, false) || set.matchProject(path, false) {
+		if set.match(prefix+rel, false) || set.matchProject(abs, false) {
 			return nil
 		}
 
-		out = append(out, path)
+		out = append(out, abs)
 
 		return nil
 	})
@@ -405,10 +405,10 @@ func relFromAbs(parent, child string) (string, bool) {
 	return filepath.ToSlash(rel), true
 }
 
-func relSlash(root, path string) string {
-	rel, err := filepath.Rel(root, path)
+func relSlash(root, abs string) string {
+	rel, err := filepath.Rel(root, abs)
 	if err != nil {
-		return path
+		return abs
 	}
 
 	return filepath.ToSlash(rel)

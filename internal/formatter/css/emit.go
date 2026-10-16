@@ -10,7 +10,7 @@ import (
 )
 
 // trimCSSSpace exists because bytes.TrimSpace would also strip a vertical
-// tab or NBSP, which CSS keeps as content, so the output would re-parse
+// tab or NBSP, which CSS keeps as content, so the output would reparse
 // with a different structure.
 func trimCSSSpace(b []byte) []byte {
 	return bytes.Trim(b, " \t\n\r\f")

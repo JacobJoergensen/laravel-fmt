@@ -101,18 +101,18 @@ func compileScopedPattern(dir, raw string) (ignorePattern, bool) {
 	return p, true
 }
 
-func (m ignoreMatcher) match(path string, isDir bool) bool {
-	return m.matchFrom(false, path, isDir)
+func (m ignoreMatcher) match(rel string, isDir bool) bool {
+	return m.matchFrom(false, rel, isDir)
 }
 
 // matchFrom continues last-match-wins from an earlier layer's verdict, which is
 // how .gitignore patterns and the configured ones compose into one answer.
-func (m ignoreMatcher) matchFrom(ignored bool, path string, isDir bool) bool {
+func (m ignoreMatcher) matchFrom(ignored bool, rel string, isDir bool) bool {
 	if len(m) == 0 {
 		return ignored
 	}
 
-	return m.matchSegmentsFrom(ignored, strings.Split(path, "/"), isDir)
+	return m.matchSegmentsFrom(ignored, strings.Split(rel, "/"), isDir)
 }
 
 func (m ignoreMatcher) matchSegmentsFrom(ignored bool, segments []string, isDir bool) bool {
@@ -150,16 +150,16 @@ func compileRules(cfg *config.File) ignoreRules {
 	return rules
 }
 
-func (r ignoreRules) match(path string, isDir bool) bool {
-	return r.matchFrom(false, path, isDir)
+func (r ignoreRules) match(rel string, isDir bool) bool {
+	return r.matchFrom(false, rel, isDir)
 }
 
-func (r ignoreRules) matchFrom(ignored bool, path string, isDir bool) bool {
+func (r ignoreRules) matchFrom(ignored bool, rel string, isDir bool) bool {
 	if len(r.adopted) == 0 && len(r.own) == 0 {
 		return ignored
 	}
 
-	segments := strings.Split(path, "/")
+	segments := strings.Split(rel, "/")
 
 	for _, layer := range r.adopted {
 		if !ignored {
@@ -234,27 +234,27 @@ func (s *ignoreSet) enterProject(projectOf ProjectIgnore, dir string, anchoredHe
 	return nil
 }
 
-func (s *ignoreSet) matchProject(path string, isDir bool) bool {
-	p := s.nearestProject(path)
+func (s *ignoreSet) matchProject(abs string, isDir bool) bool {
+	p := s.nearestProject(abs)
 
-	return p != nil && p.ignores(path, isDir)
+	return p != nil && p.ignores(abs, isDir)
 }
 
 // matchProjectFile is matchProject for a file tested on its own, outside a walk
 // that prunes: an ignored directory of its project excludes it too, as matchFile
 // does for the other layers. The scan stops at the project's anchor, since the
 // directories above it belong to another project.
-func (s *ignoreSet) matchProjectFile(path string) bool {
-	p := s.nearestProject(path)
+func (s *ignoreSet) matchProjectFile(abs string) bool {
+	p := s.nearestProject(abs)
 	if p == nil {
 		return false
 	}
 
-	if p.ignores(path, false) {
+	if p.ignores(abs, false) {
 		return true
 	}
 
-	for dir := filepath.Dir(path); dir != p.anchor && underAnchor(p.anchor, dir); dir = filepath.Dir(dir) {
+	for dir := filepath.Dir(abs); dir != p.anchor && underAnchor(p.anchor, dir); dir = filepath.Dir(dir) {
 		if p.ignores(dir, true) {
 			return true
 		}
@@ -263,13 +263,13 @@ func (s *ignoreSet) matchProjectFile(path string) bool {
 	return false
 }
 
-func (s *ignoreSet) nearestProject(path string) *projectPatterns {
+func (s *ignoreSet) nearestProject(abs string) *projectPatterns {
 	var nearest *projectPatterns
 
 	for i := range s.projects {
 		p := &s.projects[i]
 
-		if underAnchor(p.anchor, path) && (nearest == nil || len(p.anchor) > len(nearest.anchor)) {
+		if underAnchor(p.anchor, abs) && (nearest == nil || len(p.anchor) > len(nearest.anchor)) {
 			nearest = p
 		}
 	}
@@ -277,9 +277,9 @@ func (s *ignoreSet) nearestProject(path string) *projectPatterns {
 	return nearest
 }
 
-// path must lie at or below p's anchor.
-func (p *projectPatterns) ignores(path string, isDir bool) bool {
-	rel := strings.TrimPrefix(path[len(p.anchor):], string(filepath.Separator))
+// abs must lie at or below p's anchor.
+func (p *projectPatterns) ignores(abs string, isDir bool) bool {
+	rel := strings.TrimPrefix(abs[len(p.anchor):], string(filepath.Separator))
 	if rel == "" {
 		return false
 	}
@@ -287,30 +287,30 @@ func (p *projectPatterns) ignores(path string, isDir bool) bool {
 	return p.patterns.match(filepath.ToSlash(rel), isDir)
 }
 
-func (s *ignoreSet) match(path string, isDir bool) bool {
-	return s.cfg.matchFrom(s.matchGit(path, isDir), path, isDir)
+func (s *ignoreSet) match(rel string, isDir bool) bool {
+	return s.cfg.matchFrom(s.matchGit(rel, isDir), rel, isDir)
 }
 
 // The files above the ignore root are shallower, so they match first.
-func (s *ignoreSet) matchGit(path string, isDir bool) bool {
-	if repo, ok := s.repoOf(path); ok {
-		return s.repos[repo].match(path, isDir)
+func (s *ignoreSet) matchGit(rel string, isDir bool) bool {
+	if repo, ok := s.repoOf(rel); ok {
+		return s.repos[repo].match(rel, isDir)
 	}
 
 	if s.excluded {
 		return true
 	}
 
-	ignored := s.above.matchFrom(false, s.aboveRoot+path, isDir)
+	ignored := s.above.matchFrom(false, s.aboveRoot+rel, isDir)
 
-	return s.git.matchFrom(ignored, path, isDir)
+	return s.git.matchFrom(ignored, rel, isDir)
 }
 
-func (s *ignoreSet) repoOf(path string) (string, bool) {
+func (s *ignoreSet) repoOf(rel string) (string, bool) {
 	var deepest string
 
 	for repo := range s.repos {
-		if len(repo) > len(deepest) && strings.HasPrefix(path, repo) {
+		if len(repo) > len(deepest) && strings.HasPrefix(rel, repo) {
 			deepest = repo
 		}
 	}
@@ -390,10 +390,10 @@ func matchSegments(pattern, segments []string) bool {
 
 // Both paths are clean and absolute, so a separator-bounded prefix answers
 // without Abs or Rel; this runs for every file against every project.
-func underAnchor(anchor, path string) bool {
-	if !strings.HasPrefix(path, anchor) {
+func underAnchor(anchor, abs string) bool {
+	if !strings.HasPrefix(abs, anchor) {
 		return false
 	}
 
-	return len(path) == len(anchor) || path[len(anchor)] == filepath.Separator || strings.HasSuffix(anchor, string(filepath.Separator))
+	return len(abs) == len(anchor) || abs[len(anchor)] == filepath.Separator || strings.HasSuffix(anchor, string(filepath.Separator))
 }

@@ -638,7 +638,7 @@ func (p *bladeParser) parseAt() Node {
 
 // tryParseBlockBody consumes nodes until opener's closer. Returns nil when the
 // closer is never found, having rewound to just after the opener so the caller
-// treats it as a flat DirectiveNode and re-parses the body as siblings. The
+// treats it as a flat DirectiveNode and reparses the body as siblings. The
 // recovery is silent: a diagnostic here would make the formatter bail on the
 // next pass, since auto-closing a parent element (`<li>…@if</li>`) turns an
 // opener that was at EOF on this pass into one with a trailing close tag.
@@ -1227,9 +1227,9 @@ func (p *bladeParser) parseElement(stack [][]byte) Node {
 	// close lives in a sibling branch or later iteration. Only valid at Blade
 	// body level (empty HTML stack); nested in another element it is genuinely
 	// unclosed and must fail loudly, since a close-less tag trapped inside an
-	// ancestor's close tag no longer re-parses. It owns no children: rewind past
-	// them so the body re-parses them as siblings, since nesting content under a
-	// close-less tag flips its inline/block layout on re-parse (non-idempotent).
+	// ancestor's close tag no longer reparses. It owns no children: rewind past
+	// them so the body reparses them as siblings, since nesting content under a
+	// close-less tag flips its inline/block layout on reparse (non-idempotent).
 	if len(stack) == 0 && p.atEnclosingBlockBoundary() {
 		el.Loose = true
 		el.Children = nil

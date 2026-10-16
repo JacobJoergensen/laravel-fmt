@@ -45,7 +45,7 @@ func emitBlocks(w *formatter.Writer, file *parser.File, cfg *config.File, blankB
 			emitBlockVerbatim(w, file.Src, block)
 		case i == 0 && avoidLeadingFrontmatter && leadingBreakFormsFrontmatter(file.Blocks):
 			// A `---` thematic break on line 1 pairs with a later `---` line into a
-			// frontmatter fence when re-parsed; emit `***` (an equivalent break) so
+			// frontmatter fence when reparsed; emit `***` (an equivalent break) so
 			// the document stays a thematic break rather than flipping to frontmatter.
 			w.Write("***")
 		case !blankBetween && breakReadsAsSetextUnderline(prev, block):
@@ -65,7 +65,7 @@ func emitBlocks(w *formatter.Writer, file *parser.File, cfg *config.File, blankB
 
 // clearColumn returns the column that must stay outside the list at block i,
 // or 0 when nothing does. Emitted with its marker at column 0, a list's content
-// column can drop to 2 or 3, and the block after it would then re-parse as the
+// column can drop to 2 or 3, and the block after it would then reparse as the
 // last item's continuation instead of a sibling. The column is where a
 // following code block or HTML block is emitted, or a following list's own
 // indent, so the requirement travels back up a run of lists.
@@ -125,7 +125,7 @@ func htmlBlockColumn(b *parser.HTMLBlock) int {
 	return len(first) - len(bytes.TrimLeft(first, " "))
 }
 
-// listIndent returns the indent the list at block i is emitted with: enough
+// listIndent returns the indent the list at block I is emitted with: enough
 // that its content column clears whatever must stay outside it, capped at
 // three because a fourth space makes the marker itself indented code.
 func listIndent(blocks []parser.Node, cfg *config.File, i, depth int, blankBetween, besideMarker bool) int {
@@ -374,7 +374,7 @@ func emitATXHeading(w *formatter.Writer, h *parser.ATXHeading) {
 		w.Space()
 		w.WriteBytes(content)
 
-		// Content ending in a `#` run that would re-parse as a closing sequence
+		// Content ending in a `#` run that would reparse as a closing sequence
 		// (the run is the whole content or is preceded by a space) needs an
 		// explicit closing `#`, or the next pass would strip the content's own
 		// trailing hash. `# foo` keeps no closer; `# #` becomes `# # #`.
@@ -479,8 +479,8 @@ func emitParagraphPreserve(w *formatter.Writer, p *parser.Paragraph) {
 		}
 
 		// Leading whitespace on a paragraph line is insignificant in CommonMark.
-		// Emitting it verbatim can indent a trailing paragraph enough to re-parse
-		// as a list-item continuation, flipping the prior list to loose next pass.
+		// Emitting it verbatim can indent a trailing paragraph enough to reparse
+		// as a list-item continuation, flipping the prior list to lose next pass.
 		line = bytes.TrimLeft(bytes.TrimRight(line, "\r"), " \t")
 
 		// A continuation line whose stripped form would start a block construct
@@ -886,7 +886,7 @@ func emitLinkRefDef(w *formatter.Writer, d *parser.LinkRefDef) {
 // whole. The parser strips them, so re-emitting a title inside a quote it
 // carries ends the title early and the definition stops parsing altogether. A
 // title holding an unescaped instance of all three delimiters, which a
-// parenthesised source can produce, leaves escaping as the only way out.
+// parenthesized source can produce, leaves escaping as the only way out.
 func emitLinkTitle(w *formatter.Writer, title []byte) {
 	switch {
 	case !containsUnescaped(title, '"'):

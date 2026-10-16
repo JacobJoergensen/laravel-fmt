@@ -282,40 +282,41 @@ func BuildDirectiveArgWrapped(src []byte, tokens []parser.Token, expr parser.Exp
 	return stripLineCR(out)
 }
 
-// SortClassExpr reorders the Tailwind classes inside the string literals of a
-// class expression, in place on the parsed node the caller then hands to
-// BuildDirectiveArg/BuildExpr. It is the shared engine behind `@class([...])` and
-// a bound `:class="..."`. sort is the class sorter (injected so this package stays
-// independent of the Tailwind registry). Only positions whose value is itself a
-// class list are descended: a bare array element and a keyed element's key (the
-// keyed value is its boolean condition, matching Laravel `@class`), a ternary's
-// branches, the operands of concatenation and short-circuit/null-coalesce
-// operators (`.`, `&&`, `||`, `and`, `or`, `??`), and a parenthesized inner
-// expression. A comparison, a function argument, and a variable are left alone, so
-// a condition like `$type === 'admin'` never has its literal reordered; an
-// interpolated or escaped string is skipped too.
-func SortClassExpr(expr parser.Expr, sort func(classes string, pinFirst, pinLast bool) string) {
-	sortClassExpr(expr, sort, false, false)
+// SortClassExpr reorders the Tailwind classes inside the string literals of
+// a class expression, in place on the parsed node the caller then hands to
+// BuildDirectiveArg/BuildExpr. It is the shared engine behind `@class([...])`
+// and a bound `:class="..."`. sortClasses is the class sorter (injected so
+// this package stays independent of the Tailwind registry). Only positions
+// whose value is itself a class list are descended: a bare array element and
+// a keyed element's key (the keyed value is its boolean condition, matching
+// Laravel `@class`), a ternary's branches, the operands of concatenation
+// and short-circuit/null-coalesce operators (`.`, `&&`, `||`, `and`, `or`,
+// `??`), and a parenthesized inner expression. A comparison, a function
+// argument, and a variable are left alone, so a condition like
+// `$type === 'admin'` never has its literal reordered; an interpolated or
+// escaped string is skipped too.
+func SortClassExpr(expr parser.Expr, sortClasses func(classes string, pinFirst, pinLast bool) string) {
+	sortClassExpr(expr, sortClasses, false, false)
 }
 
-func sortClassExpr(expr parser.Expr, sort func(string, bool, bool) string, pinFirst, pinLast bool) {
+func sortClassExpr(expr parser.Expr, sortClasses func(string, bool, bool) string, pinFirst, pinLast bool) {
 	switch e := expr.(type) {
 	case *parser.StringExpr:
-		sortClassStringToken(e, sort, pinFirst, pinLast)
+		sortClassStringToken(e, sortClasses, pinFirst, pinLast)
 	case *parser.ArrayExpr:
 		for _, el := range e.Elements {
 			switch {
 			case el.Key != nil:
-				sortClassExpr(el.Key, sort, false, false)
+				sortClassExpr(el.Key, sortClasses, false, false)
 			case el.Value != nil && !el.Spread:
-				sortClassExpr(el.Value, sort, false, false)
+				sortClassExpr(el.Value, sortClasses, false, false)
 			}
 		}
 	case *parser.TernaryExpr:
-		sortClassExpr(e.Then, sort, pinFirst, pinLast)
-		sortClassExpr(e.Else, sort, pinFirst, pinLast)
+		sortClassExpr(e.Then, sortClasses, pinFirst, pinLast)
+		sortClassExpr(e.Else, sortClasses, pinFirst, pinLast)
 	case *parser.ParenExpr:
-		sortClassExpr(e.Expr, sort, pinFirst, pinLast)
+		sortClassExpr(e.Expr, sortClasses, pinFirst, pinLast)
 	case *parser.BinaryExpr:
 		if !classOperator(e.Op.Kind) {
 			return
@@ -328,14 +329,14 @@ func sortClassExpr(expr parser.Expr, sort func(string, bool, bool) string, pinFi
 			// `a . b . c` can pin both edges.
 			glued := !edgeSpace(e.Left, true) && !edgeSpace(e.Right, false)
 
-			sortClassExpr(e.Left, sort, pinFirst, glued)
-			sortClassExpr(e.Right, sort, glued, pinLast)
+			sortClassExpr(e.Left, sortClasses, pinFirst, glued)
+			sortClassExpr(e.Right, sortClasses, glued, pinLast)
 
 			return
 		}
 
-		sortClassExpr(e.Left, sort, pinFirst, pinLast)
-		sortClassExpr(e.Right, sort, pinFirst, pinLast)
+		sortClassExpr(e.Left, sortClasses, pinFirst, pinLast)
+		sortClassExpr(e.Right, sortClasses, pinFirst, pinLast)
 	}
 }
 
@@ -390,7 +391,7 @@ func classOperator(k parser.Kind) bool {
 	}
 }
 
-func sortClassStringToken(s *parser.StringExpr, sort func(string, bool, bool) string, pinFirst, pinLast bool) {
+func sortClassStringToken(s *parser.StringExpr, sortClasses func(string, bool, bool) string, pinFirst, pinLast bool) {
 	body, quote, ok := plainStringBody(s.Token.Text)
 	if !ok {
 		return
@@ -412,7 +413,7 @@ func sortClassStringToken(s *parser.StringExpr, sort func(string, bool, bool) st
 	pinFirst = pinFirst && lead == ""
 	pinLast = pinLast && trail == ""
 
-	newBody := lead + sort(inner, pinFirst, pinLast) + trail
+	newBody := lead + sortClasses(inner, pinFirst, pinLast) + trail
 	if newBody == body {
 		return
 	}

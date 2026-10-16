@@ -9,7 +9,7 @@ import (
 
 func emitFile(w *formatter.Writer, file *parser.File) {
 	// Freeze the WHOLE file byte-for-byte when it cannot be safely modeled.
-	// Re-emitting such input as structure yields cleaner output that re-parses
+	// Re-emitting such input as structure yields cleaner output that reparses
 	// into a different, normalized shape; freezing is the only fixed point.
 	if shouldFreezeFile(file) {
 		// Start at the first content line: leading blank lines are trivia the
@@ -51,7 +51,7 @@ func contentLineStart(src []byte) int {
 // shouldFreezeFile reports input the formatter must keep verbatim: a document
 // holding a Bail node (a region the parser could not resolve), a non-first
 // document with no `---` (a split the parser made from inconsistent
-// indentation, which re-parses differently), or a key that reads as a
+// indentation, which reparses differently), or a key that reads as a
 // document marker at column 0.
 func shouldFreezeFile(file *parser.File) bool {
 	for i, doc := range file.Docs {
@@ -334,7 +334,7 @@ func emitLeafValue(w *formatter.Writer, src []byte, value parser.Node, comment *
 		// The value's span starts at the block indent and may end with trailing
 		// whitespace, both structure the emitter owns; emitting them after the
 		// separator space would double the gap and collapse when the value
-		// re-parses inline on the next pass.
+		// reparses inline on the next pass.
 		start := v.Range.Start.Offset
 		end := v.Range.End.Offset
 

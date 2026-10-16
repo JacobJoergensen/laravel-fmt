@@ -17,15 +17,15 @@ import (
 // ENOTDIR counts as missing: a path git lists can name a directory the work
 // tree has since replaced with a file.
 func readGitignore(dir string) ([]string, error) {
-	path := filepath.Join(dir, ".gitignore")
+	gitignore := filepath.Join(dir, ".gitignore")
 
-	file, err := os.Open(path)
+	file, err := os.Open(gitignore)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 			return nil, nil
 		}
 
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, fmt.Errorf("read %s: %w", gitignore, err)
 	}
 
 	defer func() { _ = file.Close() }()
@@ -39,7 +39,7 @@ func readGitignore(dir string) ([]string, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, fmt.Errorf("read %s: %w", gitignore, err)
 	}
 
 	return lines, nil
