@@ -57,7 +57,8 @@ linters:
       threshold: 200
     exhaustive:
       default-signifies-exhaustive: true
-      ignore-enum-types: 'php\.Kind$'
+      ignore-types:
+        - 'php\.Kind$'
     forbidigo:
       forbid:
         - pattern: '^fmt\.Print(|f|ln)$'
