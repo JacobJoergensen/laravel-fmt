@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.3.0 (2026-10-17)
 * Added `--reporter gitlab` to write a GitLab Code Quality report with `--check`, so unformatted files show up in merge requests
 * Added formatting of PHP, Blade, HTML, CSS, JSON, YAML and XML code blocks in Markdown, including PHP snippets without `<?php`; a block that doesn't parse is kept as written
 * Improved `!` in Alpine attributes to keep a space after it (`open = ! open`), following `php.notOperatorSpace` like PHP and Blade echoes
