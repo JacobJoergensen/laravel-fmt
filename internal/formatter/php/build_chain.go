@@ -1840,7 +1840,10 @@ func (b *builder) flattenChain(e parser.Expr) (parser.Expr, []chainLink) {
 		case *parser.SubscriptExpr:
 			idx := document.Text("")
 			if n.Index != nil {
+				saved := b.inKey
+				b.inKey = true
 				idx = b.expr(n.Index)
+				b.inKey = saved
 			}
 
 			// A key is read whole; a break inside it never shortens the line usefully.

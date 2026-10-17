@@ -1147,8 +1147,11 @@ func (l *lexer) scanOperator(start Position) {
 // so a formatter measuring a raw source span can discount exactly the bytes that
 // will not survive; a narrower class there charges width to a byte the output
 // drops, and the next pass, measuring without it, decides differently.
+//
+// PHP's scanner skips only these four; a form feed or vertical tab between
+// tokens is a parse error there, so it is one here too.
 func IsWhitespace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\v' || b == '\f'
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }
 
 // IsIdentStart reports whether b can start a PHP identifier: an ASCII letter,

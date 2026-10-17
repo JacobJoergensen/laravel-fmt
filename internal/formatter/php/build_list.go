@@ -1243,7 +1243,16 @@ func (b *builder) elementValue(el *parser.ArrayElement) *document.Doc {
 	prev := b.elemStart
 	b.elemStart = el.Span().Start.Offset
 	b.lineKnownNext = true
+
+	// An assignment measures from the column its target starts at, the list's
+	// indent once the list breaks; any lead before the list is not on its line.
+	savedLead := b.chainStmtLead
+	if _, assigns := el.Value.(*parser.AssignExpr); assigns && el.Key == nil {
+		b.chainStmtLead = 0
+	}
+
 	value := b.expr(el.Value)
+	b.chainStmtLead = savedLead
 	b.lineKnownNext = false
 	b.elemStart = prev
 

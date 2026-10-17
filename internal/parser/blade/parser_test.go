@@ -696,6 +696,24 @@ func TestParseRawPhpIslandStatements(t *testing.T) {
 	}
 }
 
+func TestBareAtStaysInTheTextAroundIt(t *testing.T) {
+	for _, src := range []string{"<p>a @ b</p>", "<p>a @\n\nb</p>", "<p>a @1 b</p>"} {
+		file, errs := Parse([]byte(src), nil)
+		if len(errs) != 0 {
+			t.Fatalf("%q: unexpected errors: %v", src, errs)
+		}
+
+		el, ok := file.Nodes[0].(*html.Element)
+		if !ok {
+			t.Fatalf("%q: node is %T, want *html.Element", src, file.Nodes[0])
+		}
+
+		if len(el.Children) != 1 {
+			t.Fatalf("%q: %d children, want the text as one node", src, len(el.Children))
+		}
+	}
+}
+
 func TestUnquotedAttrValueEndsAtWhitespaceOrTagEnd(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -707,6 +725,10 @@ func TestUnquotedAttrValueEndsAtWhitespaceOrTagEnd(t *testing.T) {
 		{"slash inside the value", "<a href=/docs>d</a>", "href", "/docs", false},
 		{"slash-gt closes the tag", "<x-icon name=check/>", "name", "check", true},
 		{"form feed separates attributes", "<a\fhref=\"x\">d</a>", "href", "x", false},
+		// PHP runs the tag first, so neither the `>` of `?>` nor one it prints ends
+		// the start tag.
+		{"php tag", "<div a=<?=$v?>>t</div>", "a", "<?=$v?>", false},
+		{"php tag printing a tag end", `<a b=<?= "/>" ?>>t</a>`, "b", `<?= "/>" ?>`, false},
 	}
 
 	for _, tc := range cases {

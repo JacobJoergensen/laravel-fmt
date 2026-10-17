@@ -583,13 +583,19 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 				inner = append(inner, document.LineSuffix(document.Concat(trail...)))
 			}
 
-			// Grouped like a fill break, so both indent from the same line.
-			line := []*document.Doc{document.HardLine()}
-			for _, c := range lead {
-				line = append(line, c, document.HardLine())
-			}
+			// Grouped like a fill break, so both indent from the same line. With no
+			// comment to hold on its own line, it is the fill's separator kept broken,
+			// so the run still measures flat as the pass that broke it on width did.
+			if len(lead) == 0 && len(trail) == 0 {
+				inner = append(inner, indented(document.GroupBreak(document.Concat(sep, step))))
+			} else {
+				line := []*document.Doc{document.HardLine()}
+				for _, c := range lead {
+					line = append(line, c, document.HardLine())
+				}
 
-			inner = append(inner, indented(document.Group(document.Concat(append(line, step)...))))
+				inner = append(inner, indented(document.Group(document.Concat(append(line, step)...))))
+			}
 		case document.HasForcedBreak(step):
 			// An operand that opens a block (`.match (…) {`) keeps its opener on
 			// the line when it fits, its block at that line's indent. Its own
@@ -629,7 +635,7 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 		if width, ok := b.blockOpenerWidth(onlyTail[0].operand); ok {
 			op := " " + string(onlyTail[0].op.Text) + " "
 			operand := b.expr(onlyTail[0].operand)
-			alone := (saved+1)*b.cfg.TabWidth + len(op) + b.oneLineWidth(operand)
+			alone := (saved+1)*b.cfg.TabWidth + len(op) + b.oneLineWidth(operand) + b.chainStmtTail
 
 			if alone > b.cfg.PrintWidth {
 				// The head measures its line up to the block's opener only, as
@@ -679,29 +685,37 @@ func (b *builder) blockOpenerWidth(operand parser.Expr) (int, bool) {
 	}
 
 	last := call.Args[len(call.Args)-1]
-	if arr, isArray := last.(*parser.ArrayExpr); !isArray || !arrayHasValue(arr.Elements) {
-		if len(collectChainSpine(call)) > 0 || slices.ContainsFunc(call.Args, isHuggableArg) {
-			return 0, false
+	if arr, isArray := last.(*parser.ArrayExpr); isArray && arrayHasValue(arr.Elements) {
+		hugged := false
+		width := b.measureWidth(func() int {
+			_, hugged = b.argListHug(call.Args, withTrailingComma)
+
+			width := document.FlatWidth(b.expr(call.Callee), b.cfg.TabWidth) + len("([")
+			for _, arg := range call.Args[:len(call.Args)-1] {
+				width += document.FlatWidth(b.expr(arg), b.cfg.TabWidth) + len(", ")
+			}
+
+			return width
+		})
+
+		if hugged {
+			return width, width < document.ForcedBreakWidth
 		}
 
-		callee := b.measureWidth(func() int { return document.FlatWidth(b.expr(call.Callee), b.cfg.TabWidth) })
-
-		return callee + len("("), true
+		// Unhugged where it would be glued, the list breaks right after `(`. It
+		// must open its block there, or moved down a level it can hug its array,
+		// whose break then reads back as the author's and glues it next pass.
+	} else if slices.ContainsFunc(call.Args, isHuggableArg) {
+		return 0, false
 	}
 
-	hugged := false
-	width := b.measureWidth(func() int {
-		_, hugged = b.argListHug(call.Args, withTrailingComma)
+	if len(collectChainSpine(call)) > 0 {
+		return 0, false
+	}
 
-		width := document.FlatWidth(b.expr(call.Callee), b.cfg.TabWidth) + len("([")
-		for _, arg := range call.Args[:len(call.Args)-1] {
-			width += document.FlatWidth(b.expr(arg), b.cfg.TabWidth) + len(", ")
-		}
+	callee := b.measureWidth(func() int { return document.FlatWidth(b.expr(call.Callee), b.cfg.TabWidth) })
 
-		return width
-	})
-
-	return width, hugged && width < document.ForcedBreakWidth
+	return callee + len("("), true
 }
 
 // chainTail returns a statement's one unbreakable operand when it stays on the
@@ -1594,8 +1608,13 @@ func (b *builder) assign(n *parser.AssignExpr, stmtLevel, continued bool) *docum
 	broken := b.authorBroke(n.Op.Span.Start.Offset) ||
 		stmtLevel && flatTarget && b.binaryHeadOverflows(n.Right, lead, op)
 
-	if !broken && b.valueBelowList(n, left) {
-		b.chainStmtLevel = stmtLevel
+	// The value is built at one level wherever it lands, the level it has on the
+	// list's line: a break only one place allows would read back as authored and
+	// move it there next pass.
+	level := stmtLevel && flatTarget
+
+	if !broken && b.valueBelowList(n, left, level, lead) {
+		b.chainStmtLevel = level
 		b.chainStmtLead = 0
 
 		b.depth++
@@ -1614,14 +1633,14 @@ func (b *builder) assign(n *parser.AssignExpr, stmtLevel, continued bool) *docum
 		// Only while the target itself stays on one line: a target that can break
 		// moves the value off the statement's indent, and a preserved chain would
 		// reproduce its breaks against the wrong one.
-		b.chainStmtLevel = stmtLevel && flatTarget
+		b.chainStmtLevel = level
 		if b.chainStmtLevel {
 			b.chainStmtLead = lead
 		}
 
-		if _, chained := n.Right.(*parser.AssignExpr); chained && !b.chainStmtLevel {
+		if valueLead, chained := chainedAssignLead(n.Right, lead); chained && !b.chainStmtLevel {
 			saved := b.chainStmtLead
-			b.chainStmtLead = lead
+			b.chainStmtLead = valueLead
 			value := b.assignValue(n.Right)
 			b.chainStmtLead = saved
 
@@ -1667,8 +1686,8 @@ func (b *builder) targetEnd(left *document.Doc) int {
 	return b.chainStmtLead + flatWidth(left, b.cfg.TabWidth)
 }
 
-func (b *builder) valueBelowList(n *parser.AssignExpr, left *document.Doc) bool {
-	if _, ok := n.Left.(*parser.ArrayExpr); !ok || n.ByRef || document.HasForcedBreak(left) {
+func (b *builder) valueBelowList(n *parser.AssignExpr, left *document.Doc, level bool, lead int) bool {
+	if _, ok := n.Left.(*parser.ArrayExpr); !ok || n.ByRef || b.inKey || document.HasForcedBreak(left) {
 		return false
 	}
 
@@ -1678,18 +1697,34 @@ func (b *builder) valueBelowList(n *parser.AssignExpr, left *document.Doc) bool 
 	}
 
 	opener := b.measureWidth(func() int {
-		saved := b.chainStmtLead
-		if _, chained := n.Right.(*parser.AssignExpr); chained {
-			b.chainStmtLead = line + len(" ") - b.depth*b.cfg.TabWidth
+		savedLevel, savedLead := b.chainStmtLevel, b.chainStmtLead
+		b.chainStmtLevel = level
+
+		switch valueLead, chained := chainedAssignLead(n.Right, lead); {
+		case level:
+			b.chainStmtLead = lead
+		case chained:
+			b.chainStmtLead = valueLead
 		}
 
 		width, _ := document.BrokenPrefixWidth(b.expr(n.Right), b.cfg.TabWidth)
-		b.chainStmtLead = saved
+		b.chainStmtLevel, b.chainStmtLead = savedLevel, savedLead
 
 		return width
 	})
 
 	return line+len(" ")+opener > b.cfg.PrintWidth
+}
+
+func chainedAssignLead(e parser.Expr, lead int) (int, bool) {
+	for p, ok := e.(*parser.ParenExpr); ok; p, ok = e.(*parser.ParenExpr) {
+		e = p.Expr
+		lead += len("(")
+	}
+
+	_, chained := e.(*parser.AssignExpr)
+
+	return lead, chained
 }
 
 func (b *builder) assignValue(e parser.Expr) *document.Doc {

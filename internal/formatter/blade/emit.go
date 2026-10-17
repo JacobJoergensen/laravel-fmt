@@ -736,13 +736,13 @@ func (e *emitter) emitPhpBlock(n *parser.PhpBlockNode) {
 
 	e.w.Write("@php")
 
-	if len(n.Stmts) == 0 {
+	content := e.src[n.Open.End.Offset:n.Close.Start.Offset]
+
+	if len(n.Stmts) == 0 && len(bytes.TrimSpace(content)) == 0 {
 		e.w.Write(" @endphp")
 
 		return
 	}
-
-	content := e.src[n.Open.End.Offset:n.Close.Start.Offset]
 
 	// A block the author wrote on one line stays there while its statement
 	// does and the line fits, as Pint keeps it.

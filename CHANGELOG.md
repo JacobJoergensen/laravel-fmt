@@ -2,8 +2,18 @@
 
 ## Unreleased
 * Added `--reporter gitlab` to write a GitLab Code Quality report with `--check`, so unformatted files show up in merge requests
+* Added formatting of PHP, Blade, HTML, CSS, JSON, YAML and XML code blocks in Markdown, including PHP snippets without `<?php`; a block that doesn't parse is kept as written
 * Improved `!` in Alpine attributes to keep a space after it (`open = ! open`), following `php.notOperatorSpace` like PHP and Blade echoes
+* Fixed comments after the last statement in a `@php` block or a `<?php ?>` block in Blade being removed
 * Fixed strings like `"{$a->f("x")}"` failing to format when the code inside `{$...}` has its own quoted string
+* Fixed `markdown.proseWrap: always` wrapping text in lists and blockquotes past the print width
+* Fixed the blank line before a comment at the end of a PHP file being removed
+* Fixed a comment written after a docblock or block comment on the same line being moved onto its own line
+* Fixed an unquoted attribute value holding a PHP tag, like `<div x=<?= $a ?>>`, being cut at `?>` and quoted into broken PHP
+* Fixed a form feed or vertical tab between PHP tokens being formatted instead of failing, as PHP rejects them
+* Fixed a lone `@` in Blade text making the surrounding text change layout on a second run
+* Fixed some binary operators, concatenations and destructuring assignments changing layout on a second run
+* Fixed lines of a method chain or concatenation after a multi-line operand being indented deeper than the lines before it
 
 ## Version 0.2.0 (2026-10-15)
 * Added `blade.blankLineBeforeDirectives` to put a blank line before the Blade block directives you list, like `@if` and `@foreach`

@@ -29,6 +29,18 @@ func TestCloseTagOffsetFollowsPHPRules(t *testing.T) {
 	}
 }
 
+func TestFormFeedAndVerticalTabAreNotWhitespaceBetweenTokens(t *testing.T) {
+	for _, c := range []string{"\f", "\v"} {
+		if _, errs := Lex([]byte("<?php $a = 1;" + c + "$b = 2;")); len(errs) == 0 {
+			t.Errorf("%q between tokens lexed without an error", c)
+		}
+
+		if _, errs := Lex([]byte("<?php $a = 'x" + c + "y';")); len(errs) != 0 {
+			t.Errorf("%q inside a string was an error: %v", c, errs)
+		}
+	}
+}
+
 func TestYieldFromLexesAsOneToken(t *testing.T) {
 	cases := []struct {
 		name string

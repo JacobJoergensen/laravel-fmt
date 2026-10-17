@@ -180,7 +180,7 @@ func (p *bladeParser) parseNext(stack [][]byte) Node {
 		return p.parseRawEcho()
 	case p.StartsWith("{{"):
 		return p.parseEcho()
-	case p.Peek() == '@' && p.atAtMarker():
+	case p.atBladeAt():
 		return p.parseAt()
 	case p.StartsWith("<?"):
 		return p.parseRawPhp()
@@ -432,10 +432,19 @@ func GluedLiteralAt(src []byte, off int) bool {
 	return off > 0 && off < len(src) && src[off] == '@' && isKeywordChar(src[off-1])
 }
 
+// Any other `@` is text and stays inside the text around it.
+func (p *bladeParser) atBladeAt() bool {
+	if p.Peek() != '@' || !p.atAtMarker() {
+		return false
+	}
+
+	return p.PeekAt(1) == '@' || p.StartsWith("@{{") || p.StartsWith("@{!!") || isNameStart(p.PeekAt(1))
+}
+
 func (p *bladeParser) isBladeMarker() bool {
 	switch p.Peek() {
 	case '@':
-		return p.atAtMarker()
+		return p.atBladeAt()
 	case '{':
 		return p.PeekAt(1) == '{' || (p.PeekAt(1) == '!' && p.PeekAt(2) == '!')
 	case '<':
@@ -606,13 +615,6 @@ func (p *bladeParser) parseAt() Node {
 	}
 
 	name := p.readDirectiveName()
-
-	if len(name) == 0 {
-		return &html.Text{
-			Start: start, End: p.Pos,
-			Text: p.Src[start.Offset:p.Pos.Offset],
-		}
-	}
 
 	switch string(name) {
 	case phpDirective:
@@ -1794,11 +1796,7 @@ func (p *bladeParser) parseAttr(component bool) *html.Attr {
 	// scanner does not read the PHP keywords as bogus names and `?>`'s `>` does not
 	// close the tag early.
 	if p.StartsWith("<?") {
-		if !p.skipRawPhp() {
-			for !p.Eof() {
-				p.Advance()
-			}
-		}
+		p.skipRawPhpOrRest()
 
 		return &html.Attr{Start: start, End: p.Pos, RawPhp: p.Src[start.Offset:p.Pos.Offset]}
 	}
@@ -2245,6 +2243,12 @@ func (p *bladeParser) parseAttrParts(endQuote byte) (parts []html.Node, keep boo
 			}
 
 			keep = true
+		case endQuote == 0 && p.atPHPOpenTag():
+			// PHP runs the tag before any HTML is read, so the `>` of its `?>` does
+			// not end the value, and quotes put around it would land inside the PHP.
+			p.skipRawPhpOrRest()
+
+			keep = true
 		default:
 			p.Advance()
 			literal(from)
@@ -2300,6 +2304,16 @@ func (p *bladeParser) skipRawPhp() bool {
 	p.AdvanceN(len("?>"))
 
 	return true
+}
+
+func (p *bladeParser) skipRawPhpOrRest() {
+	if p.skipRawPhp() {
+		return
+	}
+
+	for !p.Eof() {
+		p.Advance()
+	}
 }
 
 func (p *bladeParser) hasCloseAhead(closer string) bool {

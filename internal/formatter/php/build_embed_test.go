@@ -82,6 +82,31 @@ func TestDirectiveArgWrappedKeepsACommentItCannotPlace(t *testing.T) {
 	}
 }
 
+func TestStmtsKeepTheCommentsAfterTheLastStatement(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"trailing and below a blank line", "$a = 1; // note\n\n\n// below\n", "$a = 1; // note\n\n// below"},
+		{"trailing on one line", "$a = 1; # note", "$a = 1; # note"},
+		{"trailing the last import of a sorted run", "use B;\nuse A; # note\n", "use A; # note\nuse B;"},
+		{"after an import that stays last", "use A;\nuse B; # note\n", "use A;\nuse B; # note"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stmts, tokens, _ := parser.ParseStatements([]byte(tc.src))
+			got := BuildStmts([]byte(tc.src), tokens, stmts, config.Default(), 0)
+
+			if string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+
+			reStmts, reTokens, _ := parser.ParseStatements(got)
+			if again := BuildStmts(got, reTokens, reStmts, config.Default(), 0); !bytes.Equal(again, got) {
+				t.Fatalf("not idempotent: %q -> %q", got, again)
+			}
+		})
+	}
+}
+
 func TestStmtsLayoutIsStableAtEveryIndent(t *testing.T) {
 	src := []byte("$rows()->filter($total % $count() % $limit());")
 

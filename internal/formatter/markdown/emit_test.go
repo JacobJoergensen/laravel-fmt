@@ -497,6 +497,35 @@ func TestProseWrapAlwaysKeepsHTMLBlockOut(t *testing.T) {
 	}
 }
 
+func TestNestedBodiesLayOutWithinThePrintWidth(t *testing.T) {
+	cfg := config.Default()
+	cfg.Markdown.ProseWrap = config.ProseWrapAlways
+	cfg.PrintWidth = 40
+
+	cases := []struct{ name, src string }{
+		{"quoted prose", "> one two three four five six seven eight nine ten\n"},
+		{"listed prose", "- one two three four five six seven eight nine ten\n"},
+		{"prose after a widening ordered marker", "9. first\n10. one two three four five six seven abc def\n"},
+		{"listed code", "- Run:\n\n  ```php\n  $total = sum($first, $second, $third, $fourth);\n  ```\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), cfg)
+
+			for line := range bytes.Lines(got) {
+				if width := columns(bytes.TrimRight(line, "\n")); width > cfg.PrintWidth {
+					t.Fatalf("line is %d columns, past the print width %d:\n%s", width, cfg.PrintWidth, got)
+				}
+			}
+
+			if twice := mustFormat(t, got, cfg); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
+	}
+}
+
 func TestProseWrapAlways(t *testing.T) {
 	cfg := config.Default()
 	cfg.Markdown.ProseWrap = config.ProseWrapAlways
@@ -786,7 +815,7 @@ func TestFormatKeepsOuterListTightAroundLooseChild(t *testing.T) {
 // content line.
 func TestFormatDedentsIndentedFenceContent(t *testing.T) {
 	cases := []struct{ name, src, want string }{
-		{"one_space", " ```php\n    code\n```\n", "```php\n   code\n```\n"},
+		{"one_space", " ```text\n    code\n```\n", "```text\n   code\n```\n"},
 		{"tab_content", "  ```\n\tcode\n```\n", "```\n  code\n```\n"},
 		{"whitespace_only_line", " ```\n   \n```\n", "```\n  \n```\n"},
 		// Inside an item the body is already dedented to the content column, so

@@ -113,6 +113,15 @@ new class extends Component {
 <div>Hello {{ $name }}</div>
 `,
 		},
+		{
+			name: "markdown",
+			path: "x.md",
+			src: "# Usage\n\nRegister the service in a provider:\n\n" +
+				"```php\nuse App\\Services\\Greeter;\n\npublic function register(): void\n{\n" +
+				"    $this->app->singleton(Greeter::class, fn ($app) => new Greeter($app['config']['greeter']));\n}\n```\n\n" +
+				"Then publish the config:\n\n```shell\nphp artisan vendor:publish --tag=greeter\n```\n\n" +
+				"```json\n{\"greeter\": {\"name\": \"World\", \"loud\": false}}\n```\n",
+		},
 	}
 
 	cfg := config.Default()

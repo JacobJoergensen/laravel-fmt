@@ -600,15 +600,13 @@ func TestBuildTrailingMethodBreak(t *testing.T) {
 	}
 }
 
-// `\f` and `\v` are PHP whitespace like a space, so the source measure must not
-// count them.
 func TestBuildOpenerWidthIgnoresVanishingWhitespace(t *testing.T) {
 	callee := strings.Repeat("0", 59)
 	arg := strings.Repeat("0", 51)
 
 	space := buildPHP(t, "<?php (0("+callee+" ('\n"+arg+"')));")
 
-	for _, sep := range []string{"\f", "\v", "\t", "\r", "\n", "  "} {
+	for _, sep := range []string{"\t", "\r", "\n", "  "} {
 		t.Run(fmt.Sprintf("%q", sep), func(t *testing.T) {
 			got := buildPHP(t, "<?php (0("+callee+sep+"('\n"+arg+"')));")
 

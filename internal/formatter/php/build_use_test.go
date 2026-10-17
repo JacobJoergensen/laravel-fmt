@@ -21,7 +21,7 @@ func TestCommentsLeftAfterAMovedRunTailKeepTheirOwnLine(t *testing.T) {
 		{
 			name: "directive and comment before a statement",
 			src:  "<?php use B;#0\nuse A;/*laravel-fmt-ignore*/ /*z*/\nfoo( 1 );\n",
-			want: "<?php\n\nuse A;\nuse B; #0\n\n/*laravel-fmt-ignore*/\n/*z*/\nfoo(1);\n",
+			want: "<?php\n\nuse A;\nuse B; #0\n\n/*laravel-fmt-ignore*/ /*z*/\nfoo(1);\n",
 		},
 	}
 

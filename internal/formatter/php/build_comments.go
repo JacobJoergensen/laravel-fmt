@@ -291,14 +291,9 @@ func (b *builder) splitComments(offset int) (lead, trail []*document.Doc) {
 			}
 
 			if seenNewline {
-				lead = append(lead, b.leadCommentWithGap(tr, len(lead) > 0, newlines))
+				lead = b.appendOwnLineComment(lead, tr, newlines)
 			} else {
-				// Each authored group keeps its own scope: two groups the output
-				// happens to put on adjacent lines would otherwise pad each other.
-				group := b.alignedCommentGroup(tr.Span.Start.Offset)
-				gap := document.AlignGap(b.commentScope(group), 0)
-
-				trail = append(trail, document.Concat(gap, b.commentVerbatim(tr)))
+				trail = append(trail, b.trailingComment(tr))
 			}
 
 			newlines = 0
@@ -306,6 +301,26 @@ func (b *builder) splitComments(offset int) (lead, trail []*document.Doc) {
 	}
 
 	return lead, trail
+}
+
+func (b *builder) appendOwnLineComment(lead []*document.Doc, tr parser.Trivia, newlines int) []*document.Doc {
+	if len(lead) == 0 || newlines > 0 {
+		return append(lead, b.leadCommentWithGap(tr, len(lead) > 0, newlines))
+	}
+
+	last := len(lead) - 1
+	lead[last] = document.Concat(lead[last], b.trailingComment(tr))
+
+	return lead
+}
+
+func (b *builder) trailingComment(tr parser.Trivia) *document.Doc {
+	// Each authored group keeps its own scope: two groups the output happens to
+	// put on adjacent lines would otherwise pad each other.
+	group := b.alignedCommentGroup(tr.Span.Start.Offset)
+	gap := document.AlignGap(b.commentScope(group), 0)
+
+	return document.Concat(gap, b.commentVerbatim(tr))
 }
 
 func (b *builder) alignedCommentGroup(offset int) int {
@@ -761,7 +776,7 @@ func (b *builder) allComments(offset int) []*document.Doc {
 				continue
 			}
 
-			out = append(out, b.leadCommentWithGap(tr, len(out) > 0, newlines))
+			out = b.appendOwnLineComment(out, tr, newlines)
 			newlines = 0
 		}
 	}
@@ -1140,10 +1155,14 @@ func (b *builder) fileTailComments(eof parser.Token, bodyEmitted bool) *document
 		return nil
 	}
 
-	parts := make([]*document.Doc, 0, len(lead)*2+2)
+	parts := make([]*document.Doc, 0, len(lead)*2+3)
 
 	if len(trail) > 0 {
 		parts = append(parts, document.LineSuffix(document.Concat(trail...)))
+	}
+
+	if len(lead) > 0 && b.blankBefore(offset) {
+		parts = append(parts, document.HardLine())
 	}
 
 	for i, c := range lead {

@@ -80,6 +80,7 @@ type builder struct {
 	preserveChainNext bool          // the next postfix is an operand of a statement's binary, which keeps an author ladder as the statement's own chain does; read and cleared on entry
 	preserveAt        int           // source offset of a nested chain that keeps its author ladder (a Pest `->and(` argument), 0 for none
 	lineKnownNext     bool          // the next value starts a line whose column the depth gives (an array entry's value); read and cleared in exprInner
+	inKey             bool          // inside a subscript key, which lays out flat unless the author broke it
 }
 
 func (b *builder) nextGroupID() int32 {

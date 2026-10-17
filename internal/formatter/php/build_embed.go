@@ -586,11 +586,8 @@ func buildWidth(src []byte, tokens []parser.Token, cfg *config.File, indentCols,
 // The host re-homes every line, and inside such a literal that rewrites the
 // value, so a caller keeps that body as written instead.
 func BuildStmts(src []byte, tokens []parser.Token, stmts []parser.Stmt, cfg *config.File, indentCols int) []byte {
-	if len(stmts) == 0 {
-		return nil
-	}
-
 	b := &builder{src: src, cfg: columnZeroConfig(cfg, indentCols), tokens: tokens, comments: commentOffsets(tokens), crLiterals: crLiteralOffsets(tokens), rehomeSlices: true, embed: true}
+
 	b.headerSpacing = startsWithOpenTag(stmts) && !containsInlineHTML(stmts)
 	b.depth = indentCols / max(cfg.TabWidth, 1)
 
@@ -605,6 +602,17 @@ func BuildStmts(src []byte, tokens []parser.Token, stmts []parser.Stmt, cfg *con
 	}
 
 	body := b.buildSequence(spans, docs, b.stmtForceBlank(stmts), false)
+
+	// Collected after the statements: sorting a use run may already have moved a
+	// comment of the EOF trivia.
+	tail := b.fileTailComments(eofToken(tokens), len(stmts) > 0)
+
+	switch {
+	case tail != nil:
+		body = document.Concat(body, tail)
+	case len(stmts) == 0:
+		return nil
+	}
 
 	width := max(cfg.PrintWidth-indentCols, 1)
 

@@ -180,9 +180,23 @@ func (p *printer) stepGroup(c cmd) {
 
 	// A group whose opener was pushed onto a continuation line indents its body
 	// from that line, not its structural depth, so the body does not sit level
-	// with the line that opened it (PHP-CS-Fixer statement_indentation).
+	// with the line that opened it (PHP-CS-Fixer statement_indentation). A group
+	// that opens with its own break has no opener on that line.
+	indent := c.indent
+	if !opensWithBreak(c.doc.parts[0]) {
+		indent = max(indent, p.lineIndent)
+	}
+
 	p.recordGroup(c.doc, modeBreak)
-	p.push(max(c.indent, p.lineIndent), modeBreak, c.prefix, c.doc.parts[0])
+	p.push(indent, modeBreak, c.prefix, c.doc.parts[0])
+}
+
+func opensWithBreak(d *Doc) bool {
+	for d.kind == kindConcat && len(d.parts) > 0 {
+		d = d.parts[0]
+	}
+
+	return d.kind == kindLine || d.kind == kindSoftLine || d.kind == kindHardLine
 }
 
 // stepCondGroup pushes the chosen variant in break mode: a compact variant

@@ -244,6 +244,26 @@ func TestFormatRawPhpIslandsStructural(t *testing.T) {
 	}
 }
 
+func TestFormatRawPhpIslandKeepsTheCommentAfterItsLastStatement(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"on one line", "<p>x</p>\n<?php $a = 1; // note ?>\n", "<p>x</p>\n<?php $a = 1; // note ?>\n"},
+		{"over lines", "<p>x</p>\n<?php\n$a = 1;\n// note\n?>\n", "<p>x</p>\n<?php\n    $a = 1;\n    // note\n?>\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent: %q -> %q", got, twice)
+			}
+		})
+	}
+}
+
 func TestFormatLivewireBlockDirectivesIndentBody(t *testing.T) {
 	src := []byte(`<div>
 @island(name: 'x')
@@ -2659,6 +2679,11 @@ func TestPhpBlockDocFormatting(t *testing.T) {
 			"keeps comment",
 			"@php\n// keep me\n$a = 1;\n@endphp\n",
 			"@php\n    // keep me\n    $a = 1;\n@endphp\n",
+		},
+		{
+			"keeps a block holding only a comment",
+			"@php\n// only\n@endphp\n",
+			"@php\n    // only\n@endphp\n",
 		},
 		{
 			"one-line block stays on its line",

@@ -35,6 +35,7 @@ func TestHeredocIndentationModes(t *testing.T) {
 
 func TestBinaryKeepsItsOperatorOnTheLineOpeningABlockThatBreaksAnyway(t *testing.T) {
 	wide := "['xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' => 1, 'yyyyyyyyyyyyyyyyyyyyyyyyyy' => 2, 'zzzzzzzzzzzzzzzzzzzzzz' => 3]"
+	long := "$" + strings.Repeat("v", 103)
 
 	cases := []struct {
 		name string
@@ -56,6 +57,11 @@ func TestBinaryKeepsItsOperatorOnTheLineOpeningABlockThatBreaksAnyway(t *testing
 			"operand that fits its own line moves down",
 			"$aaaaaaaaaaaaaaaaaaaaaaaa = $this->reference($query, $order->number) ?? $this->score($query, $order->number, [$v, $order->notes]);",
 			"$aaaaaaaaaaaaaaaaaaaaaaaa = $this->reference($query, $order->number)\n    ?? $this->score($query, $order->number, [$v, $order->notes]);",
+		},
+		{
+			"operand that fits its own line only without the statement's closers",
+			"$a = (($b ?? score(" + long + ")));",
+			"$a = (($b ?? score(\n    " + long + ",\n)));",
 		},
 	}
 
@@ -221,6 +227,37 @@ func TestChainedAssignmentMeasuresFromItsRealColumn(t *testing.T) {
 
 	if twice := string(mustFormat(t, []byte(got), config.Default())); twice != got {
 		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
+func TestValueAssignedToAListKeepsItsLayoutOnTheNextRun(t *testing.T) {
+	inner, value := "$"+strings.Repeat("c", 40), "$"+strings.Repeat("a", 70)
+	chain := "($q = " + inner + " = " + value + " + $m);"
+
+	cases := []struct{ name, src, want string }{
+		{
+			"list that can break",
+			"[$p] = " + chain,
+			"[$p] =\n    ($q = " + inner + " = " + value + "\n        + $m);",
+		},
+		{
+			"list that stays flat",
+			"[] = " + chain,
+			"[] = ($q = " + inner + "\n    = " + value + " + $m);",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(mustFormat(t, []byte("<?php\n\n"+tc.src+"\n"), config.Default()))
+			if want := "<?php\n\n" + tc.want + "\n"; got != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+
+			if twice := string(mustFormat(t, []byte(got), config.Default())); twice != got {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
 	}
 }
 

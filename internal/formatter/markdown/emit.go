@@ -319,6 +319,13 @@ func formatBody(content []byte, cfg *config.File, blankBetween, onMarkerLine, cl
 	return w.Bytes()
 }
 
+func nestedConfig(cfg *config.File, column int) *config.File {
+	nested := *cfg
+	nested.PrintWidth -= column
+
+	return &nested
+}
+
 func emitBlock(w *formatter.Writer, node parser.Node, cfg *config.File, clearAt int, onMarkerLine, inMarkerRun, closeQuote bool) {
 	switch n := node.(type) {
 	case *parser.Frontmatter:
@@ -332,7 +339,7 @@ func emitBlock(w *formatter.Writer, node parser.Node, cfg *config.File, clearAt 
 	case *parser.Paragraph:
 		emitParagraph(w, n, cfg)
 	case *parser.FencedCodeBlock:
-		emitFencedCode(w, n)
+		emitFencedCode(w, n, cfg)
 	case *parser.IndentedCodeBlock:
 		emitIndentedCode(w, n)
 	case *parser.HTMLBlock:
@@ -774,8 +781,13 @@ func splitContentLines(content []byte) [][]byte {
 	return append(lines, content[start:])
 }
 
-func emitFencedCode(w *formatter.Writer, b *parser.FencedCodeBlock) {
-	length := fenceLength(b.Content, b.FenceChar)
+func emitFencedCode(w *formatter.Writer, b *parser.FencedCodeBlock, cfg *config.File) {
+	content := b.Content
+	if formatted, ok := formatCode(b, cfg); ok {
+		content = formatted
+	}
+
+	length := fenceLength(content, b.FenceChar)
 	fence := strings.Repeat(string(b.FenceChar), length)
 
 	w.Write(fence)
@@ -794,8 +806,8 @@ func emitFencedCode(w *formatter.Writer, b *parser.FencedCodeBlock) {
 	w.Newline()
 
 	switch {
-	case len(b.Content) > 0:
-		for _, line := range splitContentLines(b.Content) {
+	case len(content) > 0:
+		for _, line := range splitContentLines(content) {
 			w.WriteBytes(line)
 			w.Newline()
 		}
@@ -1010,7 +1022,7 @@ func linkDestNeedsAngles(dest []byte) bool {
 // constructs get the same canonical layout (`>    # H` becomes `> # H`). A blank
 // line emits as a lone `>` to avoid trailing whitespace.
 func emitBlockquote(w *formatter.Writer, b *parser.Blockquote, cfg *config.File, closeQuote bool) {
-	formatted := bytes.TrimRight(formatBody(b.Content, cfg, true, false, false), "\n")
+	formatted := bytes.TrimRight(formatBody(b.Content, nestedConfig(cfg, len("> ")), true, false, false), "\n")
 
 	for i, line := range bytes.Split(formatted, []byte("\n")) {
 		if i > 0 {
@@ -1059,9 +1071,13 @@ func emitList(w *formatter.Writer, l *parser.List, cfg *config.File, clearAt int
 
 	bodies := make([][]byte, len(l.Items))
 
+	// The widest marker is the last one, or the repeated start; with the one
+	// space after it, that is where the bodies start.
+	bodyCfg := nestedConfig(cfg, len(listMarker(l, len(l.Items)-1, repeats))+1)
+
 	for i, item := range l.Items {
 		last := i == len(l.Items)-1
-		bodies[i] = bytes.TrimRight(formatBody(item.Content, cfg, item.Loose, true, closeQuote && last), "\n")
+		bodies[i] = bytes.TrimRight(formatBody(item.Content, bodyCfg, item.Loose, true, closeQuote && last), "\n")
 	}
 
 	pad := ""
