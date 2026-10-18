@@ -41,17 +41,21 @@ type response struct {
 	Error   *responseError  `json:"error,omitempty"`
 }
 
+type notification struct {
+	JSONRPC string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  any    `json:"params"`
+}
+
 type responseError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
 
 const (
-	codeMethodNotFound = -32601
+	jsonrpcVersion = "2.0"
 
-	// codeRequestFailed is LSP's code for a well-formed request that could not
-	// be carried out; the message is what the editor shows the user.
-	codeRequestFailed = -32803
+	codeMethodNotFound = -32601
 )
 
 // read returns the next framed message; at end of input the error wraps io.EOF.
@@ -101,17 +105,21 @@ func (c *conn) read() (*request, error) {
 }
 
 func (c *conn) reply(id json.RawMessage, result any) error {
-	return c.write(response{JSONRPC: "2.0", ID: id, Result: result})
+	return c.write(response{JSONRPC: jsonrpcVersion, ID: id, Result: result})
 }
 
 func (c *conn) replyError(id json.RawMessage, code int, message string) error {
-	return c.write(response{JSONRPC: "2.0", ID: id, Error: &responseError{Code: code, Message: message}})
+	return c.write(response{JSONRPC: jsonrpcVersion, ID: id, Error: &responseError{Code: code, Message: message}})
 }
 
-func (c *conn) write(msg response) error {
+func (c *conn) notify(method string, params any) error {
+	return c.write(notification{JSONRPC: jsonrpcVersion, Method: method, Params: params})
+}
+
+func (c *conn) write(msg any) error {
 	body, err := json.Marshal(msg)
 	if err != nil {
-		return fmt.Errorf("encode response: %w", err)
+		return fmt.Errorf("encode message: %w", err)
 	}
 
 	if _, err := fmt.Fprintf(c.w, "Content-Length: %d\r\n\r\n", len(body)); err != nil {

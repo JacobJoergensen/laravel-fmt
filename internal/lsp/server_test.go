@@ -84,6 +84,38 @@ func editsFromResponses(t *testing.T, out []byte) []TextEdit {
 	return edits
 }
 
+func messagesSent(t *testing.T, out []byte, method string) []messageParams {
+	t.Helper()
+
+	r := bufio.NewReader(bytes.NewReader(out))
+
+	var sent []messageParams
+
+	for {
+		body, err := readFrame(r)
+		if errors.Is(err, io.EOF) {
+			return sent
+		}
+
+		if err != nil {
+			t.Fatalf("read frame: %v", err)
+		}
+
+		var msg struct {
+			Method string        `json:"method"`
+			Params messageParams `json:"params"`
+		}
+
+		if err := json.Unmarshal(body, &msg); err != nil {
+			t.Fatalf("decode message: %v", err)
+		}
+
+		if msg.Method == method {
+			sent = append(sent, msg.Params)
+		}
+	}
+}
+
 func responseTo(t *testing.T, out []byte, id string) wireResponse {
 	t.Helper()
 
@@ -293,17 +325,132 @@ func TestFormatDocumentUnknownExtensionNoEdits(t *testing.T) {
 	}
 }
 
-func TestFormatDocumentUnparseableNoEdits(t *testing.T) {
+func TestFormattingLogsAnUnparseableDocumentWithoutShowingIt(t *testing.T) {
 	s, uri := newDirectServer(t, "broken.php", "<?php if (")
-	if edits := mustDocumentEdits(t, s, uri); len(edits) != 0 {
+
+	var out bytes.Buffer
+	s.conn = newConn(strings.NewReader(""), &out)
+
+	if err := s.handleFormatting(formattingRequest(t, uri)); err != nil {
+		t.Fatalf("handleFormatting: %v", err)
+	}
+
+	if edits := editsFromResponses(t, out.Bytes()); len(edits) != 0 {
 		t.Fatalf("unparseable input must be a no-op, got %+v", edits)
+	}
+
+	if shown := messagesSent(t, out.Bytes(), "window/showMessage"); len(shown) != 0 {
+		t.Fatalf("a document that does not parse was shown to the user: %+v", shown)
+	}
+
+	logged := messagesSent(t, out.Bytes(), "window/logMessage")
+
+	if len(logged) != 1 || logged[0].Type != messageWarning || !strings.Contains(logged[0].Message, "broken.php") {
+		t.Fatalf("logMessage = %+v, want one warning naming broken.php", logged)
 	}
 }
 
-func TestFormatDocumentUnknownURINoEdits(t *testing.T) {
+func TestFormattingShowsABrokenConfigOnceUntilADocumentFormats(t *testing.T) {
+	const brokenConfig = `{"printWidht":40}`
+
+	dir := t.TempDir()
+	seedFiles(t, dir, map[string]string{
+		"composer.json":    "{}",
+		"laravel-fmt.json": brokenConfig,
+	})
+
+	uri := pathToURI(filepath.Join(dir, "app", "x.php"))
+	s, out := newRecordingServer(map[string]string{uri: longCallSrc})
+
+	formatEach(t, s, uri, uri)
+
+	seedFiles(t, dir, map[string]string{"laravel-fmt.json": `{"printWidth":40}`})
+	formatEach(t, s, uri)
+
+	seedFiles(t, dir, map[string]string{"laravel-fmt.json": brokenConfig})
+	formatEach(t, s, uri)
+
+	if shown := messagesSent(t, out.Bytes(), "window/showMessage"); len(shown) != 2 {
+		t.Fatalf("showMessage sent %d times, want once per break: %+v", len(shown), shown)
+	}
+}
+
+func TestFormattingKeepsAShownFailureAcrossAnUntouchedDocument(t *testing.T) {
+	dir := t.TempDir()
+	seedFiles(t, dir, map[string]string{
+		"composer.json":    "{}",
+		"laravel-fmt.json": `{"printWidht":40}`,
+	})
+
+	uri := pathToURI(filepath.Join(dir, "app", "x.php"))
+	const untitledURI = "untitled:Untitled-1"
+
+	s, out := newRecordingServer(map[string]string{uri: longCallSrc, untitledURI: "<?php\n"})
+
+	formatEach(t, s, uri, untitledURI, uri)
+
+	if shown := messagesSent(t, out.Bytes(), "window/showMessage"); len(shown) != 1 {
+		t.Fatalf("showMessage sent %d times, want 1: %+v", len(shown), shown)
+	}
+}
+
+func TestFormattingShowsEachOfTwoBrokenConfigsOnce(t *testing.T) {
+	base := t.TempDir()
+	seedFiles(t, base, map[string]string{
+		"a/composer.json":    "{}",
+		"a/laravel-fmt.json": `{"printWidht":40}`,
+		"b/composer.json":    "{}",
+		"b/laravel-fmt.json": `{"printWidht":40}`,
+	})
+
+	a := pathToURI(filepath.Join(base, "a", "x.php"))
+	b := pathToURI(filepath.Join(base, "b", "y.php"))
+
+	s, out := newRecordingServer(map[string]string{a: longCallSrc, b: longCallSrc})
+
+	formatEach(t, s, a, b, a, b)
+
+	if shown := messagesSent(t, out.Bytes(), "window/showMessage"); len(shown) != 2 {
+		t.Fatalf("showMessage sent %d times, want 2: %+v", len(shown), shown)
+	}
+}
+
+func newRecordingServer(docs map[string]string) (*server, *bytes.Buffer) {
+	var out bytes.Buffer
+
+	return &server{
+		conn:          newConn(strings.NewReader(""), &out),
+		encoding:      encodingUTF8,
+		docs:          docs,
+		shownFailures: map[string]bool{},
+	}, &out
+}
+
+func formatEach(t *testing.T, s *server, uris ...string) {
+	t.Helper()
+
+	for _, uri := range uris {
+		if err := s.handleFormatting(formattingRequest(t, uri)); err != nil {
+			t.Fatalf("handleFormatting %s: %v", uri, err)
+		}
+	}
+}
+
+func formattingRequest(t *testing.T, uri string) *request {
+	t.Helper()
+
+	params, err := json.Marshal(formattingParams{TextDocument: textDocumentIdentifier{URI: uri}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return &request{JSONRPC: "2.0", ID: json.RawMessage(formatRequestID), Method: "textDocument/formatting", Params: params}
+}
+
+func TestFormatDocumentUnknownURIIsUntouched(t *testing.T) {
 	s, _ := newDirectServer(t, "open.php", "<?php\n")
-	if edits := mustDocumentEdits(t, s, "file:///never-opened.php"); len(edits) != 0 {
-		t.Fatalf("unknown document should yield no edits, got %+v", edits)
+	if _, err := s.documentEdits("file:///never-opened.php"); !errors.Is(err, errUntouched) {
+		t.Fatalf("documentEdits = %v, want errUntouched", err)
 	}
 }
 
@@ -429,8 +576,8 @@ func TestFormattingLeavesAnIgnoredDocumentUntouched(t *testing.T) {
 		docs:     map[string]string{ignoredURI: unformattedSrc, keptURI: unformattedSrc},
 	}
 
-	if edits := mustDocumentEdits(t, s, ignoredURI); len(edits) != 0 {
-		t.Fatalf("an ignored document got edits: %+v", edits)
+	if _, err := s.documentEdits(ignoredURI); !errors.Is(err, errUntouched) {
+		t.Fatalf("documentEdits on an ignored document = %v, want errUntouched", err)
 	}
 
 	if edits := mustDocumentEdits(t, s, keptURI); len(edits) == 0 {
@@ -552,14 +699,18 @@ func TestFormattingReportsAnUnreadableConfig(t *testing.T) {
 				t.Fatalf("Serve: %v", err)
 			}
 
-			resp := responseTo(t, out.Bytes(), formatRequestID)
-
-			if resp.Error == nil || resp.Error.Code != codeRequestFailed {
-				t.Fatalf("reply = %+v with result %s, want a RequestFailed error", resp.Error, resp.Result)
+			if edits := editsFromResponses(t, out.Bytes()); len(edits) != 0 {
+				t.Fatalf("a broken config produced edits: %+v", edits)
 			}
 
-			if !strings.Contains(resp.Error.Message, "laravel-fmt.json") {
-				t.Fatalf("error %q does not name the file to fix", resp.Error.Message)
+			shown := messagesSent(t, out.Bytes(), "window/showMessage")
+
+			if len(shown) != 1 || shown[0].Type != messageError {
+				t.Fatalf("showMessage = %+v, want one error", shown)
+			}
+
+			if !strings.Contains(shown[0].Message, "laravel-fmt.json") {
+				t.Fatalf("message %q does not name the file to fix", shown[0].Message)
 			}
 		})
 	}

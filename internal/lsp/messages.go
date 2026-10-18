@@ -12,6 +12,16 @@ const (
 // for no gain.
 const syncFull = 1
 
+const (
+	messageError   = 1
+	messageWarning = 2
+)
+
+type messageParams struct {
+	Type    int    `json:"type"`
+	Message string `json:"message"`
+}
+
 // Position is a zero-based line and character offset; the character unit is the
 // negotiated position encoding.
 type Position struct {

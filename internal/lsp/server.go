@@ -35,6 +35,10 @@ type server struct {
 
 	docs map[string]string
 
+	// Format on save asks on every save, so each failure is shown once, and
+	// again only after a document formats.
+	shownFailures map[string]bool
+
 	shutdownRequested bool
 }
 
@@ -47,6 +51,8 @@ func Serve(in io.Reader, out, logw io.Writer, version string) error {
 		encoding: encodingUTF16,
 		version:  version,
 		docs:     map[string]string{},
+
+		shownFailures: map[string]bool{},
 	}
 
 	for {
@@ -200,11 +206,8 @@ func (s *server) handleFormatting(req *request) error {
 	}
 
 	edits, err := s.documentEdits(p.TextDocument.URI)
-	if err != nil {
-		return s.conn.replyError(req.ID, codeRequestFailed, err.Error())
-	}
 
-	return s.conn.reply(req.ID, edits)
+	return s.replyEdits(req.ID, edits, err)
 }
 
 func (s *server) handleRangeFormatting(req *request) error {
@@ -214,30 +217,43 @@ func (s *server) handleRangeFormatting(req *request) error {
 	}
 
 	edits, err := s.rangeEdits(p.TextDocument.URI, p.Range)
-	if err != nil {
-		return s.conn.replyError(req.ID, codeRequestFailed, err.Error())
+
+	return s.replyEdits(req.ID, edits, err)
+}
+
+// An editor discards or merely logs an error reply to a formatting request,
+// so a failure the user has to fix is shown as a message instead. A document
+// that does not parse is usually mid-edit and already marked by the editor,
+// so it only goes to the server log.
+func (s *server) replyEdits(id json.RawMessage, edits []TextEdit, formatErr error) error {
+	switch {
+	case formatErr == nil:
+		clear(s.shownFailures)
+
+		return s.conn.reply(id, edits)
+	case errors.Is(formatErr, errUntouched):
+	case errors.Is(formatErr, errUnparseable):
+		if err := s.conn.notify("window/logMessage", messageParams{Type: messageWarning, Message: formatErr.Error()}); err != nil {
+			return err
+		}
+	case !s.shownFailures[formatErr.Error()]:
+		s.shownFailures[formatErr.Error()] = true
+
+		if err := s.conn.notify("window/showMessage", messageParams{Type: messageError, Message: formatErr.Error()}); err != nil {
+			return err
+		}
 	}
 
-	return s.conn.reply(req.ID, edits)
+	return s.conn.reply(id, []TextEdit{})
 }
 
 func (s *server) documentEdits(uri string) ([]TextEdit, error) {
 	res, err := s.format(uri, scopeDocument)
 	if err != nil {
-		return refusal(err)
+		return nil, err
 	}
 
 	return buildEdits(res.src, res.out, s.encoding), nil
-}
-
-// refusal is the reply for a document format would not format: no edits when
-// it is left as it is on purpose, the error when the user has something to fix.
-func refusal(err error) ([]TextEdit, error) {
-	if errors.Is(err, errUntouched) {
-		return []TextEdit{}, nil
-	}
-
-	return nil, err
 }
 
 // The selection is resolved against the formatted document, not filtered out
@@ -246,7 +262,7 @@ func refusal(err error) ([]TextEdit, error) {
 func (s *server) rangeEdits(uri string, r Range) ([]TextEdit, error) {
 	res, err := s.format(uri, scopeRange)
 	if err != nil {
-		return refusal(err)
+		return nil, err
 	}
 
 	lineStart := lspLineStarts(res.src)
@@ -273,13 +289,14 @@ type formatResult struct {
 	out  []byte
 }
 
-// errUntouched marks a document format leaves as it is on purpose.
-var errUntouched = errors.New("document left untouched")
+var (
+	errUntouched   = errors.New("document left untouched")
+	errUnparseable = errors.New("cannot format")
+)
 
-// A buffer the server does not hold, cannot map to a file or cannot parse is
-// errUntouched: a formatter never emits recovery output. An unreadable config
-// is returned as the error, since an empty reply would pass for a formatted
-// file.
+// A document the server does not hold, cannot map to a file or ignores is
+// errUntouched. One that does not parse is errUnparseable: a formatter never
+// emits recovery output.
 func (s *server) format(uri string, scope formatScope) (*formatResult, error) {
 	text, ok := s.docs[uri]
 	if !ok {
@@ -326,9 +343,7 @@ func (s *server) format(uri string, scope formatScope) (*formatResult, error) {
 
 	out, err := dispatch.File(path, src, &cfg)
 	if err != nil {
-		s.logf("format %s: %v", path, err)
-
-		return nil, errUntouched
+		return nil, fmt.Errorf("%w %s: %w", errUnparseable, path, err)
 	}
 
 	return &formatResult{path: path, cfg: cfg, src: src, out: out}, nil

@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+* Improved `laravel-fmt lsp` to show a broken config as a message in the editor
 
 ## Version 0.3.0 (2026-10-17)
 * Added `--reporter gitlab` to write a GitLab Code Quality report with `--check`, so unformatted files show up in merge requests
