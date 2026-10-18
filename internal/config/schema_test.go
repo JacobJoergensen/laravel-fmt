@@ -15,10 +15,56 @@ import (
 
 type schemaNode struct {
 	Properties map[string]schemaNode `json:"properties"`
+	Items      *schemaNode           `json:"items"`
+	Enum       []string              `json:"enum"`
 }
 
-// schema/v1.json is hand-written, so nothing else keeps it in step with the
-// structs.
+// Append each release's new keys and enum values; never remove one.
+var releasedSchemaEntries = []string{
+	"$schema", "ignore", "printWidth", "indentWidth",
+	"indentStyle", "indentStyle=space", "indentStyle=tab",
+	"endOfLine", "endOfLine=lf", "endOfLine=crlf", "endOfLine=auto",
+	"quoteStyle", "quoteStyle=auto", "quoteStyle=single", "quoteStyle=double",
+
+	"php", "php.removeTrailingCloseTag", "php.sortUses", "php.expandUseGroups",
+	"php.concatSpace", "php.notOperatorSpace", "php.closureFnSpace",
+	"php.alignFatArrow", "php.shortArray",
+	"php.functionBraceStyle", "php.functionBraceStyle=same-line",
+	"php.functionBraceStyle=next-line", "php.functionBraceStyle=always-next-line",
+	"php.methodBraceStyle", "php.methodBraceStyle=same-line",
+	"php.methodBraceStyle=next-line", "php.methodBraceStyle=always-next-line",
+	"php.classBraceStyle", "php.classBraceStyle=same-line",
+	"php.classBraceStyle=next-line", "php.classBraceStyle=always-next-line",
+	"php.anonymousClassBraceStyle", "php.anonymousClassBraceStyle=same-line",
+	"php.anonymousClassBraceStyle=next-line", "php.anonymousClassBraceStyle=always-next-line",
+	"php.controlBraceStyle", "php.controlBraceStyle=same-line",
+	"php.controlBraceStyle=next-line", "php.controlBraceStyle=always-next-line",
+	"php.blankLineBeforeStatements",
+	"php.blankLineBeforeStatements[]=break", "php.blankLineBeforeStatements[]=continue",
+	"php.blankLineBeforeStatements[]=declare", "php.blankLineBeforeStatements[]=do",
+	"php.blankLineBeforeStatements[]=for", "php.blankLineBeforeStatements[]=foreach",
+	"php.blankLineBeforeStatements[]=goto", "php.blankLineBeforeStatements[]=if",
+	"php.blankLineBeforeStatements[]=include", "php.blankLineBeforeStatements[]=include_once",
+	"php.blankLineBeforeStatements[]=require", "php.blankLineBeforeStatements[]=require_once",
+	"php.blankLineBeforeStatements[]=return", "php.blankLineBeforeStatements[]=switch",
+	"php.blankLineBeforeStatements[]=throw", "php.blankLineBeforeStatements[]=try",
+	"php.blankLineBeforeStatements[]=while", "php.blankLineBeforeStatements[]=yield",
+	"php.blankLineBeforeStatements[]=yield_from",
+	"php.heredocIndentation", "php.heredocIndentation=start_plus_one",
+	"php.heredocIndentation=same_as_start", "php.heredocIndentation=none",
+	"php.importOrder", "php.importOrder[]=class", "php.importOrder[]=function",
+	"php.importOrder[]=const",
+
+	"blade", "blade.blockDirectives", "blade.blockDirectives[].open",
+	"blade.blockDirectives[].close", "blade.blockDirectives[].branches",
+	"blade.blankLineBeforeDirectives",
+
+	"markdown", "markdown.proseWrap", "markdown.proseWrap=always",
+	"markdown.proseWrap=never", "markdown.proseWrap=preserve",
+
+	"tailwind", "tailwind.stylesheet",
+}
+
 func TestSchemaMatchesStructs(t *testing.T) {
 	root := readSchema(t)
 
@@ -44,6 +90,24 @@ func TestSchemaMatchesStructs(t *testing.T) {
 		if !slices.Equal(want, got) {
 			t.Errorf("%s properties drift:\n  structs: %v\n  schema:  %v", tc.label, want, got)
 		}
+	}
+}
+
+// The generated $schema URL tracks v1.json on main, so a config written for
+// any release must keep validating.
+func TestSchemaKeepsReleasedEntries(t *testing.T) {
+	current := schemaEntries(readSchema(t), "")
+
+	var missing []string
+
+	for _, entry := range releasedSchemaEntries {
+		if !slices.Contains(current, entry) {
+			missing = append(missing, entry)
+		}
+	}
+
+	if len(missing) > 0 {
+		t.Errorf("schema/v1.json dropped released entries %v; add schema/v2.json instead", missing)
 	}
 }
 
@@ -97,6 +161,32 @@ func structJSONFields(t reflect.Type) []string {
 	slices.Sort(names)
 
 	return names
+}
+
+// anyOf and oneOf are skipped: the one enum under them, in
+// blankLineBeforeDirectives, only lists names, since any name validates.
+func schemaEntries(node schemaNode, path string) []string {
+	var entries []string
+
+	for _, value := range node.Enum {
+		entries = append(entries, path+"="+value)
+	}
+
+	if node.Items != nil {
+		entries = append(entries, schemaEntries(*node.Items, path+"[]")...)
+	}
+
+	for name, child := range node.Properties {
+		childPath := name
+		if path != "" {
+			childPath = path + "." + name
+		}
+
+		entries = append(entries, childPath)
+		entries = append(entries, schemaEntries(child, childPath)...)
+	}
+
+	return entries
 }
 
 func readSchema(t *testing.T) schemaNode {
