@@ -454,6 +454,73 @@ func TestFormatDocumentUnknownURIIsUntouched(t *testing.T) {
 	}
 }
 
+func TestFileURIBecomesAPathForTheTargetOS(t *testing.T) {
+	cases := []struct {
+		uri     string
+		goos    string
+		want    string
+		wantErr bool
+	}{
+		{uri: "file:///C:/app/x.php", goos: "windows", want: `C:\app\x.php`},
+		{uri: "file:///home/app/x.php", goos: "linux", want: "/home/app/x.php"},
+		{uri: "file://localhost/C:/app/x.php", goos: "windows", want: `C:\app\x.php`},
+		{uri: "file://localhost/home/app/x.php", goos: "linux", want: "/home/app/x.php"},
+		{uri: "file://wsl$/Ubuntu/home/app/x.php", goos: "windows", want: `\\wsl$\Ubuntu\home\app\x.php`},
+		{uri: "file://wsl.localhost/Ubuntu/home/app/x.php", goos: "windows", want: `\\wsl.localhost\Ubuntu\home\app\x.php`},
+		{uri: "file://server/share/app/x.php", goos: "windows", want: `\\server\share\app\x.php`},
+		{uri: "file://wsl%24/Ubuntu/x.php", goos: "windows", want: `\\wsl$\Ubuntu\x.php`},
+		{uri: "file:////wsl$/Ubuntu/x.php", goos: "windows", want: `\\wsl$\Ubuntu\x.php`},
+		{uri: "file://wsl$/Ubuntu/home/app/x.php", goos: "linux", wantErr: true},
+		{uri: "file://wsl.localhost/Ubuntu/home/app/x.php", goos: "darwin", wantErr: true},
+		{uri: "file://server/share/app/x.php", goos: "linux", wantErr: true},
+		{uri: "file://wsl%24/Ubuntu/x.php", goos: "linux", wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.goos+" "+tc.uri, func(t *testing.T) {
+			got, err := uriToPathFor(tc.uri, tc.goos)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("uriToPathFor = %q, want an error", got)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("uriToPathFor: %v", err)
+			}
+
+			if got != tc.want {
+				t.Fatalf("uriToPathFor = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormattingUsesTheProjectBehindALocalhostURI(t *testing.T) {
+	dir := t.TempDir()
+	seedFiles(t, dir, map[string]string{
+		"composer.json":    "{}",
+		"laravel-fmt.json": `{"printWidth":40}`,
+	})
+
+	hostlessURI := pathToURI(filepath.Join(dir, "app", "x.php"))
+	uri := "file://localhost" + strings.TrimPrefix(hostlessURI, "file://")
+
+	s := &server{
+		encoding: encodingUTF8,
+		docs:     map[string]string{uri: longCallSrc},
+	}
+
+	got := applyEditsUTF8(longCallSrc, mustDocumentEdits(t, s, uri))
+
+	if !strings.Contains(got, "doSomething(\n") {
+		t.Fatalf("the project's printWidth was not applied; the call stayed on one line:\n%s", got)
+	}
+}
+
 func formatWholeDocument(t *testing.T, name, text string) string {
 	t.Helper()
 

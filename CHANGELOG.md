@@ -2,6 +2,7 @@
 
 ## Unreleased
 * Improved `laravel-fmt lsp` to show a broken config as a message in the editor
+* Fixed `laravel-fmt lsp` looking up config in the wrong place for files on a network share or in WSL opened from Windows
 
 ## Version 0.3.0 (2026-10-17)
 * Added `--reporter gitlab` to write a GitLab Code Quality report with `--check`, so unformatted files show up in merge requests

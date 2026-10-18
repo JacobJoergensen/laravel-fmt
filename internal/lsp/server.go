@@ -8,8 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"path/filepath"
+	"runtime"
 	"slices"
+	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/detector"
@@ -357,8 +358,29 @@ func (s *server) logf(format string, args ...any) {
 	_, _ = fmt.Fprintf(s.log, "laravel-fmt lsp: "+format+"\n", args...)
 }
 
-// file:///C:/x decodes to /C:/x, so a slash before a drive letter is dropped.
 func uriToPath(uri string) (string, error) {
+	return uriToPathFor(uri, runtime.GOOS)
+}
+
+// RFC 8089: localhost is the same as no host. Go rejects a percent-escaped
+// host like wsl%24, the form VS Code sends for \\wsl$, so the host is cut off
+// and decoded before parsing.
+// file:///C:/x decodes to /C:/x, so a slash before a drive letter is dropped.
+func uriToPathFor(uri, goos string) (string, error) {
+	var host string
+
+	if rest, ok := strings.CutPrefix(uri, "file://"); ok {
+		rawHost, hostless, _ := strings.Cut(rest, "/")
+
+		decoded, err := url.PathUnescape(rawHost)
+		if err != nil {
+			return "", fmt.Errorf("parse uri host: %w", err)
+		}
+
+		host = decoded
+		uri = "file:///" + hostless
+	}
+
 	u, err := url.Parse(uri)
 	if err != nil {
 		return "", fmt.Errorf("parse uri: %w", err)
@@ -370,9 +392,19 @@ func uriToPath(uri string) (string, error) {
 
 	path := u.Path
 
-	if len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+	if host != "" && !strings.EqualFold(host, "localhost") {
+		if goos != "windows" {
+			return "", fmt.Errorf("uri host %q names a network share, which only Windows can open", host)
+		}
+
+		path = "//" + host + path
+	} else if len(path) >= 3 && path[0] == '/' && path[2] == ':' {
 		path = path[1:]
 	}
 
-	return filepath.FromSlash(path), nil
+	if goos == "windows" {
+		path = strings.ReplaceAll(path, "/", `\`)
+	}
+
+	return path, nil
 }
