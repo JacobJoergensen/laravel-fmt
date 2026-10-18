@@ -99,6 +99,10 @@ type formattingParams struct {
 	TextDocument textDocumentIdentifier `json:"textDocument"`
 }
 
+type endOfLineParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+}
+
 type rangeFormattingParams struct {
 	TextDocument textDocumentIdentifier `json:"textDocument"`
 	Range        Range                  `json:"range"`

@@ -1,8 +1,10 @@
 # Changelog
 
 ## Unreleased
+* Added a `laravel-fmt/endOfLine` request to `laravel-fmt lsp` so editor plugins can apply the project's line ending
 * Improved `laravel-fmt lsp` to show a broken config as a message in the editor
 * Fixed `laravel-fmt lsp` looking up config in the wrong place for files on a network share or in WSL opened from Windows
+* Fixed `laravel-fmt lsp` rewriting every line on each save when a file's line endings differed from the config
 
 ## Version 0.3.0 (2026-10-17)
 * Added `--reporter gitlab` to write a GitLab Code Quality report with `--check`, so unformatted files show up in merge requests

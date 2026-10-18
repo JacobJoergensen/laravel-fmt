@@ -109,6 +109,8 @@ func (s *server) handle(req *request) (bool, error) {
 		return false, s.handleFormatting(req)
 	case "textDocument/rangeFormatting":
 		return false, s.handleRangeFormatting(req)
+	case "laravel-fmt/endOfLine":
+		return false, s.handleEndOfLine(req)
 	default:
 		if req.isNotification() {
 			return false, nil
@@ -222,6 +224,26 @@ func (s *server) handleRangeFormatting(req *request) error {
 	return s.replyEdits(req.ID, edits, err)
 }
 
+// The answer is the configured value. auto, also sent for a file the
+// formatter leaves alone, means the client keeps the line ending it has.
+func (s *server) handleEndOfLine(req *request) error {
+	var p endOfLineParams
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		return s.conn.reply(req.ID, config.EndOfLineAuto)
+	}
+
+	_, cfg, err := s.fileConfig(p.TextDocument.URI)
+	if err != nil {
+		if !errors.Is(err, errUntouched) {
+			s.logf("endOfLine %s: %v", p.TextDocument.URI, err)
+		}
+
+		return s.conn.reply(req.ID, config.EndOfLineAuto)
+	}
+
+	return s.conn.reply(req.ID, cfg.EndOfLine)
+}
+
 // An editor discards or merely logs an error reply to a formatting request,
 // so a failure the user has to fix is shown as a message instead. A document
 // that does not parse is usually mid-edit and already marked by the editor,
@@ -304,33 +326,7 @@ func (s *server) format(uri string, scope formatScope) (*formatResult, error) {
 		return nil, errUntouched
 	}
 
-	path, err := uriToPath(uri)
-	if err != nil {
-		s.logf("uri %s: %v", uri, err)
-
-		return nil, errUntouched
-	}
-
-	// Resolved as --stdin-filepath resolves it, from the file's own directory,
-	// and afresh per request: a cache would have to track every file detection
-	// reads, and a stale one formats differently from the CLI.
-	project, err := detector.NewResolver(detector.LoadConfig).For(path)
-	if err != nil {
-		return nil, err
-	}
-
-	// Format on save reaches every file an editor opens, vendor code and
-	// lockfiles included, so the project's ignore rules apply as in a run.
-	ignored, err := walk.IgnoresFile(project.IgnoreAnchor(), &project.Cfg, path)
-	if err != nil {
-		return nil, err
-	}
-
-	if ignored {
-		return nil, errUntouched
-	}
-
-	cfg, err := detector.ResolveFileConfig(&project.Cfg, path, project.Ctx, project.UserKeys)
+	path, cfg, err := s.fileConfig(uri)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +335,12 @@ func (s *server) format(uri string, scope formatScope) (*formatResult, error) {
 		config.DisableRelocatingPasses(&cfg)
 	}
 
+	// No client changes a line ending through a TextEdit: VS Code, JetBrains
+	// and Neovim all rewrite the new text to the document's own. Converting
+	// here only replaces every line on every save; handleEndOfLine tells the
+	// client instead.
 	src := []byte(text)
+	cfg.EndOfLine = config.EndOfLineAuto
 	config.ResolveEndOfLine(src, &cfg)
 
 	out, err := dispatch.File(path, src, &cfg)
@@ -348,6 +349,41 @@ func (s *server) format(uri string, scope formatScope) (*formatResult, error) {
 	}
 
 	return &formatResult{path: path, cfg: cfg, src: src, out: out}, nil
+}
+
+func (s *server) fileConfig(uri string) (string, config.File, error) {
+	path, err := uriToPath(uri)
+	if err != nil {
+		s.logf("uri %s: %v", uri, err)
+
+		return "", config.File{}, errUntouched
+	}
+
+	// Resolved as --stdin-filepath resolves it, from the file's own directory,
+	// and afresh per request: a cache would have to track every file detection
+	// reads, and a stale one formats differently from the CLI.
+	project, err := detector.NewResolver(detector.LoadConfig).For(path)
+	if err != nil {
+		return "", config.File{}, err
+	}
+
+	// Format on save reaches every file an editor opens, vendor code and
+	// lockfiles included, so the project's ignore rules apply as in a run.
+	ignored, err := walk.IgnoresFile(project.IgnoreAnchor(), &project.Cfg, path)
+	if err != nil {
+		return "", config.File{}, err
+	}
+
+	if ignored {
+		return "", config.File{}, errUntouched
+	}
+
+	cfg, err := detector.ResolveFileConfig(&project.Cfg, path, project.Ctx, project.UserKeys)
+	if err != nil {
+		return "", config.File{}, err
+	}
+
+	return path, cfg, nil
 }
 
 func (s *server) logf(format string, args ...any) {

@@ -862,3 +862,77 @@ func seedFiles(t *testing.T, dir string, files map[string]string) {
 		}
 	}
 }
+
+func TestFormattingKeepsTheBuffersLineEnding(t *testing.T) {
+	cases := []struct {
+		name      string
+		endOfLine string
+		src       string
+	}{
+		{name: "crlf buffer under lf", endOfLine: "lf", src: "<?php\r\n\r\n$a = 1;\r\n"},
+		{name: "lf buffer under crlf", endOfLine: "crlf", src: "<?php\n\n$a = 1;\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace := t.TempDir()
+
+			seedFiles(t, workspace, map[string]string{
+				"laravel-fmt.json": `{"endOfLine": "` + tc.endOfLine + `"}`,
+			})
+
+			uri := pathToURI(filepath.Join(workspace, "a.php"))
+
+			s := &server{encoding: encodingUTF8, docs: map[string]string{uri: tc.src}}
+
+			if edits := mustDocumentEdits(t, s, uri); len(edits) != 0 {
+				t.Fatalf("a formatted buffer got edits for its line ending: %+v", edits)
+			}
+		})
+	}
+}
+
+func TestEndOfLineReportsTheProjectsLineEnding(t *testing.T) {
+	workspace := t.TempDir()
+
+	seedFiles(t, workspace, map[string]string{
+		".editorconfig":    "root = true\n[*.php]\nend_of_line = crlf\n",
+		"laravel-fmt.json": `{"ignore": ["generated/**"]}`,
+	})
+
+	cases := []struct {
+		name string
+		file string
+		want string
+	}{
+		{name: "editorconfig section", file: "app/a.php", want: "crlf"},
+		{name: "ignored file", file: "generated/a.php", want: "auto"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			uri := pathToURI(filepath.Join(workspace, filepath.FromSlash(tc.file)))
+			s, out := newRecordingServer(map[string]string{})
+
+			params, err := json.Marshal(endOfLineParams{TextDocument: textDocumentIdentifier{URI: uri}})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			req := &request{JSONRPC: "2.0", ID: json.RawMessage(formatRequestID), Method: "laravel-fmt/endOfLine", Params: params}
+
+			if _, err := s.handle(req); err != nil {
+				t.Fatalf("handle: %v", err)
+			}
+
+			var got string
+			if err := json.Unmarshal(responseTo(t, out.Bytes(), formatRequestID).Result, &got); err != nil {
+				t.Fatalf("decode result: %v", err)
+			}
+
+			if got != tc.want {
+				t.Fatalf("endOfLine = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
