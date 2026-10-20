@@ -91,3 +91,18 @@ func TestRawLessThanInTextIsAnError(t *testing.T) {
 		})
 	}
 }
+
+func TestStrayClosingTagIsAnError(t *testing.T) {
+	cases := []struct{ name, src string }{
+		{"alone", "</a>"},
+		{"inside an element", "<r></a></r>"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, errs := Parse([]byte(tc.src)); len(errs) == 0 {
+				t.Fatal("want an error for a closing tag with no open element")
+			}
+		})
+	}
+}

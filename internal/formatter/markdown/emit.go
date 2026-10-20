@@ -431,8 +431,9 @@ func emitSetextHeading(w *formatter.Writer, h *parser.SetextHeading) {
 
 		// A continuation line that would begin a block construct once dedented
 		// splits the heading in two; same guard as emitParagraphPreserve.
+		rest := line
 		if i > 0 && paragraphLineNeedsEscape(prev, line) {
-			w.Write("\\")
+			rest = writeMarkerEscape(w, line)
 		}
 
 		// Raw HTML cannot be escaped, so it keeps an indent; same guard as
@@ -441,7 +442,7 @@ func emitSetextHeading(w *formatter.Writer, h *parser.SetextHeading) {
 			w.Write(strings.Repeat(" ", indentedCodeColumn))
 		}
 
-		w.WriteBytes(line)
+		w.WriteBytes(rest)
 		prev = line
 	}
 
@@ -494,8 +495,9 @@ func emitParagraphPreserve(w *formatter.Writer, p *parser.Paragraph) {
 		// (heading, blockquote, list, thematic break, fence, setext underline)
 		// must be escaped, or it would interrupt the paragraph on the next pass.
 		// The first line is the paragraph's start, so it cannot be such a marker.
+		rest := line
 		if i > 0 && paragraphLineNeedsEscape(prev, line) {
-			w.Write("\\")
+			rest = writeMarkerEscape(w, line)
 		}
 
 		// Raw HTML is the one construct a backslash cannot rescue: `\<div>` renders
@@ -508,7 +510,7 @@ func emitParagraphPreserve(w *formatter.Writer, p *parser.Paragraph) {
 			w.Write(strings.Repeat(" ", indentedCodeColumn))
 		}
 
-		w.WriteBytes(line)
+		w.WriteBytes(rest)
 		prev = line
 	}
 }
@@ -537,7 +539,7 @@ func paragraphLineNeedsEscape(prev, line []byte) bool {
 	case '#':
 		return mdATXStart(line)
 	case '`', '~':
-		return mdFenceStart(line)
+		return parser.OpensFence(line)
 	case '=':
 		return mdSetextUnderline(line, '=')
 	case '-':
@@ -555,6 +557,21 @@ func paragraphLineNeedsEscape(prev, line []byte) bool {
 	}
 }
 
+// writeMarkerEscape writes line's escape and returns the rest of line. An
+// ordered marker escapes its delimiter (`1\.`): a backslash before a digit
+// is literal.
+func writeMarkerEscape(w *formatter.Writer, line []byte) []byte {
+	at := 0
+	for at < len(line) && line[at] >= '0' && line[at] <= '9' {
+		at++
+	}
+
+	w.WriteBytes(line[:at])
+	w.Write("\\")
+
+	return line[at:]
+}
+
 func mdATXStart(line []byte) bool {
 	n := 0
 	for n < len(line) && line[n] == '#' {
@@ -562,15 +579,6 @@ func mdATXStart(line []byte) bool {
 	}
 
 	return n >= 1 && n <= 6 && (n == len(line) || line[n] == ' ' || line[n] == '\t')
-}
-
-func mdFenceStart(line []byte) bool {
-	n := 0
-	for n < len(line) && line[n] == line[0] {
-		n++
-	}
-
-	return n >= 3
 }
 
 func mdSetextUnderline(line []byte, c byte) bool {
@@ -705,12 +713,14 @@ func wrapSegment(w *formatter.Writer, content []byte, printWidth int) {
 			end++
 		}
 
+		first := units[start]
+
 		if start > 0 {
 			w.Newline()
 
 			// Same guard, and the same reason, as emitParagraphPreserve.
 			if wrapLineNeedsEscape(prev, units, start, end) {
-				w.Write("\\")
+				first = writeMarkerEscape(w, first)
 			}
 		}
 
@@ -721,11 +731,10 @@ func wrapSegment(w *formatter.Writer, content []byte, printWidth int) {
 			w.Write(strings.Repeat(" ", indentedCodeColumn))
 		}
 
-		for i, unit := range units[start:end] {
-			if i > 0 {
-				w.Space()
-			}
+		w.WriteBytes(first)
 
+		for _, unit := range units[start+1 : end] {
+			w.Space()
 			w.WriteBytes(unit)
 		}
 

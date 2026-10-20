@@ -41,9 +41,40 @@ func trimFrozenTrailing(src []byte, start, end int) int {
 	return end
 }
 
-func emitFrozen(w *formatter.Writer, src []byte, span parser.Span) {
+func lastLeaf(node parser.Node) parser.Node {
+	for {
+		switch n := node.(type) {
+		case *parser.Mapping:
+			if len(n.Entries) == 0 {
+				return nil
+			}
+
+			node = n.Entries[len(n.Entries)-1].Value
+		case *parser.Sequence:
+			if len(n.Items) == 0 {
+				return nil
+			}
+
+			node = n.Items[len(n.Items)-1].Value
+		default:
+			return node
+		}
+	}
+}
+
+func emitFrozen(w *formatter.Writer, src []byte, span parser.Span, last parser.Node) {
 	start := span.Start.Offset
-	end := trimFrozenTrailing(src, span.Start.Offset, span.End.Offset)
+
+	// A leaf's span stops before its final line break unless that break is
+	// value: a `+` block scalar's span runs over the breaks it keeps.
+	floor := start
+	if leaf := lastLeaf(last); leaf != nil {
+		if end := leaf.Span().End.Offset; end > start && src[end-1] == '\n' {
+			floor = end
+		}
+	}
+
+	end := trimFrozenTrailing(src, floor, span.End.Offset)
 
 	// Per-line trailing whitespace in a frozen span can be value, hence the
 	// KeepTrailing variant. Lone CRs were already rewritten by Format.

@@ -936,3 +936,68 @@ func TestEndOfLineReportsTheProjectsLineEnding(t *testing.T) {
 		})
 	}
 }
+
+func TestDidCloseForgetsTheDocument(t *testing.T) {
+	dir := t.TempDir()
+	docURI := pathToURI(filepath.Join(dir, "sample.php"))
+
+	text, err := json.Marshal("<?php\n\necho   'hello'  ;\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	input := frame(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":%q}}`, pathToURI(dir))) +
+		frame(fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"text":%s}}}`, docURI, text)) +
+		frame(fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":%q}}}`, docURI)) +
+		frame(fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{"textDocument":{"uri":%q}}}`, docURI)) +
+		frame(`{"jsonrpc":"2.0","id":3,"method":"shutdown"}`) +
+		frame(`{"jsonrpc":"2.0","method":"exit"}`)
+
+	var out bytes.Buffer
+	if err := Serve(strings.NewReader(input), &out, io.Discard, ""); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+
+	if edits := editsFromResponses(t, out.Bytes()); len(edits) != 0 {
+		t.Fatalf("a closed document was formatted from its stale buffer: %+v", edits)
+	}
+}
+
+func TestUnknownMethodRepliesOnlyToARequest(t *testing.T) {
+	input := frame(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`) +
+		frame(`{"jsonrpc":"2.0","method":"$/unknownNotification"}`) +
+		frame(`{"jsonrpc":"2.0","id":2,"method":"workspace/unknownRequest"}`) +
+		frame(`{"jsonrpc":"2.0","id":3,"method":"shutdown"}`) +
+		frame(`{"jsonrpc":"2.0","method":"exit"}`)
+
+	var out bytes.Buffer
+	if err := Serve(strings.NewReader(input), &out, io.Discard, ""); err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+
+	if resp := responseTo(t, out.Bytes(), "2"); resp.Error == nil || resp.Error.Code != codeMethodNotFound {
+		t.Fatalf("unknown request got %+v, want error code %d", resp.Error, codeMethodNotFound)
+	}
+
+	r := bufio.NewReader(bytes.NewReader(out.Bytes()))
+
+	for {
+		body, err := readFrame(r)
+		if errors.Is(err, io.EOF) {
+			return
+		}
+
+		if err != nil {
+			t.Fatalf("read frame: %v", err)
+		}
+
+		var resp wireResponse
+		if err := json.Unmarshal(body, &resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+
+		if resp.Error != nil && string(resp.ID) != "2" {
+			t.Fatalf("a notification was answered: %s", body)
+		}
+	}
+}

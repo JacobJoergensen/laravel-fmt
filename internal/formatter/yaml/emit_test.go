@@ -134,6 +134,7 @@ func TestFormatBlockScalarIndentIsAFixedPoint(t *testing.T) {
 		{name: "literal under a sequence item", src: "- a: |\n   0\n", want: "- a: |\n    0\n"},
 		{name: "empty key under a sequence item", src: "- : >\n   0\n", want: "- : >\n    0\n"},
 		{name: "explicit indentation indicator", src: "- a: |2\n   0\n"},
+		{name: "digit in the header comment", src: "a: | # v2\n    0\n", want: "a: | # v2\n  0\n"},
 		{name: "keep chomping", src: "- a: |+\n   0\n", want: "- a: |+\n    0\n"},
 		{name: "body one column past a nested mapping", src: ":\n : >\n  0 \n", want: ":\n  : >\n    0 \n"},
 		{name: "body on the dash line", src: "- >\n   0\n", want: "- >\n  0\n"},
@@ -328,6 +329,7 @@ func TestFormatBlockScalarKeepsTrailingSpace(t *testing.T) {
 		"|\n 0  \n",
 		"|\n 0  ",
 		"|\n 0\t",
+		"a: &x |\n  0  \n  1\nb: 2\n",
 	}
 
 	for _, src := range cases {
@@ -754,6 +756,8 @@ func TestKeepChompedBlockScalarKeepsItsBlankLines(t *testing.T) {
 		{"single blank mid document", "a: |+\n  k\n\nb: 2\n"},
 		{"folded keep", "a: >+\n  fold\n\n"},
 		{"nested in a sequence", "list:\n  - a: |+\n      k\n\n\n"},
+		{"anchored mid document", "a: &x |+\n  k\n\n\nb: 2\n"},
+		{"tagged item at eof", "- !!str |+\n  k\n\n\n"},
 	}
 
 	for _, tc := range cases {
@@ -771,9 +775,10 @@ func TestKeepChompedBlockScalarKeepsItsBlankLines(t *testing.T) {
 // invisible and stays the formatter's business.
 func TestClipAndStripBlockScalarsStillCollapse(t *testing.T) {
 	cases := map[string]string{
-		"a: |\n  k\n\n\n\n":  "a: |\n  k\n",
-		"a: |-\n  k\n\n\n":   "a: |-\n  k\n",
-		"a: >\n  fold\n\n\n": "a: >\n  fold\n",
+		"a: |\n  k\n\n\n\n":             "a: |\n  k\n",
+		"a: |-\n  k\n\n\n":              "a: |-\n  k\n",
+		"a: >\n  fold\n\n\n":            "a: >\n  fold\n",
+		"a: | # c++\n  k\n\n\n\nb: 2\n": "a: | # c++\n  k\n\nb: 2\n",
 	}
 
 	for src, want := range cases {

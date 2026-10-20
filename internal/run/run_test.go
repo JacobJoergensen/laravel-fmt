@@ -121,3 +121,51 @@ func TestFailedGitLabReportWriteFailsTheRun(t *testing.T) {
 		t.Fatalf("Format = %v, want the write error", err)
 	}
 }
+
+func TestStdinFormatsForTheProjectOfItsPath(t *testing.T) {
+	const unparseable = "<?php\nfunction (\n"
+
+	cases := []struct {
+		name    string
+		config  string
+		path    string
+		src     string
+		want    string
+		wantErr error
+	}{
+		{"ignored file is echoed", "", "app/skip.php", unparseable, unparseable, nil},
+		{"pinned config's ignore", "pinned/laravel-fmt.json", "pinned/sub/a.php", unparseable, unparseable, nil},
+		{
+			"nested project's config",
+			"",
+			"sub/a.php",
+			"<?php\n\n$x = foo($aaaa, $bbbb, $cccc);\n",
+			"<?php\n\n$x = foo(\n    $aaaa,\n    $bbbb,\n    $cccc,\n);\n",
+			nil,
+		},
+		{"parse error writes nothing", "", "app/a.php", unparseable, "", ErrSilentFailure},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			writeProject(t, map[string]string{
+				"laravel-fmt.json":        `{"ignore": ["app/skip.php"]}`,
+				"sub/laravel-fmt.json":    `{"printWidth": 20}`,
+				"pinned/laravel-fmt.json": `{"ignore": ["sub/**"]}`,
+			})
+
+			var stdout bytes.Buffer
+
+			streams := Streams{In: strings.NewReader(tc.src), Out: &stdout, Err: &bytes.Buffer{}}
+
+			err := Format(&Options{Config: tc.config, StdinFilepath: tc.path}, streams)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Format = %v, want %v", err, tc.wantErr)
+			}
+
+			if stdout.String() != tc.want {
+				t.Fatalf("stdout = %q, want %q", stdout.String(), tc.want)
+			}
+		})
+	}
+}

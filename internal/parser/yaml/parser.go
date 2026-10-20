@@ -340,8 +340,9 @@ func (p *yamlParser) parseSequenceItem(indent int) *SequenceItem {
 	}
 
 	// A block scalar is read against its owner's column, here the dash's, as a
-	// mapping value's is against its key's.
-	if c := p.Peek(); c == '|' || c == '>' {
+	// mapping value's is against its key's. An anchor or tag before it does not
+	// change its owner.
+	if blockIndicator(p.Src[p.Pos.Offset:]) != nil {
 		value := p.parseBlockScalar(indent)
 
 		return &SequenceItem{Range: mkspan(start, p.contentEnd(pendingBefore)), Dash: dash, Value: value}
@@ -422,23 +423,15 @@ func (p *yamlParser) parseQuotedScalar(indent int) *Scalar {
 
 func (p *yamlParser) parseBlockScalar(indent int) *BlockScalar {
 	start := p.Pos
-	end := p.consumeIndentedBlock(indent)
-
-	// `+` keep chomping makes the trailing line breaks part of the value, so
-	// they stay in the span, out of reach of the blank-line rules that would
-	// collapse or trim them.
-	if keepChomped(p.slice(start, end)) {
-		end = p.consumeTrailingBlanks(end)
-	}
-
+	end := p.consumeValueBlock(indent)
 	raw := p.slice(start, end)
 
 	return &BlockScalar{Range: mkspan(start, end), Raw: raw, Indent: indent, ContentIndent: contentIndent(raw)}
 }
 
 func contentIndent(span []byte) int {
-	header, body, _ := bytes.Cut(span, []byte("\n"))
-	if bytes.ContainsAny(header, "123456789") {
+	_, body, _ := bytes.Cut(span, []byte("\n"))
+	if bytes.ContainsAny(blockIndicator(span), "123456789") {
 		return 0
 	}
 
@@ -460,14 +453,26 @@ func contentIndent(span []byte) int {
 	return column
 }
 
-func keepChomped(span []byte) bool {
-	header := span
+func blockIndicator(span []byte) []byte {
+	header, _, _ := bytes.Cut(span, []byte("\n"))
 
-	if i := bytes.IndexByte(header, '\n'); i >= 0 {
-		header = header[:i]
+	for field := range bytes.FieldsSeq(header) {
+		switch field[0] {
+		case '&', '!':
+			continue
+		case '|', '>':
+			return field
+		}
+
+		return nil
 	}
 
-	return bytes.IndexByte(header, '+') >= 0
+	return nil
+}
+
+// A `+` in the header's comment chomps nothing.
+func keepChomped(span []byte) bool {
+	return bytes.IndexByte(blockIndicator(span), '+') >= 0
 }
 
 // consumeTrailingBlanks returns the end before the run's last line break,
@@ -480,16 +485,23 @@ func (p *yamlParser) consumeTrailingBlanks(end Position) Position {
 	return end
 }
 
-func (p *yamlParser) parseAnchoredValue(indent int) *Verbatim {
+// A value whose header goes on to `|` or `>` is a block scalar: its trailing
+// whitespace and kept breaks are value, which only a BlockScalar preserves.
+func (p *yamlParser) parseAnchoredValue(indent int) Node {
 	start := p.Pos
-	end := p.consumeIndentedBlock(indent)
+	end := p.consumeValueBlock(indent)
+	raw := p.slice(start, end)
 
-	return &Verbatim{Range: mkspan(start, end), Raw: p.slice(start, end), Indent: indent}
+	if blockIndicator(raw) != nil {
+		return &BlockScalar{Range: mkspan(start, end), Raw: raw, Indent: indent, ContentIndent: contentIndent(raw)}
+	}
+
+	return &Verbatim{Range: mkspan(start, end), Raw: raw, Indent: indent}
 }
 
 func (p *yamlParser) bailLine(indent int) *Verbatim {
 	start := p.Pos
-	end := p.consumeIndentedBlock(indent)
+	end := p.consumeValueBlock(indent)
 
 	return &Verbatim{Range: mkspan(start, end), Raw: p.slice(start, end), Bail: true, Indent: indent}
 }
@@ -527,6 +539,20 @@ func (p *yamlParser) parseFlow() Node {
 // Trailing blank lines are left for the caller to collect as trivia, so they
 // survive as blank-line layout instead of being absorbed into the verbatim
 // span.
+// `+` keep chomping makes the trailing line breaks part of the value, so they
+// stay in the span, out of reach of the blank-line rules that would collapse or
+// trim them.
+func (p *yamlParser) consumeValueBlock(indent int) Position {
+	start := p.Pos
+	end := p.consumeIndentedBlock(indent)
+
+	if keepChomped(p.slice(start, end)) {
+		end = p.consumeTrailingBlanks(end)
+	}
+
+	return end
+}
+
 func (p *yamlParser) consumeIndentedBlock(indent int) Position {
 	contentEnd := p.consumeLineKeepEnd()
 

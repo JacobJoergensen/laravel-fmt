@@ -100,7 +100,8 @@ type Scalar struct {
 // Span returns the source extent of the scalar.
 func (s *Scalar) Span() Span { return s.Range }
 
-// BlockScalar is a `|` literal or `>` folded scalar.
+// BlockScalar is a `|` literal or `>` folded scalar, with any anchor or tag
+// that leads its header.
 type BlockScalar struct {
 	Range Span
 	Raw   []byte
@@ -128,8 +129,8 @@ type Flow struct {
 func (f *Flow) Span() Span { return f.Range }
 
 // Verbatim is a span the parser does not model: an anchored, aliased or tagged
-// value, or with Bail set, lines it cannot classify, which leave the whole
-// file unformatted.
+// value other than a block scalar, or with Bail set, lines it cannot classify,
+// which leave the whole file unformatted.
 type Verbatim struct {
 	Range Span
 	Raw   []byte

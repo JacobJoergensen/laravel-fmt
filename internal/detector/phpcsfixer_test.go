@@ -82,6 +82,24 @@ return (new PhpCsFixer\Config())->setRules(['@PSR12' => true, '@Symfony' => true
 	}
 }
 
+func TestDetectPhpCsFixerKeepsAConfigWithANumericOption(t *testing.T) {
+	dir := t.TempDir()
+	seedFileAt(t, dir, ".php-cs-fixer.dist.php", `<?php
+return (new PhpCsFixer\Config())->setRules([
+    'concat_space' => ['spacing' => 'one'],
+    'blank_lines_before_namespace' => ['min_line_breaks' => 2, 'max_line_breaks' => 2.0],
+]);`)
+
+	pint, found, err := detectPhpCsFixer(dir)
+	if err != nil {
+		t.Fatalf("detectPhpCsFixer: %v", err)
+	}
+
+	if !found || pint.ConcatSpace == nil || pint.ConcatSpace.Spacing != pintSpacingOne {
+		t.Fatalf("found = %v, ConcatSpace = %+v, want the config adopted with spacing=one", found, pint.ConcatSpace)
+	}
+}
+
 func TestDetectPhpCsFixerBailsToDefaults(t *testing.T) {
 	cases := []struct {
 		name string
@@ -133,6 +151,12 @@ return (new PhpCsFixer\Config())->setRules(['concat_space' => true])->setRules([
 			"value string with backslash",
 			`<?php
 return (new PhpCsFixer\Config())->setRules(['php_unit_namespace' => ['target' => 'PHPUnit\\Framework']]);`,
+		},
+		{
+			// 010 is 8 in PHP and invalid JSON.
+			"octal number",
+			`<?php
+return (new PhpCsFixer\Config())->setRules(['blank_lines_before_namespace' => ['min_line_breaks' => 010]]);`,
 		},
 		{
 			"parse error",

@@ -1489,6 +1489,14 @@ func openFence(line []byte) (byte, int, []byte, bool) {
 	return char, length, info, true
 }
 
+// OpensFence reports whether line opens a fenced code block. A line opening
+// with a code span (```x```) does not: a backtick fence's info has no backtick.
+func OpensFence(line []byte) bool {
+	_, _, _, ok := openFence(line)
+
+	return ok
+}
+
 func isClosingFence(line []byte, fenceChar byte, minLen int) bool {
 	i := skipOptionalIndent(line)
 

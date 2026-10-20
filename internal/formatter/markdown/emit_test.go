@@ -406,6 +406,21 @@ func unescapeTitle(title []byte) string {
 	return string(out)
 }
 
+func TestFormatCodeSpanContinuationIsNotAFence(t *testing.T) {
+	cases := []struct{ name, src string }{
+		{"paragraph", "x\n```y``` z\n"},
+		{"setext_heading", "x\n```y``` z\n---\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mustFormat(t, []byte(tc.src), config.Default()); string(got) != tc.src {
+				t.Fatalf("got %q, want %q", got, tc.src)
+			}
+		})
+	}
+}
+
 func TestFormatSetextContinuationStaysText(t *testing.T) {
 	cases := []struct {
 		name string
@@ -940,6 +955,9 @@ func TestProseWrapAlwaysEscapesWrappedBlockMarkers(t *testing.T) {
 		// CommonMark's bullets are `-`, `+` and `*`, so a lone underscore
 		// starts nothing.
 		{"underscore_is_never_a_bullet", "aaaa bbbb cccc dddd _ eee\n", "aaaa bbbb cccc dddd\n_ eee\n"},
+		{"ordered_marker_escapes_its_delimiter", "aaaa bbbb cccc dddd 1. eee fff\n", "aaaa bbbb cccc dddd\n1\\. eee fff\n"},
+		{"backtick_fence_opener", "aaaa bbbb cccc dddd ``` eee\n", "aaaa bbbb cccc dddd\n\\``` eee\n"},
+		{"code_span_is_not_a_fence", "aaaa bbbb cccc dddd ```eee``` fff\n", "aaaa bbbb cccc dddd\n```eee``` fff\n"},
 	}
 
 	for _, tc := range cases {

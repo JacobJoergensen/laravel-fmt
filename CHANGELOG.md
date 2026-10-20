@@ -5,6 +5,11 @@
 * Improved `laravel-fmt lsp` to show a broken config as a message in the editor
 * Fixed `laravel-fmt lsp` looking up config in the wrong place for files on a network share or in WSL opened from Windows
 * Fixed `laravel-fmt lsp` rewriting every line on each save when a file's line endings differed from the config
+* Fixed a Markdown line starting with a code span like ` ```code``` ` getting a backslash that broke the code span
+* Fixed `markdown.proseWrap: always` showing a backslash before a `1.` or `1)` it wrapped to the start of a line
+* Fixed the kept blank lines of a YAML `|+` or `>+` block being removed when it has an anchor or tag, ends the file, or sits under `laravel-fmt-ignore`
+* Fixed trailing spaces being removed from an anchored or tagged YAML block like `key: &a |`
+* Fixed a `+` or a digit in the comment after a YAML block header changing how the block is formatted
 
 ## Version 0.3.0 (2026-10-17)
 * Added `--reporter gitlab` to write a GitLab Code Quality report with `--check`, so unformatted files show up in merge requests

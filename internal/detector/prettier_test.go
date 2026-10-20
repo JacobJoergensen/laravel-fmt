@@ -254,6 +254,26 @@ func TestPrettierResolveForFileExcludeFiles(t *testing.T) {
 	}
 }
 
+func TestApplyPrettierMapsEndOfLine(t *testing.T) {
+	cases := map[string]string{
+		"lf":   config.EndOfLineLF,
+		"crlf": config.EndOfLineCRLF,
+		"auto": config.EndOfLineAuto,
+		"cr":   "",
+	}
+
+	for value, want := range cases {
+		cfg := config.Default()
+		cfg.EndOfLine = ""
+
+		applyPrettier(cfg, &Prettier{Options: prettierOptions{EndOfLine: &value}})
+
+		if cfg.EndOfLine != want {
+			t.Errorf("endOfLine %q: EndOfLine = %q, want %q", value, cfg.EndOfLine, want)
+		}
+	}
+}
+
 func TestApplyPrettierMapsOptions(t *testing.T) {
 	cfg := config.Default()
 

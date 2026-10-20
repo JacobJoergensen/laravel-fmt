@@ -84,14 +84,6 @@ func EmitVerbatimAtIndent(w *Writer, src []byte, startOffset, endOffset int) {
 	emitVerbatim(w, src, startOffset, endOffset, w.IndentColumn(), true)
 }
 
-// EmitVerbatimAtIndentKeepTrailing is EmitVerbatimAtIndent for a span whose
-// line-trailing whitespace is content: a node the parser hands over verbatim is
-// one it does not model, and a top-level YAML block scalar arrives that way, so
-// trimming its lines deletes value bytes.
-func EmitVerbatimAtIndentKeepTrailing(w *Writer, src []byte, startOffset, endOffset int) {
-	emitVerbatim(w, src, startOffset, endOffset, w.IndentColumn(), false)
-}
-
 // EmitVerbatimStripping writes raw with stripCols columns of indent removed from
 // each continuation line, for a caller that knows the span's structural indent
 // but has had to normalize the bytes before emitting, so the source line the

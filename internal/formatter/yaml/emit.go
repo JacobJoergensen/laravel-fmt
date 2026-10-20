@@ -16,7 +16,16 @@ func emitFile(w *formatter.Writer, file *parser.File) {
 		// document path never re-emits, so freezing them would leave output the
 		// next pass strips, and the emission would not be a fixed point.
 		start := parser.Position{Offset: contentLineStart(file.Src)}
-		emitFrozen(w, file.Src, parser.Span{Start: start, End: parser.Position{Offset: len(file.Src)}})
+
+		var last parser.Node
+
+		for _, doc := range file.Docs {
+			if doc.Body != nil {
+				last = doc.Body
+			}
+		}
+
+		emitFrozen(w, file.Src, parser.Span{Start: start, End: parser.Position{Offset: len(file.Src)}}, last)
 
 		return
 	}
@@ -153,7 +162,7 @@ func emitDocument(w *formatter.Writer, src []byte, doc *parser.Document) {
 		if leadingHasIgnore(doc.Leading) {
 			// Freeze from the body through the document end so trailing trivia is
 			// covered by the frozen span, not emitted again below as a blank line.
-			emitFrozen(w, src, parser.Span{Start: doc.Body.Span().Start, End: doc.Range.End})
+			emitFrozen(w, src, parser.Span{Start: doc.Body.Span().Start, End: doc.Range.End}, doc.Body)
 
 			return
 		}
@@ -170,36 +179,14 @@ func emitDocument(w *formatter.Writer, src []byte, doc *parser.Document) {
 }
 
 // emitNode emits a node that stands on its own at the current indent: a
-// document body or a block value already positioned on a fresh line.
+// document body or a block value already positioned on a fresh line. Only a
+// collection gets here; any other body bails, which freezes the file.
 func emitNode(w *formatter.Writer, src []byte, node parser.Node) {
 	switch n := node.(type) {
 	case *parser.Mapping:
 		emitMapping(w, src, n)
 	case *parser.Sequence:
 		emitSequence(w, src, n)
-	case *parser.Scalar:
-		w.WriteBytes(n.Raw)
-		w.Newline()
-	case *parser.BlockScalar:
-		emitBlockScalar(w, src, n)
-		w.Newline()
-	case *parser.Flow:
-		formatter.EmitVerbatimAtIndent(w, src, n.Range.Start.Offset, n.Range.End.Offset)
-		w.Newline()
-	case *parser.Verbatim:
-		// The span begins at the node's source indent, but the Writer owns
-		// placement (column 0 for a document body, the active indent for a nested
-		// value). Emitting that leading indent verbatim would re-nest the node
-		// under a preceding key on the next pass.
-		start := n.Range.Start.Offset
-		for start < n.Range.End.Offset && (src[start] == ' ' || src[start] == '\t') {
-			start++
-		}
-
-		// Trailing whitespace stays: a top-level block scalar arrives here rather
-		// than as a BlockScalar, and its lines' trailing spaces are value bytes.
-		formatter.EmitVerbatimAtIndentKeepTrailing(w, src, start, n.Range.End.Offset)
-		w.Newline()
 	}
 }
 
@@ -208,7 +195,7 @@ func emitMapping(w *formatter.Writer, src []byte, m *parser.Mapping) {
 		emitTrivia(w, e.Leading)
 
 		if leadingHasIgnore(e.Leading) {
-			emitFrozen(w, src, e.Range)
+			emitFrozen(w, src, e.Range, e.Value)
 
 			continue
 		}
@@ -218,14 +205,6 @@ func emitMapping(w *formatter.Writer, src []byte, m *parser.Mapping) {
 }
 
 func emitMappingEntry(w *formatter.Writer, src []byte, e *parser.MappingEntry) {
-	if e.Key == nil {
-		if e.Value != nil {
-			emitNode(w, src, e.Value)
-		}
-
-		return
-	}
-
 	w.WriteBytes(e.Key.Raw)
 	w.Write(":")
 
@@ -245,7 +224,7 @@ func emitSequence(w *formatter.Writer, src []byte, s *parser.Sequence) {
 		emitTrivia(w, item.Leading)
 
 		if leadingHasIgnore(item.Leading) {
-			emitFrozen(w, src, item.Range)
+			emitFrozen(w, src, item.Range, item.Value)
 
 			continue
 		}
