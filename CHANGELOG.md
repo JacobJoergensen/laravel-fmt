@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.4.0 (2026-10-20)
 * Added a `laravel-fmt/endOfLine` request to `laravel-fmt lsp` so editor plugins can apply the project's line ending
 * Improved `laravel-fmt lsp` to show a broken config as a message in the editor
 * Fixed `laravel-fmt lsp` looking up config in the wrong place for files on a network share or in WSL opened from Windows
