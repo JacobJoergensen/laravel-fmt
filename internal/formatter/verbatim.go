@@ -108,42 +108,6 @@ func EmitVerbatimStrippingKeepTrailing(w *Writer, raw []byte, stripCols int) {
 	emitVerbatim(w, raw, 0, len(raw), stripCols, false)
 }
 
-// EmitVerbatimRehomed is EmitVerbatimStrippingKeepTrailing for a span whose
-// nested(n) lines (counting from 0) belong to something inside it that was
-// copied at its own columns. Such a line does not lower the strip, and one left
-// of the strip keeps its column: pulled into the strip it would re-home the
-// whole span one level deeper on every pass.
-func EmitVerbatimRehomed(w *Writer, raw []byte, base int, nested func(n int) bool) {
-	lines := bytes.Split(raw, []byte("\n"))
-
-	strip := base
-
-	for n, line := range lines[1:] {
-		if ws := skipIndent(line, len(line)); ws < len(line) && !nested(n+1) {
-			strip = min(strip, ws)
-		}
-	}
-
-	for n, line := range lines {
-		line = line[:lineEnd(line, 0, len(line), false)]
-
-		if n > 0 {
-			w.Newline()
-		}
-
-		switch {
-		case len(line) == 0:
-		case n == 0:
-			w.WriteBytes(line)
-		case skipIndent(line, strip) == strip:
-			w.WriteBytes(line[strip:])
-		case skipIndent(line, len(line)) == len(line):
-		default:
-			w.WithoutIndent(func() { w.WriteBytes(line) })
-		}
-	}
-}
-
 func emitVerbatim(w *Writer, src []byte, startOffset, endOffset, naturalIndent int, trimTrailing bool) {
 	if endOffset <= startOffset || endOffset > len(src) {
 		return

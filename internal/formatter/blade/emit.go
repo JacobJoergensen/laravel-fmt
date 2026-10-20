@@ -966,23 +966,15 @@ func (e *emitter) emitElement(el *htmlparser.Element) {
 		}
 	case isWhitespaceSensitive(el) && bodyCopyable(el):
 		// A source-glued inline boundary blocks a structural reflow (it would inject a
-		// rendered space at the glue). For a white-space:normal block element the body
-		// is still safe to re-home to the tree's indent (leading-line whitespace
-		// collapses); an inline element/component keeps verbatim because its edge
-		// whitespace renders, as does a body with a descendant that renders leading
-		// whitespace literally (<pre>/<textarea>/whitespace-pre*).
+		// rendered space at the glue). An inline element/component keeps its body
+		// verbatim because its edge whitespace renders, as does a body with a
+		// descendant that renders leading whitespace literally
+		// (<pre>/<textarea>/whitespace-pre*).
 		//
 		// Must precede the all-inline block case: an inline element whose open tag
 		// wraps would otherwise take that path and gain a rendered space per side.
-		keepsBranch := htmlfmt.IsInlineContainer(el.Name) || e.bodyPreservesInnerWhitespace(el.Children) ||
-			lastChildEndsAtClose(el)
-
-		if keepsBranch || !bodyIsRehomable(e.src, el.Children) {
-			if !e.emitGluedBodyNormalized(el.Children, el.OpenClose.End.Offset, el.CloseOpen.Start.Offset, !keepsBranch, e.closeTagWidth(el)) {
-				htmlfmt.EmitGluedBodyContent(e.w, e.src, el, e.bodyPHPSpans(el))
-			}
-		} else {
-			e.emitRehomedGluedBody(el)
+		if !e.emitGluedBodyNormalized(el.Children, el.OpenClose.End.Offset, el.CloseOpen.Start.Offset, false, e.closeTagWidth(el)) {
+			htmlfmt.EmitGluedBodyContent(e.w, e.src, el, e.bodyPHPSpans(el))
 		}
 	case e.allInlineChildren(el.Children):
 		e.emitBlockInlineChildren(el)
@@ -2797,93 +2789,6 @@ func (e *emitter) isRoot(el *htmlparser.Element) bool {
 	return false
 }
 
-// emitRehomedGluedBody emits a whitespace-sensitive block element's body from its
-// source span, re-homed under the (re-indented) open tag. The body carries a glued
-// inline boundary so it cannot reflow structurally, but the element is
-// white-space:normal, so EmitVerbatim keeps every inner byte exact (glued
-// boundaries and relative indentation) while re-basing the block's leading indent.
-func (e *emitter) emitRehomedGluedBody(el *htmlparser.Element) {
-	start := el.OpenClose.End.Offset
-	end := el.CloseOpen.Start.Offset
-
-	// Drop the source newlines/indent around the content; the layout below owns the
-	// break after the open tag and before the close tag.
-	for start < end && htmlfmt.IsCollapsibleSpace(e.src[start]) {
-		start++
-	}
-
-	for end > start && htmlfmt.IsCollapsibleSpace(e.src[end-1]) {
-		end--
-	}
-
-	// The trim must not cut into a child: an echo owns the lone CR after its
-	// closer, and trimming that CR as whitespace would copy the echo raw on
-	// this pass and rebuild it on the next.
-	for _, c := range el.Children {
-		if _, text := c.(*htmlparser.Text); text {
-			continue
-		}
-
-		if span := c.Span(); span.Start.Offset < end && span.End.Offset > end {
-			end = span.End.Offset
-		}
-	}
-
-	if start >= end {
-		return
-	}
-
-	e.w.Indent()
-	e.w.Newline()
-
-	// The trim above took the author's blank line with the leading whitespace.
-	// Structural children keep that blank, so it is restored here, or the same
-	// body would render differently depending on which layout it lands in.
-	if htmlfmt.CountLineBreaks(e.src[el.OpenClose.End.Offset:start]) >= 2 {
-		e.w.RequestBlankLine()
-	}
-
-	// The body is HTML around PHP, so a lone CR in the markup is read as the LF
-	// it is; copied on LF alone it would stay a byte where its LF twin is a
-	// line break.
-	if !e.emitGluedBodyNormalized(el.Children, start, end, true, 0) {
-		body := e.src[start:end]
-		phpSpans := phpSpansFor(body, el.Children)
-		lines := htmlfmt.NormalizeLineBreaksIn(body, start, phpSpans)
-		nested := linesInsideChildElements(body, start, phpSpans, el.Children)
-
-		formatter.EmitVerbatimRehomed(e.w, lines, formatter.NaturalIndentBefore(e.src, start), func(n int) bool {
-			return nested[n]
-		})
-	}
-
-	e.w.Dedent()
-	e.w.Newline()
-}
-
-// linesInsideChildElements reports, per line of body (source offset base), whether
-// the line starts inside one of children's elements, where that element's own
-// layout placed it.
-func linesInsideChildElements(body []byte, base int, phpSpans []htmlparser.Span, children []htmlparser.Node) []bool {
-	inside := []bool{false}
-
-	for pos := 0; ; {
-		at, width := htmlfmt.LineBreakIn(body[pos:], base+pos, phpSpans)
-		if at < 0 {
-			return inside
-		}
-
-		pos += at + width
-		offset := base + pos
-
-		inside = append(inside, slices.ContainsFunc(children, func(c htmlparser.Node) bool {
-			el, ok := c.(*htmlparser.Element)
-
-			return ok && el.Span().Start.Offset < offset && offset < el.Span().End.Offset
-		}))
-	}
-}
-
 // emitGluedBodyNormalized rebuilds each echo and directive of a single-line
 // glued body and copies the text between them byte for byte, since that
 // whitespace renders. Only PHP is reformatted; a wrapped directive breaks
@@ -3006,113 +2911,6 @@ func (e *emitter) collectRebuildable(n htmlparser.Node, start, end int, out *[]h
 			e.collectRebuildable(v.End, start, end, out)
 		}
 	}
-}
-
-// bodyIsRehomable reports whether a glued block body can be re-homed by the
-// byte-level EmitVerbatim: it must span multiple source lines (so re-indenting has
-// an effect) while every newline in the body is a structural gap between nodes,
-// never inside a string, attribute value, or expression, where stripping a line's
-// leading whitespace would corrupt content. Such a body keeps its verbatim source
-// columns instead.
-func bodyIsRehomable(src []byte, children []htmlparser.Node) bool {
-	structural := false
-
-	for _, c := range children {
-		if !nodeRehomable(src, c) {
-			return false
-		}
-
-		// Counted the way the verbatim path writes it: a lone CR in the markup
-		// as the LF it is, one inside PHP as a byte. Read any other way, a CR
-		// body would come back as an LF one for the next pass to re-home.
-		span := c.Span()
-		raw := src[span.Start.Offset:span.End.Offset]
-
-		if htmlfmt.HasLineBreakIn(raw, span.Start.Offset, phpSpansFor(raw, []htmlparser.Node{c})) {
-			structural = true
-		}
-	}
-
-	return structural
-}
-
-// nodeRehomable reports whether one body node is safe for the byte-level
-// EmitVerbatim re-home. A single-line node always is: its only leading whitespace
-// is the structural line indent. A multi-line node is safe only when its newlines
-// are provably structural gaps between children -- a nested element (with
-// single-line attribute values) or a block directive (with single-line arguments)
-// whose own children are recursively re-homable. It is default-deny: a multi-line
-// echo, raw `<?php ?>` island, `@php` block, or directive with a wrapped argument
-// may carry a newline inside a string or expression, so it is kept verbatim.
-func nodeRehomable(src []byte, n htmlparser.Node) bool {
-	span := n.Span()
-	raw := src[span.Start.Offset:span.End.Offset]
-
-	if !htmlfmt.HasLineBreakIn(raw, span.Start.Offset, phpSpansFor(raw, []htmlparser.Node{n})) {
-		return true
-	}
-
-	switch node := n.(type) {
-	case *htmlparser.Text:
-		return true
-	case *htmlparser.Element:
-		component := parser.IsComponentTag(node.Name)
-
-		for _, a := range node.Attributes {
-			// A single attribute that spans lines is a multi-line value (a string,
-			// a bound expression, or a `<?php ?>` island); a wrapped attribute list
-			// keeps each attribute single-line, so this allows that and rejects only
-			// a value whose interior whitespace would be corrupted by the re-home.
-			if attrSpansLines(src, a, component) {
-				return false
-			}
-		}
-
-		for _, c := range node.Children {
-			if !nodeRehomable(src, c) {
-				return false
-			}
-		}
-
-		return true
-	case *parser.DirectiveBlockNode:
-		if directiveArgSpansLines(src, node.Opener) {
-			return false
-		}
-
-		for _, c := range node.Body {
-			if !nodeRehomable(src, c) {
-				return false
-			}
-		}
-
-		for _, br := range node.Branches {
-			if directiveArgSpansLines(src, br.Directive) {
-				return false
-			}
-
-			for _, c := range br.Body {
-				if !nodeRehomable(src, c) {
-					return false
-				}
-			}
-		}
-
-		return true
-	default:
-		return false
-	}
-}
-
-// directiveArgSpansLines reports whether a directive's parenthesized argument list
-// wraps across source lines (a multi-line condition or array), where a re-home
-// could reach inside a string literal in the expression.
-func directiveArgSpansLines(src []byte, d *parser.DirectiveNode) bool {
-	if d == nil || d.RParen.End.Offset == 0 {
-		return false
-	}
-
-	return bytes.IndexByte(src[d.LParen.Start.Offset:d.RParen.End.Offset], '\n') >= 0
 }
 
 // bodyPreservesInnerWhitespace reports whether any descendant renders its own

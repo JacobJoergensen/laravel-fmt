@@ -166,19 +166,6 @@ func appendAttrPHPSpans(spans []htmlparser.Span, a *htmlparser.Attr, component b
 	return spans
 }
 
-// attrSpansLines reports whether an attribute's source spans lines, reading a
-// lone CR as a line break except inside a value that compiles into PHP.
-func attrSpansLines(src []byte, a *htmlparser.Attr, component bool) bool {
-	raw := src[a.Start.Offset:a.End.Offset]
-
-	var php []htmlparser.Span
-	if hasLoneCR(raw) {
-		php = appendAttrPHPSpans(nil, a, component)
-	}
-
-	return htmlfmt.HasLineBreakIn(raw, a.Start.Offset, php)
-}
-
 func hasValueLineBreak(b []byte, compilesToPHP bool) bool {
 	at, _ := valueLineBreak(b, compilesToPHP)
 
