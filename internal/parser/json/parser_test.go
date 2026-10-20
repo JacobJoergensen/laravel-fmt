@@ -166,26 +166,48 @@ func TestParseEmptyDocument(t *testing.T) {
 
 func TestParseRejectsInvalidSyntax(t *testing.T) {
 	cases := []struct {
-		name string
-		src  string
+		name  string
+		src   string
+		jsonc bool
 	}{
-		{"trailing comma in object", `{"a": 1,}`},
-		{"trailing comma in array", `[1, 2,]`},
-		{"leading zero", `01`},
-		{"unterminated string", `"hello`},
-		{"control char in string", "\"a\x01b\""},
-		{"line comment", `{"a": 1} // tail`},
-		{"block comment", `/* head */ {"a": 1}`},
-		{"trailing content", `{"a": 1} extra`},
-		{"bare value after root", `42 13`},
-		{"invalid string escape", `"\x"`},
-		{"short unicode escape", `"\u12"`},
-		{"non-hex unicode escape", `"\uZZZZ"`},
+		{"trailing comma in object", `{"a": 1,}`, false},
+		{"trailing comma in array", `[1, 2,]`, false},
+		{"leading zero", `01`, false},
+		{"unterminated string", `"hello`, false},
+		{"control char in string", "\"a\x01b\"", false},
+		{"line comment", `{"a": 1} // tail`, false},
+		{"block comment", `/* head */ {"a": 1}`, false},
+		{"trailing content", `{"a": 1} extra`, false},
+		{"bare value after root", `42 13`, false},
+		{"invalid string escape", `"\x"`, false},
+		{"short unicode escape", `"\u12"`, false},
+		{"non-hex unicode escape", `"\uZZZZ"`, false},
+		{"value missing at the end", `{"a":`, false},
+		{"unclosed empty object", `{`, false},
+		{"unclosed object after a member", `{"a": 1`, false},
+		{"unquoted key", `{a: 1}`, false},
+		{"missing colon", `{"a" 1}`, false},
+		{"missing comma in object", `{"a": 1 "b": 2}`, false},
+		{"unclosed array", `[1, 2`, false},
+		{"missing comma in array", `[1 2]`, false},
+		{"escape at the end", `"ab\`, false},
+		{"raw newline in string", "\"a\nb\"", false},
+		{"lone minus", `-`, false},
+		{"dot without a digit", `1.`, false},
+		{"exponent without a digit", `1e+`, false},
+		{"bad true", `tru`, false},
+		{"bad null", `nul`, false},
+		{"unterminated block comment", `/* open`, true},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, errs := Parse([]byte(tc.src))
+			parse := Parse
+			if tc.jsonc {
+				parse = ParseJSONC
+			}
+
+			_, errs := parse([]byte(tc.src))
 
 			if len(errs) == 0 {
 				t.Fatalf("expected at least one error, got none")

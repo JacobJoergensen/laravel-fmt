@@ -106,6 +106,7 @@ func TestParseJSONCCoversAllContentBytes(t *testing.T) {
 				coverValue(t, c, src, file.Root)
 			}
 
+			coverComment(c, file.RootTrailing)
 			coverComments(c, file.Trailing)
 			c.AssertOnlyAllowedUncovered(" \t\r\n{}[],:")
 		})

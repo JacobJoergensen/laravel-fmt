@@ -39,6 +39,24 @@ func Normalize(value []byte, spaceAfterNot bool) ([]byte, bool) {
 	return out, true
 }
 
+// BreaksInTemplate reports whether a line break in value falls inside a
+// template literal. A value that does not tokenize is assumed to when it
+// holds a backtick.
+func BreaksInTemplate(value []byte) bool {
+	toks, ok := lex(value)
+	if !ok {
+		return bytes.IndexByte(value, '`') >= 0
+	}
+
+	for _, t := range toks {
+		if t.kind == kindTemplate && bytes.ContainsAny(value[t.start:t.end], "\n\r") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // IsAlpineJSAttr reports whether the attribute name carries a JavaScript
 // value Alpine evaluates. The list is a closed allowlist: unknown x-*
 // attributes (plugins like x-mask define non-JS value syntax) and the

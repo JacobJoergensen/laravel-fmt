@@ -21,5 +21,7 @@ func parse(src []byte, jsonc bool) (*File, []Error) {
 	}
 	root := p.parseDocument()
 
-	return &File{Src: src, Root: root, Leading: p.fileLeading, Trailing: p.fileTrailing}, p.errors
+	file := &File{Src: src, Root: root, Leading: p.fileLeading, RootTrailing: p.rootTrailing, Trailing: p.fileTrailing}
+
+	return file, p.errors
 }

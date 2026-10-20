@@ -37,6 +37,12 @@ func TestNormalizeCanonicalSpacing(t *testing.T) {
 		{"destructured x-for", "(i,k) in [...Array(3).keys()]", "(i, k) in [...Array(3).keys()]"},
 		{"typeof before bracket", "typeof [1]", "typeof [1]"},
 		{"index stays tight", "items[ 0 ]", "items[0]"},
+		{
+			"compound operators stay whole",
+			"a??=b;c**=2;d===e;f!==g;h&&=i;j||=k;l<<=1;m>>=2;n>>>=3;o>>>p;s%=2;t^=1;u&=1;v|=1;w<=x;y>=z",
+			"a ??= b; c **= 2; d === e; f !== g; h &&= i; j ||= k; l <<= 1; m >>= 2; n >>>= 3; o >>> p; s %= 2; t ^= 1; u &= 1; v |= 1; w <= x; y >= z",
+		},
+		{"question dot before a digit is a ternary", "x=a?.5:1", "x = a ? .5 : 1"},
 	}
 
 	for _, c := range cases {
@@ -160,6 +166,9 @@ func TestNormalizeRefusesUnsafeValues(t *testing.T) {
 		{"numeric html entity", "x &#39; y"},
 		{"unterminated string", "'open"},
 		{"unterminated template", "`a ${open"},
+		{"unterminated block comment", "a /* b"},
+		{"unterminated regex", "x = /ab"},
+		{"exponent without a digit", "x = 1e+"},
 		{"slash after brace", "{} /re/.test(s)"},
 		// A `)` closing a control-flow head is followed by a regex, not a
 		// division: spacing `if (b) /b/.test(b)` would change it from true to
@@ -282,5 +291,28 @@ func TestNormalizeRefusesHTMLLikeComment(t *testing.T) {
 		if out, ok := Normalize([]byte(in), true); ok {
 			t.Errorf("Normalize(%q) = %q, want refusal", in, out)
 		}
+	}
+}
+
+func TestBreaksInTemplate(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{"break inside a template", "{ msg: `one\ntwo` }", true},
+		{"break inside a substitution's template", "{ a: `x${`y\nz`}` }", true},
+		{"break between tokens", "{\n  msg: `one`,\n}", false},
+		{"no template", "{\n  open: false\n}", false},
+		{"untokenizable with a backtick", "{ a: 'x\ny', b: `z` }", true},
+		{"untokenizable without one", "{ a: 'x\ny' }", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := BreaksInTemplate([]byte(tc.value)); got != tc.want {
+				t.Fatalf("BreaksInTemplate(%q) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
 	}
 }

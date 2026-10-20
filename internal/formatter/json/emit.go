@@ -23,6 +23,7 @@ func emitFile(w *formatter.Writer, file *parser.File) {
 	}
 
 	emitValue(w, file.Src, file.Root)
+	emitTrailingComment(w, file.Src, file.RootTrailing)
 
 	for _, c := range file.Trailing {
 		w.Newline()

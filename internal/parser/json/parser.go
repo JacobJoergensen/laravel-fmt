@@ -18,6 +18,7 @@ type jsonParser struct {
 	// Strict JSON keeps every comment/trailing-comma path inert.
 	jsonc        bool
 	fileLeading  []Comment
+	rootTrailing *Comment
 	fileTrailing []Comment
 }
 
@@ -39,14 +40,8 @@ func (p *jsonParser) parseDocument() Value {
 
 	root := p.parseValue()
 
-	trailing := p.sameLineComment()
-	after, _ := p.leadingComments()
-
-	if trailing != nil {
-		p.fileTrailing = append([]Comment{*trailing}, after...)
-	} else {
-		p.fileTrailing = after
-	}
+	p.rootTrailing = p.sameLineComment()
+	p.fileTrailing, _ = p.leadingComments()
 
 	if !p.Eof() {
 		p.addError(p.Pos, "unexpected trailing content after root value")

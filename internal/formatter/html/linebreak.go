@@ -172,9 +172,13 @@ func uniformStrip(value []byte, natural int) int {
 // ValueReflows reports whether whitespace in a's value does not render.
 func ValueReflows(a *parser.Attr) bool {
 	name := a.Name
+	js := a.Bound || alpine.IsAlpineJSAttr(name) || hasPrefixFold(name, "x-")
 
-	return a.Bound || IsClassAttr(name) || bytes.EqualFold(name, []byte("style")) ||
-		alpine.IsAlpineJSAttr(name) || hasPrefixFold(name, "x-") || hasPrefixFold(name, "wire:")
+	if js && alpine.BreaksInTemplate(a.Value) {
+		return false
+	}
+
+	return js || IsClassAttr(name) || bytes.EqualFold(name, []byte("style")) || hasPrefixFold(name, "wire:")
 }
 
 func hasPrefixFold(name []byte, prefix string) bool {

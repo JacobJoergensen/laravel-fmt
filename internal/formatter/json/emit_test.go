@@ -127,6 +127,11 @@ func TestFormatJSONCKeepsEveryComment(t *testing.T) {
 			"// only a comment\n",
 		},
 		{
+			"same-line comment after the root",
+			"{\"a\": 1} // why\n// own\n",
+			"{ \"a\": 1 } // why\n// own\n",
+		},
+		{
 			"multi-line block comment follows its indent",
 			"{\n    /* a\n       b */\n    \"x\": 1\n}\n",
 			"{\n  /* a\n     b */\n  \"x\": 1\n}\n",

@@ -30,12 +30,14 @@ func (c *Comment) Span() Span { return c.Range }
 
 // File is a parsed JSON document; Root is nil when src holds no value.
 // Leading and Trailing hold JSONC comments before and after the root
-// value (both empty for strict JSON).
+// value (both empty for strict JSON); RootTrailing is a same-line comment
+// after the root.
 type File struct {
-	Src      []byte
-	Root     Value
-	Leading  []Comment
-	Trailing []Comment
+	Src          []byte
+	Root         Value
+	Leading      []Comment
+	RootTrailing *Comment
+	Trailing     []Comment
 }
 
 // Object is { members } in source order. Duplicate keys aren't enforced; the
