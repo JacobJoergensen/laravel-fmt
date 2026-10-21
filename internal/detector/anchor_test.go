@@ -3,6 +3,7 @@ package detector
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -88,5 +89,26 @@ func TestAnchorDirUsesTheDirectoryBeforeAGlob(t *testing.T) {
 				t.Fatalf("AnchorDir(%v) = %q, want %q", tc.paths, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAnchorDirReadsABackslashTheWayTheWalkDoes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a backslash is a separator on Windows")
+	}
+
+	root := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(root, "dir"), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	got, err := AnchorDir(root, []string{root + `/dir\*.php`})
+	if err != nil {
+		t.Fatalf("AnchorDir: %v", err)
+	}
+
+	if got != root {
+		t.Fatalf("AnchorDir = %q, want %q", got, root)
 	}
 }

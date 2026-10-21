@@ -2,6 +2,7 @@ package detector
 
 import (
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -81,7 +82,7 @@ func TestLoadConfigAdoptsExclusionsBeneathTheUsersList(t *testing.T) {
 		t.Fatalf("Ignore =\n%q\nwant\n%q", loaded.File.Ignore, want)
 	}
 
-	wantAdopted := [][]string{{"CLAUDE.md", "!keep.md"}, {"**/resources/views/flux/"}}
+	wantAdopted := [][]string{{"# generated", "CLAUDE.md", "", "!keep.md"}, {"**/resources/views/flux/"}}
 
 	if !slices.EqualFunc(loaded.File.AdoptedIgnore, wantAdopted, slices.Equal) {
 		t.Fatalf("AdoptedIgnore = %q, want %q", loaded.File.AdoptedIgnore, wantAdopted)
@@ -176,5 +177,49 @@ func TestAUserNegationKeepsAFileTypeOxfmtOwns(t *testing.T) {
 
 	if want := []string{"README.md", "app/Model.php"}; !slices.Equal(got, want) {
 		t.Fatalf("formatted %q, want %q", got, want)
+	}
+}
+
+func TestPrettierIgnoreIsReadAsGitignoreSyntax(t *testing.T) {
+	root := t.TempDir()
+	seedFileAt(t, root, ".prettierignore", "\uFEFFfirst.md\n lead.md\ntrail.md\\ \n")
+
+	ctx, err := Detect(root)
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+
+	loaded, err := LoadConfig(root, ctx)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	cases := []struct {
+		name        string
+		file        string
+		want        bool
+		trailsSpace bool
+	}{
+		{"the pattern after a BOM", "first.md", true, false},
+		{"a leading space is part of the name", " lead.md", true, false},
+		{"a leading space does not match without it", "lead.md", false, false},
+		{"an escaped trailing space is kept", "trail.md ", true, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.trailsSpace && runtime.GOOS == "windows" {
+				t.Skip("Windows drops a trailing space from a path")
+			}
+
+			got, err := walk.IgnoresFile(root, &loaded.File, filepath.Join(root, tc.file))
+			if err != nil {
+				t.Fatalf("IgnoresFile: %v", err)
+			}
+
+			if got != tc.want {
+				t.Fatalf("IgnoresFile(%q) = %v, want %v", tc.file, got, tc.want)
+			}
+		})
 	}
 }

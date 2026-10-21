@@ -230,12 +230,19 @@ func isGlobPattern(arg string) bool {
 	return strings.ContainsAny(arg, "*?[")
 }
 
-// A glob resolves like a path argument, from the working directory. On Windows
+// GlobBase returns the absolute directory above the first segment of arg that
+// holds a glob character, or arg made absolute when it holds none. On Windows
 // \ is a separator there, not an escape.
-func splitGlob(pattern string) (string, []string, error) {
-	base, err := filepath.Abs(pattern)
+func GlobBase(arg string) (string, error) {
+	base, _, err := globBaseAndSegments(arg)
+
+	return base, err
+}
+
+func globBaseAndSegments(arg string) (string, []string, error) {
+	base, err := filepath.Abs(arg)
 	if err != nil {
-		return "", nil, fmt.Errorf("resolve %s: %w", pattern, err)
+		return "", nil, fmt.Errorf("resolve %s: %w", arg, err)
 	}
 
 	var segments []string
@@ -246,6 +253,15 @@ func splitGlob(pattern string) (string, []string, error) {
 	}
 
 	slices.Reverse(segments)
+
+	return base, segments, nil
+}
+
+func splitGlob(pattern string) (string, []string, error) {
+	base, segments, err := globBaseAndSegments(pattern)
+	if err != nil {
+		return "", nil, err
+	}
 
 	for _, segment := range segments {
 		if _, err := path.Match(segment, ""); err != nil {

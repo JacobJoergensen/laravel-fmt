@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/JacobJoergensen/laravel-fmt/internal/walk"
 )
 
 // AnchorDir returns the deepest directory holding every path, or workDir when
@@ -43,12 +45,12 @@ func AnchorDir(workDir string, paths []string) (string, error) {
 	return common, nil
 }
 
-// A glob anchors above its first pattern character: a pattern names no
+// A glob anchors on the directory the walk expands it from: a pattern names no
 // directory, and an upward search through one fails outright on Windows.
 func anchorFor(path string) (string, error) {
-	abs, err := filepath.Abs(globPrefix(path))
+	abs, err := walk.GlobBase(path)
 	if err != nil {
-		return "", fmt.Errorf("resolve %s: %w", path, err)
+		return "", fmt.Errorf("anchor %s: %w", path, err)
 	}
 
 	if info, err := os.Stat(abs); err == nil && info.IsDir() {
@@ -56,26 +58,6 @@ func anchorFor(path string) (string, error) {
 	}
 
 	return filepath.Dir(abs), nil
-}
-
-// The pattern characters are walk's own, so the anchor reads an argument the
-// way the walk will.
-func globPrefix(path string) string {
-	idx := strings.IndexAny(path, "*?[")
-	if idx < 0 {
-		return path
-	}
-
-	cut := strings.LastIndexAny(path[:idx], `/\`)
-
-	switch {
-	case cut < 0:
-		return "."
-	case cut == 0:
-		return path[:1]
-	default:
-		return path[:cut]
-	}
 }
 
 // Paths on different volumes share no directory, so a is kept: a real directory

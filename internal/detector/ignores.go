@@ -2,7 +2,6 @@ package detector
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
+	"github.com/JacobJoergensen/laravel-fmt/internal/walk"
 )
 
 const prettierIgnoreFile = ".prettierignore"
@@ -90,31 +90,14 @@ func oxfmtOwnsFrontend(dir string) (bool, error) {
 	return false, nil
 }
 
+// .prettierignore is gitignore syntax, so its lines go to the walk unread.
 func prettierIgnores(dir string) ([]string, error) {
-	path := filepath.Join(dir, prettierIgnoreFile)
-
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-
+	lines, err := walk.ReadIgnoreFile(filepath.Join(dir, prettierIgnoreFile))
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, fmt.Errorf("prettier ignores: %w", err)
 	}
 
-	var patterns []string
-
-	for line := range strings.Lines(string(raw)) {
-		line = strings.TrimSpace(line)
-
-		if line == "" || line[0] == '#' {
-			continue
-		}
-
-		patterns = append(patterns, line)
-	}
-
-	return patterns, nil
+	return lines, nil
 }
 
 // pintIgnores translates pint.json's Finder options: exclude names directories

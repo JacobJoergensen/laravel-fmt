@@ -1,7 +1,6 @@
 package walk
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -13,36 +12,36 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
 )
 
-// A missing .gitignore returns (nil, nil), since most directories have none.
-// ENOTDIR counts as missing: a path git lists can name a directory the work
-// tree has since replaced with a file.
-func readGitignore(dir string) ([]string, error) {
-	gitignore := filepath.Join(dir, ".gitignore")
+const utf8BOM = "\uFEFF"
 
-	file, err := os.Open(gitignore)
+// ReadIgnoreFile returns a gitignore-syntax file's lines with only the line
+// endings and a leading BOM removed. A missing file returns (nil, nil), and so
+// does ENOTDIR: a path git lists can name a directory the work tree has since
+// replaced with a file.
+func ReadIgnoreFile(path string) ([]string, error) {
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 			return nil, nil
 		}
 
-		return nil, fmt.Errorf("read %s: %w", gitignore, err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	defer func() { _ = file.Close() }()
+	content := strings.TrimPrefix(string(raw), utf8BOM)
 
 	var lines []string
 
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read %s: %w", gitignore, err)
+	for line := range strings.Lines(content) {
+		line = strings.TrimSuffix(line, "\n")
+		lines = append(lines, strings.TrimSuffix(line, "\r"))
 	}
 
 	return lines, nil
+}
+
+func readGitignore(dir string) ([]string, error) {
+	return ReadIgnoreFile(filepath.Join(dir, ".gitignore"))
 }
 
 // relDir is absDir's slash path from the ignore root, empty for the root

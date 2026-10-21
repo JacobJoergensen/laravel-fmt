@@ -3,6 +3,7 @@ package walk
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
@@ -183,5 +184,32 @@ func TestIgnoreRootOutsideAWorkTreeReadsNothingAbove(t *testing.T) {
 
 	if !containsRel(got, root, "proj/app/A.php") {
 		t.Fatalf("a .gitignore above a project outside any work tree was applied: %v", got)
+	}
+}
+
+func TestGitignoreIsReadTheWayGitReadsIt(t *testing.T) {
+	cases := []struct {
+		name      string
+		gitignore string
+	}{
+		{"a BOM before the first pattern", "\uFEFFGen.php\n"},
+		{"a line longer than 64 KiB", "#" + strings.Repeat("x", 70_000) + "\nGen.php\n"},
+		{"CRLF line endings", "Other.php\r\nGen.php\r\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := buildTree(t, map[string]string{
+				".gitignore":   tc.gitignore,
+				"app/Gen.php":  "<?php",
+				"app/Keep.php": "<?php",
+			})
+
+			got := mustFiles(t, root, config.Default())
+
+			if want := []string{filepath.Join(root, "app", "Keep.php")}; !slices.Equal(got, want) {
+				t.Fatalf("walk selected %v, want %v", got, want)
+			}
+		})
 	}
 }
