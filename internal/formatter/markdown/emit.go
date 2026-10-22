@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
@@ -1345,12 +1344,12 @@ func emitTable(w *formatter.Writer, t *parser.Table) {
 	widths := make([]int, cols)
 
 	for i, cell := range header {
-		widths[i] = max(widths[i], utf8.RuneCountInString(cell))
+		widths[i] = max(widths[i], textwidth.String(cell))
 	}
 
 	for _, row := range rows {
 		for i, cell := range row {
-			widths[i] = max(widths[i], utf8.RuneCountInString(cell))
+			widths[i] = max(widths[i], textwidth.String(cell))
 		}
 	}
 
@@ -1416,7 +1415,7 @@ func emitTableRow(w *formatter.Writer, cells []string, widths []int, aligns []pa
 	for i, cell := range cells {
 		w.Space()
 
-		pad := widths[i] - utf8.RuneCountInString(cell)
+		pad := widths[i] - textwidth.String(cell)
 
 		switch aligns[i] {
 		case parser.TableAlignRight:
@@ -1571,27 +1570,15 @@ func markerLineIsThematicBreak(marker string, line []byte) bool {
 	return count >= 3
 }
 
-// columns returns the width b paints in terminal columns, not runes, since a
-// CJK character takes two.
-func columns(b []byte) int {
-	n := 0
-
-	for _, r := range string(b) {
-		n += textwidth.Rune(r)
-	}
-
-	return n
-}
-
 // fitUnits returns the index one past the last unit that fits on a line
 // starting at column col, always taking at least one unit so a unit wider than
 // the whole line still makes progress.
 func fitUnits(units [][]byte, start, col, printWidth int) int {
 	end := start + 1
-	width := col + columns(units[start])
+	width := col + textwidth.String(units[start])
 
 	for end < len(units) {
-		next := 1 + columns(units[end])
+		next := 1 + textwidth.String(units[end])
 
 		if width+next > printWidth {
 			break

@@ -76,7 +76,7 @@ func TestFormatKeepsContainerFlatUpToPrintWidth(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		rune  string
+		unit  string
 		count int
 		flat  bool
 	}{
@@ -84,11 +84,15 @@ func TestFormatKeepsContainerFlatUpToPrintWidth(t *testing.T) {
 		{"ascii one column over", "a", 117, false},
 		{"multi-byte at print width", "é", 116, true},
 		{"multi-byte one column over", "é", 117, false},
+		{"wide at print width", "あ", 58, true},
+		{"wide one column over", "あ", 59, false},
+		{"decomposed accent at print width", "e\u0301", 116, true},
+		{"escapes measured as written", "\\u3042", 20, false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			content := strings.Repeat(tc.rune, tc.count)
+			content := strings.Repeat(tc.unit, tc.count)
 			src := []byte(`["` + content + `"]`)
 
 			want := "[\"" + content + "\"]\n"

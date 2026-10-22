@@ -529,7 +529,7 @@ func TestNestedBodiesLayOutWithinThePrintWidth(t *testing.T) {
 			got := mustFormat(t, []byte(tc.src), cfg)
 
 			for line := range bytes.Lines(got) {
-				if width := columns(bytes.TrimRight(line, "\n")); width > cfg.PrintWidth {
+				if width := textwidth.String(bytes.TrimRight(line, "\n")); width > cfg.PrintWidth {
 					t.Fatalf("line is %d columns, past the print width %d:\n%s", width, cfg.PrintWidth, got)
 				}
 			}
@@ -1113,6 +1113,34 @@ func TestFormatKeepsLinkRefDefsTogether(t *testing.T) {
 
 // GFM reads a bare line as a one-cell body row; a blank line or another block
 // start ends the table. Both oracles agree on every case.
+func TestFormatAlignsTableCellsByColumns(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{
+			"wide characters take two columns",
+			"| 名前 | 説明 |\n| --- | --- |\n| ab | 日本語のテキスト |\n| abcdefgh | x |\n",
+			"| 名前     | 説明             |\n| -------- | ---------------- |\n| ab       | 日本語のテキスト |\n| abcdefgh | x                |\n",
+		},
+		{
+			"a combining accent takes none",
+			"| e\u0301 | b |\n| --- | --- |\n| cafe\u0301 | c |\n",
+			"| e\u0301    | b   |\n| ---- | --- |\n| cafe\u0301 | c   |\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got\n%s\nwant\n%s", got, tc.want)
+			}
+
+			if again := mustFormat(t, got, config.Default()); !bytes.Equal(again, got) {
+				t.Fatalf("not idempotent: %q -> %q", got, again)
+			}
+		})
+	}
+}
+
 func TestFormatKeepsTableRowsWithoutPipes(t *testing.T) {
 	cases := []struct{ name, src, want string }{
 		{"bare row", "a|b\n-|-\nc\n", "| a   | b   |\n| --- | --- |\n| c   |     |\n"},
@@ -1435,8 +1463,8 @@ func TestFormatProseWrapAlwaysCountsTheEscape(t *testing.T) {
 			}
 
 			for line := range bytes.SplitSeq(bytes.TrimRight(once, "\n"), []byte("\n")) {
-				if columns(line) > cfg.PrintWidth {
-					t.Fatalf("line of %d columns exceeds printWidth %d:\n%s", columns(line), cfg.PrintWidth, once)
+				if textwidth.String(line) > cfg.PrintWidth {
+					t.Fatalf("line of %d columns exceeds printWidth %d:\n%s", textwidth.String(line), cfg.PrintWidth, once)
 				}
 			}
 		})

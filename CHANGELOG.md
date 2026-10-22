@@ -4,6 +4,8 @@
 * Fixed the first pattern of a `.gitignore` or `.prettierignore` saved with a BOM being ignored
 * Fixed `.prettierignore` patterns with a leading space or an escaped trailing space not matching
 * Fixed a `.gitignore` line longer than 64 KiB failing the run
+* Fixed Markdown tables with Chinese, Japanese or Korean text, or decomposed accents, being misaligned
+* Fixed JSON with Chinese, Japanese or Korean text staying on one line past the print width
 
 ## Version 0.4.0 (2026-10-20)
 * Added a `laravel-fmt/endOfLine` request to `laravel-fmt lsp` so editor plugins can apply the project's line ending

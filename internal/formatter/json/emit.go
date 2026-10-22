@@ -6,6 +6,7 @@ import (
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/json"
+	"github.com/JacobJoergensen/laravel-fmt/internal/textwidth"
 )
 
 func emitFile(w *formatter.Writer, file *parser.File) {
@@ -283,7 +284,7 @@ func emptyContainerFlatWidth(dangling []parser.Comment, delimiters string, budge
 }
 
 func stringFlatWidth(s *parser.String) int {
-	return len(`""`) + utf8.RuneCount(s.Raw)
+	return len(`""`) + textwidth.String(s.Raw)
 }
 
 func withinBudget(width, budget int) int {

@@ -40,6 +40,30 @@ func TestRuneColumns(t *testing.T) {
 	}
 }
 
+func TestStringSumsTheColumnsOfItsRunes(t *testing.T) {
+	cases := []struct {
+		name string
+		s    string
+		want int
+	}{
+		{"ascii", "table", 5},
+		{"wide characters", "日本語", 6},
+		{"e with a combining accent", "e\u0301", 1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := String(tc.s); got != tc.want {
+				t.Fatalf("String(%q) = %d, want %d", tc.s, got, tc.want)
+			}
+
+			if got := String([]byte(tc.s)); got != tc.want {
+				t.Fatalf("String([]byte(%q)) = %d, want %d", tc.s, got, tc.want)
+			}
+		})
+	}
+}
+
 // The table was a hand-written list of blocks, so every Wide character a block
 // boundary missed measured one column and the line it sat on overflowed
 // printWidth. One representative from each range the sweep found missing, plus

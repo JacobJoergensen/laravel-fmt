@@ -42,3 +42,14 @@ func Rune(r rune) int {
 
 	return 1
 }
+
+// String returns the columns s paints by Rune's rules, so a tab counts as one.
+func String[T ~string | ~[]byte](s T) int {
+	width := 0
+
+	for _, r := range string(s) {
+		width += Rune(r)
+	}
+
+	return width
+}
