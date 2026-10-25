@@ -27,16 +27,12 @@ func ResolveFileConfig(cfg *config.File, path string, ctx Context, userKeys map[
 		return config.File{}, fmt.Errorf("resolve %s: %w", path, err)
 	}
 
-	prettier := ctx.Prettier
-
-	if ctx.PrettierResolver != nil {
-		prettier, err = ctx.PrettierResolver.ForFile(absPath)
-		if err != nil {
-			return config.File{}, err
-		}
+	prettier, err := filePrettier(absPath, ctx)
+	if err != nil {
+		return config.File{}, err
 	}
 
-	layout, err := fileLayout(absPath, ctx, prettier)
+	layout, err := fileLayout(absPath, ctx, prettier, nil)
 	if err != nil {
 		return config.File{}, err
 	}
@@ -57,6 +53,35 @@ func ResolveFileConfig(cfg *config.File, path string, ctx Context, userKeys map[
 	return resolved, nil
 }
 
+// LayoutSources maps each layout key to the detected config that set it.
+func LayoutSources(path string, ctx Context) (map[string]string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", path, err)
+	}
+
+	prettier, err := filePrettier(absPath, ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	sources := map[string]string{}
+
+	if _, err := fileLayout(absPath, ctx, prettier, sources); err != nil {
+		return nil, err
+	}
+
+	return sources, nil
+}
+
+func filePrettier(absPath string, ctx Context) (*Prettier, error) {
+	if ctx.PrettierResolver == nil {
+		return ctx.Prettier, nil
+	}
+
+	return ctx.PrettierResolver.ForFile(absPath)
+}
+
 func samePrettier(a, b *Prettier) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -69,7 +94,7 @@ func samePrettier(a, b *Prettier) bool {
 // precedence first. Replayed onto the resolved config, a file's
 // "indent_size = unset" could not fall back to the tool default, and its
 // EditorConfig section would override Mago.
-func fileLayout(absPath string, ctx Context, prettier *Prettier) (*config.File, error) {
+func fileLayout(absPath string, ctx Context, prettier *Prettier, sources map[string]string) (*config.File, error) {
 	layout := config.Default()
 
 	if ctx.EditorConfig != nil {
@@ -78,29 +103,65 @@ func fileLayout(absPath string, ctx Context, prettier *Prettier) (*config.File, 
 			return nil, err
 		}
 
-		applyEditorConfigSection(layout, section, nil)
+		applyLayout(layout, sources, editorConfigFileName, func(cfg *config.File) {
+			applyEditorConfigSection(cfg, section, nil)
+		})
 	}
 
 	lang := formatter.DetectLanguage(absPath)
 
 	if prettier != nil && prettier.formats(lang) {
-		rel := relativeToConfig(prettier.Path, absPath)
-		applyPrettierOptions(layout, prettier.ResolveForFile(rel), nil)
+		options := prettier.ResolveForFile(relativeToConfig(prettier.Path, absPath))
+
+		applyLayout(layout, sources, prettier.Path, func(cfg *config.File) {
+			applyPrettierOptions(cfg, options, nil)
+		})
 	}
 
 	// Pint cannot be told to indent or end lines any other way, so a PHP file it
 	// formats has this layout whatever the other sources say.
 	if ctx.Pint != nil && lang == formatter.LangPHP {
-		layout.TabWidth = pintIndentWidth
-		layout.IndentStyle = config.IndentStyleSpace
-		layout.EndOfLine = config.EndOfLineLF
+		applyLayout(layout, sources, ctx.Pint.Path, func(cfg *config.File) {
+			cfg.TabWidth = pintIndentWidth
+			cfg.IndentStyle = config.IndentStyleSpace
+			cfg.EndOfLine = config.EndOfLineLF
+		})
 	}
 
 	if ctx.Mago != nil {
-		applyMago(layout, ctx.Mago)
+		applyLayout(layout, sources, ctx.Mago.Path, func(cfg *config.File) {
+			applyMago(cfg, ctx.Mago)
+		})
 	}
 
 	return layout, nil
+}
+
+// Keys are read off an empty config: a diff of the running layout would miss
+// a value two sources agree on.
+func applyLayout(layout *config.File, sources map[string]string, source string, apply func(*config.File)) {
+	apply(layout)
+
+	if sources == nil {
+		return
+	}
+
+	var alone config.File
+
+	apply(&alone)
+
+	credit := func(key string, set bool) {
+		if set {
+			sources[key] = source
+		}
+	}
+
+	credit("printWidth", alone.PrintWidth != 0)
+	credit("indentWidth", alone.TabWidth != 0)
+	credit("indentStyle", alone.IndentStyle != "")
+	credit("endOfLine", alone.EndOfLine != "")
+	credit("quoteStyle", alone.QuoteStyle != "")
+	credit("markdown.proseWrap", alone.Markdown.ProseWrap != "")
 }
 
 func copyLayout(cfg, layout *config.File, userKeys map[string]bool) {

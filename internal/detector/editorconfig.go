@@ -16,6 +16,8 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
 )
 
+const editorConfigFileName = ".editorconfig"
+
 // EditorConfig is a parsed .editorconfig; its sections keep file order, since
 // the last matching section wins.
 type EditorConfig struct {
@@ -195,7 +197,7 @@ func (r *EditorConfigResolver) load(dir string) (*EditorConfig, error) {
 }
 
 func readEditorConfig(dir string) (*EditorConfig, bool, error) {
-	path := filepath.Join(dir, ".editorconfig")
+	path := filepath.Join(dir, editorConfigFileName)
 
 	raw, err := os.ReadFile(path)
 	if err != nil {

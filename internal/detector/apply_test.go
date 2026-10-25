@@ -435,7 +435,55 @@ func TestFileLayoutFollowsThePrecedenceChain(t *testing.T) {
 	}
 }
 
-func resolveLayout(t *testing.T, files map[string]string, rel string) config.File {
+func TestLayoutSourcesNameTheWinningConfig(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+		file  string
+		key   string
+		want  string
+	}{
+		{
+			"a value two sources agree on goes to the later",
+			map[string]string{".editorconfig": "root = true\n[*]\nmax_line_length = 100\n", ".prettierrc": `{"printWidth": 100}`},
+			"a.css", "printWidth", ".prettierrc",
+		},
+		{
+			"Pint fixes the PHP indent",
+			map[string]string{".editorconfig": "root = true\n[*]\nindent_size = 2\n", "pint.json": `{"preset": "laravel"}`},
+			"a.php", "indentWidth", "pint.json",
+		},
+		{
+			"a later source keeps no credit for a key it leaves alone",
+			map[string]string{".prettierrc": `{"printWidth": 100, "plugins": ["@prettier/plugin-php"]}`, "pint.json": `{"preset": "laravel"}`},
+			"a.php", "printWidth", ".prettierrc",
+		},
+		{
+			"Mago outranks Pint",
+			map[string]string{"pint.json": `{"preset": "laravel"}`, "mago.toml": "[formatter]\ntab-width = 8\n"},
+			"a.php", "indentWidth", "mago.toml",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path, project := seedProject(t, tc.files, tc.file)
+
+			sources, err := LayoutSources(path, project.Ctx)
+			if err != nil {
+				t.Fatalf("LayoutSources: %v", err)
+			}
+
+			want := filepath.Join(project.Root, tc.want)
+
+			if got := sources[tc.key]; got != want {
+				t.Fatalf("%s from %q, want %q", tc.key, got, want)
+			}
+		})
+	}
+}
+
+func seedProject(t *testing.T, files map[string]string, rel string) (string, *Project) {
 	t.Helper()
 
 	root := t.TempDir()
@@ -451,6 +499,14 @@ func resolveLayout(t *testing.T, files map[string]string, rel string) config.Fil
 	if err != nil {
 		t.Fatalf("resolve project: %v", err)
 	}
+
+	return path, project
+}
+
+func resolveLayout(t *testing.T, files map[string]string, rel string) config.File {
+	t.Helper()
+
+	path, project := seedProject(t, files, rel)
 
 	resolved, err := ResolveFileConfig(&project.Cfg, path, project.Ctx, project.UserKeys)
 	if err != nil {

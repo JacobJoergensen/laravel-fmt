@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+* Added support for `.prettierrc.toml`
+* Added a warning when the project's Prettier config is a JS, TS or JSON5 file, which laravel-fmt can't read
+* Improved `--show-config` to show which config each layout setting comes from, and to say when the file is ignored
+* Fixed the Prettier config being picked in a different order than Prettier uses when a folder has more than one
+* Fixed `.mts` and `.cts` Prettier configs not being found
 * Fixed the first pattern of a `.gitignore` or `.prettierignore` saved with a BOM being ignored
 * Fixed `.prettierignore` patterns with a leading space or an escaped trailing space not matching
 * Fixed a `.gitignore` line longer than 64 KiB failing the run

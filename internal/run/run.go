@@ -90,6 +90,7 @@ func Format(opts *Options, streams Streams) error {
 	}
 
 	r.warnNestedConfig(ctx)
+	r.warnUnreadPrettier(ctx)
 
 	cfg := loaded.File
 
@@ -437,7 +438,7 @@ func repoPath(root, relPath string) string {
 // and project. A parse failure writes nothing to Out and returns
 // ErrSilentFailure, so an editor keeps its buffer.
 func (r *runner) stdin(projects *detector.Resolver) error {
-	ignored, err := r.stdinIgnored(projects)
+	ignored, err := r.projectIgnores(projects, r.opts.StdinFilepath)
 	if err != nil {
 		return err
 	}
@@ -494,12 +495,12 @@ func (r *runner) stdin(projects *detector.Resolver) error {
 	return nil
 }
 
-// An editor sends --stdin-filepath on every save, so it is held to the
-// project's ignore rules, not the override a typed path gets.
-func (r *runner) stdinIgnored(projects *detector.Resolver) (bool, error) {
-	path, err := filepath.Abs(r.opts.StdinFilepath)
+// An editor sends --stdin-filepath on every save, so stdin is held to these
+// rules, not the override a typed path gets.
+func (r *runner) projectIgnores(projects *detector.Resolver, name string) (bool, error) {
+	path, err := filepath.Abs(name)
 	if err != nil {
-		return false, fmt.Errorf("resolve %s: %w", r.opts.StdinFilepath, err)
+		return false, fmt.Errorf("resolve %s: %w", name, err)
 	}
 
 	project, err := projects.For(path)
@@ -515,7 +516,7 @@ func (r *runner) stdinIgnored(projects *detector.Resolver) (bool, error) {
 	return walk.IgnoresFile(anchor, &project.Cfg, path)
 }
 
-// showConfig prints one file's resolved config as a laravel-fmt.json.
+// The explanation goes to stderr so stdout stays usable as a laravel-fmt.json.
 func (r *runner) showConfig(projects *detector.Resolver) error {
 	cfg, err := resolveFileConfig(projects, r.opts.ShowConfig)
 	if err != nil {
@@ -531,5 +532,5 @@ func (r *runner) showConfig(projects *detector.Resolver) error {
 		return fmt.Errorf("write stdout: %w", err)
 	}
 
-	return nil
+	return r.explainConfig(projects, cfg)
 }

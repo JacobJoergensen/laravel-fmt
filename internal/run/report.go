@@ -1,6 +1,7 @@
 package run
 
 import (
+	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/ci"
+	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/detector"
 	"github.com/JacobJoergensen/laravel-fmt/internal/diff"
 	"github.com/JacobJoergensen/laravel-fmt/internal/git"
@@ -105,10 +107,77 @@ func (r *runner) warnNestedConfig(ctx detector.Context) {
 		return
 	}
 
+	r.warnConfigFile(ctx.NestedConfigPath, "not applied, laravel-fmt.json is read from the project root")
+}
+
+func (r *runner) warnUnreadPrettier(ctx detector.Context) {
+	if ctx.Prettier == nil || !ctx.Prettier.Unread {
+		return
+	}
+
+	r.warnConfigFile(ctx.Prettier.Path, "not read, laravel-fmt reads only JSON, YAML and TOML Prettier configs")
+}
+
+func (r *runner) explainConfig(projects *detector.Resolver, cfg *config.File) error {
+	path := r.opts.ShowConfig
+
+	project, err := projects.For(path)
+	if err != nil {
+		return err
+	}
+
+	sources, err := detector.LayoutSources(path, project.Ctx)
+	if err != nil {
+		return err
+	}
+
+	userConfig := cmp.Or(r.opts.Config, project.Ctx.ConfigPath)
+
+	layout := []struct {
+		key   string
+		value any
+	}{
+		{"printWidth", cfg.PrintWidth},
+		{"indentWidth", cfg.TabWidth},
+		{"indentStyle", cfg.IndentStyle},
+		{"endOfLine", cfg.EndOfLine},
+		{"quoteStyle", cfg.QuoteStyle},
+		{"markdown.proseWrap", cfg.Markdown.ProseWrap},
+	}
+
+	r.errf("\n")
+
+	for _, setting := range layout {
+		source := "default"
+
+		switch {
+		case project.UserKeys[setting.key]:
+			source = displayPath(r.workDir, userConfig)
+		case sources[setting.key] != "":
+			source = displayPath(r.workDir, sources[setting.key])
+		}
+
+		r.errf("%-20s %-9v %s%s%s\n", setting.key, setting.value, terminal.Dim, source, terminal.Reset)
+	}
+
+	ignored, err := r.projectIgnores(projects, path)
+	if err != nil {
+		return err
+	}
+
+	if ignored {
+		r.warnConfigFile(path, "ignored, only naming it on the command line formats it")
+	}
+
+	return nil
+}
+
+func (r *runner) warnConfigFile(path, why string) {
 	r.errf(
-		"%s%s%s %s%s%s: not applied, laravel-fmt.json is read from the project root\n",
+		"%s%s%s %s%s%s: %s\n",
 		terminal.Yellow, terminal.WarningSign, terminal.Reset,
-		terminal.Bold, displayPath(r.workDir, ctx.NestedConfigPath), terminal.Reset,
+		terminal.Bold, displayPath(r.workDir, path), terminal.Reset,
+		why,
 	)
 }
 

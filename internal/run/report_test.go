@@ -2,6 +2,7 @@ package run
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -85,6 +86,56 @@ func TestSummaryTimingOnlyOnATerminal(t *testing.T) {
 		if got := strings.Contains(stderr.String(), "1ms"); got != tty {
 			t.Fatalf("ErrIsTTY=%v: summary %q shows timing = %v", tty, stderr.String(), got)
 		}
+	}
+}
+
+func TestShowConfigExplainsItsSourcesOnStderr(t *testing.T) {
+	writeProject(t, map[string]string{
+		"laravel-fmt.json": `{"printWidth": 100, "ignore": ["app/A.php"]}`,
+		"app/A.php":        "<?php\n",
+	})
+
+	var stdout, stderr bytes.Buffer
+
+	if err := Format(&Options{ShowConfig: "app/A.php"}, Streams{Out: &stdout, Err: &stderr}); err != nil {
+		t.Fatalf("Format(--show-config) = %v", err)
+	}
+
+	if !json.Valid(stdout.Bytes()) {
+		t.Fatalf("stdout is no longer a config:\n%s", stdout.String())
+	}
+
+	sourceOf := map[string]string{}
+
+	for line := range strings.Lines(stderr.String()) {
+		if fields := strings.Fields(line); len(fields) == 3 {
+			sourceOf[fields[0]] = fields[2]
+		}
+	}
+
+	if sourceOf["printWidth"] != "laravel-fmt.json" || sourceOf["indentWidth"] != "default" {
+		t.Fatalf("sources = %v, want printWidth from laravel-fmt.json and indentWidth default", sourceOf)
+	}
+
+	if !strings.Contains(stderr.String(), "app/A.php: ignored") {
+		t.Fatalf("stderr %q does not report the file as ignored", stderr.String())
+	}
+}
+
+func TestUnreadPrettierConfigIsWarnedOnEveryRun(t *testing.T) {
+	writeProject(t, map[string]string{
+		"prettier.config.js": "export default {}\n",
+		"app/A.php":          "<?php\n",
+	})
+
+	var stderr bytes.Buffer
+
+	if err := Format(&Options{Check: true}, Streams{Out: &bytes.Buffer{}, Err: &stderr}); err != nil {
+		t.Fatalf("Format(--check) = %v", err)
+	}
+
+	if !strings.Contains(stderr.String(), "prettier.config.js: not read") {
+		t.Fatalf("stderr %q does not warn about the unread Prettier config", stderr.String())
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/goccy/go-yaml"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
@@ -22,6 +23,7 @@ import (
 const (
 	prettierKindPackageJSON = iota
 	prettierKindConfig
+	prettierKindTOML
 	prettierKindUnsupported
 )
 
@@ -35,18 +37,22 @@ var prettierCandidates = []struct {
 	{"package.json", prettierKindPackageJSON},
 	{".prettierrc", prettierKindConfig},
 	{".prettierrc.json", prettierKindConfig},
-	{".prettierrc.yaml", prettierKindConfig},
 	{".prettierrc.yml", prettierKindConfig},
+	{".prettierrc.yaml", prettierKindConfig},
 	{".prettierrc.json5", prettierKindUnsupported},
-	{".prettierrc.toml", prettierKindUnsupported},
 	{".prettierrc.js", prettierKindUnsupported},
-	{".prettierrc.cjs", prettierKindUnsupported},
-	{".prettierrc.mjs", prettierKindUnsupported},
-	{".prettierrc.ts", prettierKindUnsupported},
 	{"prettier.config.js", prettierKindUnsupported},
-	{"prettier.config.cjs", prettierKindUnsupported},
-	{"prettier.config.mjs", prettierKindUnsupported},
+	{".prettierrc.ts", prettierKindUnsupported},
 	{"prettier.config.ts", prettierKindUnsupported},
+	{".prettierrc.mjs", prettierKindUnsupported},
+	{"prettier.config.mjs", prettierKindUnsupported},
+	{".prettierrc.mts", prettierKindUnsupported},
+	{"prettier.config.mts", prettierKindUnsupported},
+	{".prettierrc.cjs", prettierKindUnsupported},
+	{"prettier.config.cjs", prettierKindUnsupported},
+	{".prettierrc.cts", prettierKindUnsupported},
+	{"prettier.config.cts", prettierKindUnsupported},
+	{".prettierrc.toml", prettierKindTOML},
 }
 
 // PrettierResolver finds a file's Prettier config as Prettier does: the
@@ -143,6 +149,7 @@ type Prettier struct {
 	Options   prettierOptions
 	Overrides []prettierOverride
 	Plugins   []string
+	Unread    bool
 }
 
 // Prettier 3 loads only the plugins its config lists, so without one its
@@ -245,13 +252,13 @@ func detectPrettier(root string) (Prettier, bool, error) {
 			}
 
 			return prettier, true, nil
-		case prettierKindConfig:
-			return loadPrettierConfig(path)
+		case prettierKindConfig, prettierKindTOML:
+			return loadPrettierConfig(path, candidate.kind)
 		default:
 			// Prettier uses this file, which laravel-fmt cannot evaluate. It
 			// counts as found with no options, so the search stops here as
 			// Prettier's does.
-			return Prettier{Path: path}, true, nil
+			return Prettier{Path: path, Unread: true}, true, nil
 		}
 	}
 
@@ -297,10 +304,17 @@ func nameKey(name string) string {
 	return name
 }
 
-func loadPrettierConfig(path string) (Prettier, bool, error) {
+func loadPrettierConfig(path string, kind int) (Prettier, bool, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Prettier{}, false, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	if kind == prettierKindTOML {
+		raw, err = prettierTOMLAsJSON(path, raw)
+		if err != nil {
+			return Prettier{}, false, err
+		}
 	}
 
 	prettier, err := parsePrettierConfig(path, raw)
@@ -309,6 +323,21 @@ func loadPrettierConfig(path string) (Prettier, bool, error) {
 	}
 
 	return prettier, true, nil
+}
+
+func prettierTOMLAsJSON(path string, raw []byte) ([]byte, error) {
+	var parsed map[string]any
+
+	if err := toml.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+
+	encoded, err := json.Marshal(parsed)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+
+	return encoded, nil
 }
 
 func loadPrettierFromPackageJSON(path string) (Prettier, bool, error) {

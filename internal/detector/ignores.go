@@ -13,7 +13,7 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/walk"
 )
 
-const prettierIgnoreFile = ".prettierignore"
+const prettierIgnoreFileName = ".prettierignore"
 
 // finderRegexModifiers are the PCRE modifiers Symfony Finder accepts after a
 // regex delimiter.
@@ -92,7 +92,7 @@ func oxfmtOwnsFrontend(dir string) (bool, error) {
 
 // .prettierignore is gitignore syntax, so its lines go to the walk unread.
 func prettierIgnores(dir string) ([]string, error) {
-	lines, err := walk.ReadIgnoreFile(filepath.Join(dir, prettierIgnoreFile))
+	lines, err := walk.ReadIgnoreFile(filepath.Join(dir, prettierIgnoreFileName))
 	if err != nil {
 		return nil, fmt.Errorf("prettier ignores: %w", err)
 	}

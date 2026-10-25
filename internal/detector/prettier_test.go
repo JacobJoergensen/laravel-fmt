@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
+	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
 )
 
 func TestDetectPrettierParsesJSON(t *testing.T) {
@@ -99,6 +100,37 @@ overrides:
 	wantStringPtr(t, resolved.ProseWrap, "always", "override ProseWrap")
 }
 
+func TestDetectPrettierReadsTOML(t *testing.T) {
+	dir := t.TempDir()
+	seedFileAt(t, dir, ".prettierrc.toml", `printWidth = 70
+plugins = ["@prettier/plugin-php"]
+
+[[overrides]]
+files = "*.md"
+
+[overrides.options]
+proseWrap = "always"
+`)
+
+	prettier, found, err := detectPrettier(dir)
+	if err != nil {
+		t.Fatalf("detectPrettier: %v", err)
+	}
+
+	if !found {
+		t.Fatal("detectPrettier reported not found, want found")
+	}
+
+	wantIntPtr(t, prettier.Options.PrintWidth, 70, "PrintWidth")
+
+	if !prettier.formats(formatter.LangPHP) {
+		t.Fatalf("Plugins = %q, want the PHP plugin read", prettier.Plugins)
+	}
+
+	resolved := prettier.ResolveForFile("README.md")
+	wantStringPtr(t, resolved.ProseWrap, "always", "override ProseWrap")
+}
+
 func TestDetectPrettierYAMLFilesArray(t *testing.T) {
 	dir := t.TempDir()
 	seedFileAt(t, dir, ".prettierrc.yml", `overrides:
@@ -172,7 +204,7 @@ func TestDetectPrettierPackageJSONStringReferenceNotDetected(t *testing.T) {
 	}
 }
 
-func TestDetectPrettierUnsupportedFormAdoptsNothing(t *testing.T) {
+func TestDetectPrettierUnsupportedFormIsUnreadAndAdoptsNothing(t *testing.T) {
 	dir := t.TempDir()
 	seedFileAt(t, dir, ".prettierrc.js", `module.exports = { printWidth: 100 }`)
 
@@ -181,8 +213,8 @@ func TestDetectPrettierUnsupportedFormAdoptsNothing(t *testing.T) {
 		t.Fatalf("detectPrettier: %v", err)
 	}
 
-	if !found || prettier.Options != (prettierOptions{}) || prettier.Overrides != nil {
-		t.Fatalf("detectPrettier = %+v, found %v; want found with no options", prettier, found)
+	if !found || !prettier.Unread || prettier.Options != (prettierOptions{}) || prettier.Overrides != nil {
+		t.Fatalf("detectPrettier = %+v, found %v; want found, unread, with no options", prettier, found)
 	}
 }
 
@@ -408,5 +440,67 @@ func TestNestedPrettierStylesheetSortsTheFilesBelowIt(t *testing.T) {
 
 	if resolveLayout(t, files, "app/a.blade.php").Tailwind {
 		t.Fatal("a file outside the config was sorted with its stylesheet")
+	}
+}
+
+func TestDetectPrettierFollowsPrettiersSearchOrder(t *testing.T) {
+	tests := []struct {
+		name       string
+		files      map[string]string
+		wantFile   string
+		wantUnread bool
+		wantWidth  int
+	}{
+		{
+			name: "a JS config wins over TOML",
+			files: map[string]string{
+				"prettier.config.js": "export default {}",
+				".prettierrc.toml":   "printWidth = 100\n",
+			},
+			wantFile:   "prettier.config.js",
+			wantUnread: true,
+		},
+		{
+			name: ".yml wins over .yaml",
+			files: map[string]string{
+				".prettierrc.yml":  "printWidth: 70\n",
+				".prettierrc.yaml": "printWidth: 90\n",
+			},
+			wantFile:  ".prettierrc.yml",
+			wantWidth: 70,
+		},
+		{
+			name:       "prettier.config.mts is found",
+			files:      map[string]string{"prettier.config.mts": "export default {}"},
+			wantFile:   "prettier.config.mts",
+			wantUnread: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			for rel, body := range tc.files {
+				seedFileAt(t, dir, rel, body)
+			}
+
+			got, found, err := detectPrettier(dir)
+			if err != nil {
+				t.Fatalf("detectPrettier: %v", err)
+			}
+
+			if !found {
+				t.Fatalf("found = false, want %s", tc.wantFile)
+			}
+
+			if filepath.Base(got.Path) != tc.wantFile || got.Unread != tc.wantUnread {
+				t.Fatalf("detectPrettier = %s, unread %v; want %s, unread %v", got.Path, got.Unread, tc.wantFile, tc.wantUnread)
+			}
+
+			if tc.wantWidth != 0 {
+				wantIntPtr(t, got.Options.PrintWidth, tc.wantWidth, "PrintWidth")
+			}
+		})
 	}
 }
