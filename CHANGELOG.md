@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.5.0 (2026-10-26)
 * Added support for `.prettierrc.toml`
 * Added a warning when the project's Prettier config is a JS, TS or JSON5 file, which laravel-fmt can't read
 * Improved `--show-config` to show which config each layout setting comes from, and to say when the file is ignored
