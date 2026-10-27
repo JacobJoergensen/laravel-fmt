@@ -1,6 +1,9 @@
 package detector
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
@@ -86,9 +89,12 @@ func TestDetectMagoMissingFile(t *testing.T) {
 
 func TestDetectMagoWithoutFormatterTable(t *testing.T) {
 	dir := t.TempDir()
-	seedFileAt(t, dir, "mago.toml", `[linter]
+	seedFileAt(t, dir, "mago.toml", `extends = "base.toml"
+
+[linter]
 level = "strict"
 `)
+	seedFileAt(t, dir, "base.toml", "[analyzer]\n")
 
 	mago, found, err := detectMago(dir)
 	if err != nil {
@@ -96,11 +102,179 @@ level = "strict"
 	}
 
 	if found {
-		t.Fatal("detectMago reported found for a [formatter]-less file, want not found")
+		t.Fatal("detectMago reported found for a [formatter]-less chain, want not found")
 	}
 
 	if mago != (Mago{}) {
 		t.Fatalf("Mago = %+v, want zero value", mago)
+	}
+}
+
+func TestDetectMagoReadsTheProjectFileAndItsExtends(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+		want  int
+	}{
+		{
+			name: "the file's own key beats its parent's",
+			files: map[string]string{
+				"mago.toml": "extends = \"base.toml\"\n[formatter]\nprint-width = 100\n",
+				"base.toml": "[formatter]\nprint-width = 90\n",
+			},
+			want: 100,
+		},
+		{
+			name: "a later extends entry beats an earlier one",
+			files: map[string]string{
+				"mago.toml": `extends = ["a.toml", "b.toml"]`,
+				"a.toml":    "[formatter]\nprint-width = 80\n",
+				"b.toml":    "[formatter]\nprint-width = 90\n",
+			},
+			want: 90,
+		},
+		{
+			name: "a parent's extends resolves next to the parent, before its own keys",
+			files: map[string]string{
+				"mago.toml":        `extends = "shared/base.toml"`,
+				"shared/base.toml": "extends = \"root.toml\"\n[formatter]\nprint-width = 90\n",
+				"shared/root.toml": "[formatter]\nprint-width = 80\n",
+			},
+			want: 90,
+		},
+		{
+			name: "a folder entry reads the mago file inside it",
+			files: map[string]string{
+				"mago.toml":                    `extends = "vendor/acme/config"`,
+				"vendor/acme/config/mago.yaml": "formatter:\n  print-width: 90\n",
+			},
+			want: 90,
+		},
+		{
+			name: "a folder entry without a mago file is skipped",
+			files: map[string]string{
+				"mago.toml":       `extends = ["empty", "base.json"]`,
+				"empty/README.md": "",
+				"base.json":       `{"formatter": {"print-width": 90}}`,
+			},
+			want: 90,
+		},
+		{
+			name: "mago.dist.toml is read when there is no mago file",
+			files: map[string]string{
+				"mago.dist.toml": "[formatter]\nprint-width = 90\n",
+			},
+			want: 90,
+		},
+		{
+			name: "mago.toml beats mago.dist.toml",
+			files: map[string]string{
+				"mago.toml":      "[formatter]\nprint-width = 90\n",
+				"mago.dist.toml": "[formatter]\nprint-width = 80\n",
+			},
+			want: 90,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for rel, body := range test.files {
+				seedFileAt(t, dir, rel, body)
+			}
+
+			mago, found, err := detectMago(dir)
+			if err != nil {
+				t.Fatalf("detectMago: %v", err)
+			}
+
+			if !found {
+				t.Fatal("detectMago reported not found, want found")
+			}
+
+			wantIntPtr(t, mago.PrintWidth, test.want, "PrintWidth")
+		})
+	}
+}
+
+func TestDetectMagoResolvesExtendsNextToASymlinkedConfig(t *testing.T) {
+	dir := t.TempDir()
+	seedFileAt(t, dir, "shared/mago.toml", `extends = "./base.toml"`)
+	seedFileAt(t, dir, "project/base.toml", "[formatter]\nprint-width = 90\n")
+
+	link := filepath.Join(dir, "project", "mago.toml")
+	if err := os.Symlink(filepath.Join(dir, "shared", "mago.toml"), link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	mago, found, err := detectMago(filepath.Join(dir, "project"))
+	if err != nil {
+		t.Fatalf("detectMago: %v", err)
+	}
+
+	if !found {
+		t.Fatal("detectMago reported not found, want found")
+	}
+
+	wantIntPtr(t, mago.PrintWidth, 90, "PrintWidth")
+}
+
+func TestDetectMagoRejectsBrokenExtends(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{
+			name:  "missing target",
+			files: map[string]string{"mago.toml": `extends = "missing.toml"`},
+			want:  `resolve mago extends "missing.toml"`,
+		},
+		{
+			name: "cycle",
+			files: map[string]string{
+				"mago.toml": `extends = "base.toml"`,
+				"base.toml": `extends = "mago.toml"`,
+			},
+			want: "cycles back on",
+		},
+		{
+			name: "file reached twice",
+			files: map[string]string{
+				"mago.toml":   `extends = ["a.toml", "b.toml"]`,
+				"a.toml":      `extends = "shared.toml"`,
+				"b.toml":      `extends = "shared.toml"`,
+				"shared.toml": "[formatter]\nprint-width = 90\n",
+			},
+			want: "cycles back on",
+		},
+		{
+			name: "unsupported extension",
+			files: map[string]string{
+				"mago.toml": `extends = "base.ini"`,
+				"base.ini":  "",
+			},
+			want: "must be TOML, YAML or JSON",
+		},
+		{
+			name:  "extends is not a string",
+			files: map[string]string{"mago.toml": "extends = 3\n"},
+			want:  "extends must be a string",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for rel, body := range test.files {
+				seedFileAt(t, dir, rel, body)
+			}
+
+			_, _, err := detectMago(dir)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("detectMago err = %v, want one containing %q", err, test.want)
+			}
+		})
 	}
 }
 

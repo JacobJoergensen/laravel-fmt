@@ -112,6 +112,7 @@ type ArraySyntax struct {
 }
 
 type pintFile struct {
+	Extend  *string                    `json:"extend"`
 	Preset  string                     `json:"preset"`
 	Rules   map[string]json.RawMessage `json:"rules"`
 	Exclude json.RawMessage            `json:"exclude"`
@@ -131,10 +132,9 @@ func detectPint(root string) (Pint, bool, error) {
 		return Pint{}, false, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	var parsed pintFile
-
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return Pint{}, false, config.ParseJSONError(path, raw, err)
+	parsed, err := parsePintFile(path, raw)
+	if err != nil {
+		return Pint{}, false, err
 	}
 
 	pint := rulesToPint(parsed.Rules)
@@ -145,6 +145,91 @@ func detectPint(root string) (Pint, bool, error) {
 	pint.NotPath = finderList(parsed.NotPath)
 
 	return pint, true, nil
+}
+
+func parsePintFile(path string, raw []byte) (pintFile, error) {
+	var parsed pintFile
+
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return pintFile{}, config.ParseJSONError(path, raw, err)
+	}
+
+	if parsed.Extend == nil {
+		return parsed, nil
+	}
+
+	merged, err := extendPint(path, *parsed.Extend, raw)
+	if err != nil {
+		return pintFile{}, err
+	}
+
+	var extended pintFile
+
+	if err := json.Unmarshal(merged, &extended); err != nil {
+		return pintFile{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+
+	return extended, nil
+}
+
+func extendPint(path, extend string, raw []byte) ([]byte, error) {
+	// Joined without cleaning, as Pint does, so `..` resolves through symlinks.
+	basePath := filepath.Dir(path) + string(filepath.Separator) + extend
+
+	baseRaw, err := os.ReadFile(basePath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", basePath, err)
+	}
+
+	var base, own map[string]any
+
+	if err := json.Unmarshal(baseRaw, &base); err != nil {
+		return nil, config.ParseJSONError(basePath, baseRaw, err)
+	}
+
+	if base["extend"] != nil {
+		return nil, fmt.Errorf("read %s: Pint cannot extend from more than 1 file", basePath)
+	}
+
+	if err := json.Unmarshal(raw, &own); err != nil {
+		return nil, config.ParseJSONError(path, raw, err)
+	}
+
+	merged, err := json.Marshal(replaceRecursive(base, own))
+	if err != nil {
+		return nil, fmt.Errorf("merge %s into %s: %w", path, basePath, err)
+	}
+
+	return merged, nil
+}
+
+// replaceRecursive is PHP's array_replace_recursive over decoded JSON: objects
+// merge by key and lists by index, at any depth; anything else is replaced.
+func replaceRecursive(base, overlay any) any {
+	switch overlay := overlay.(type) {
+	case map[string]any:
+		if base, ok := base.(map[string]any); ok {
+			for key, value := range overlay {
+				base[key] = replaceRecursive(base[key], value)
+			}
+
+			return base
+		}
+	case []any:
+		if base, ok := base.([]any); ok {
+			for i, value := range overlay {
+				if i < len(base) {
+					base[i] = replaceRecursive(base[i], value)
+				} else {
+					base = append(base, value)
+				}
+			}
+
+			return base
+		}
+	}
+
+	return overlay
 }
 
 // Without a pint.json, Pint runs its laravel preset, and a project that

@@ -1,11 +1,14 @@
 package detector
 
 import (
-	"errors"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/goccy/go-yaml"
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
@@ -29,64 +32,245 @@ const (
 	magoPresetDrupal  = "drupal"
 )
 
-// Mago is the part of mago.toml's [formatter] table laravel-fmt applies.
+// Mago is the part of a Mago config's [formatter] table laravel-fmt applies.
 type Mago struct {
-	Path   string `toml:"-"`
-	Preset string `toml:"preset"`
+	Path   string `json:"-"`
+	Preset string `json:"preset"`
 
-	PrintWidth *int    `toml:"print-width"`
-	TabWidth   *int    `toml:"tab-width"`
-	UseTabs    *bool   `toml:"use-tabs"`
-	EndOfLine  *string `toml:"end-of-line"`
+	PrintWidth *int    `json:"print-width"`
+	TabWidth   *int    `json:"tab-width"`
+	UseTabs    *bool   `json:"use-tabs"`
+	EndOfLine  *string `json:"end-of-line"`
 
-	RemoveTrailingCloseTag *bool `toml:"remove-trailing-close-tag"`
+	RemoveTrailingCloseTag *bool `json:"remove-trailing-close-tag"`
 
-	FunctionBraceStyle  *string `toml:"function-brace-style"`
-	MethodBraceStyle    *string `toml:"method-brace-style"`
-	ClasslikeBraceStyle *string `toml:"classlike-brace-style"`
-	ControlBraceStyle   *string `toml:"control-brace-style"`
+	FunctionBraceStyle  *string `json:"function-brace-style"`
+	MethodBraceStyle    *string `json:"method-brace-style"`
+	ClasslikeBraceStyle *string `json:"classlike-brace-style"`
+	ControlBraceStyle   *string `json:"control-brace-style"`
 
-	ConcatSpace    *bool `toml:"space-around-concatenation-binary-operator"`
-	ClosureFnSpace *bool `toml:"space-before-arrow-function-parameter-list-parenthesis"`
+	ConcatSpace    *bool `json:"space-around-concatenation-binary-operator"`
+	ClosureFnSpace *bool `json:"space-before-arrow-function-parameter-list-parenthesis"`
 
-	BlankLineBeforeReturn *bool `toml:"empty-line-before-return"`
-	IndentHeredoc         *bool `toml:"indent-heredoc"`
+	BlankLineBeforeReturn *bool `json:"empty-line-before-return"`
+	IndentHeredoc         *bool `json:"indent-heredoc"`
 
-	SortUses        *bool `toml:"sort-uses"`
-	ExpandUseGroups *bool `toml:"expand-use-groups"`
+	SortUses        *bool `json:"sort-uses"`
+	ExpandUseGroups *bool `json:"expand-use-groups"`
 }
 
-type magoFile struct {
-	Formatter *Mago `toml:"formatter"`
-}
+var (
+	magoNames        = []string{"mago.toml", "mago.yaml", "mago.yml", "mago.json"}
+	magoProjectNames = []string{
+		"mago.toml", "mago.yaml", "mago.yml", "mago.json",
+		"mago.dist.toml", "mago.dist.yaml", "mago.dist.yml", "mago.dist.json",
+	}
+)
 
-// A mago.toml without a [formatter] table only configures linting or
-// analysis, so it counts as not found.
+// A Mago config whose extends chain has no [formatter] table only configures
+// linting or analysis, so it counts as not found.
 func detectMago(root string) (Mago, bool, error) {
-	path := filepath.Join(root, "mago.toml")
+	path, err := findMagoFile(root, magoProjectNames)
+	if err != nil || path == "" {
+		return Mago{}, false, err
+	}
 
-	raw, err := os.ReadFile(path)
+	formatter, err := loadMagoFormatter(path, map[string]bool{})
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return Mago{}, false, nil
-		}
-
-		return Mago{}, false, fmt.Errorf("read %s: %w", path, err)
+		return Mago{}, false, err
 	}
 
-	var parsed magoFile
-
-	if err := toml.Unmarshal(raw, &parsed); err != nil {
-		return Mago{}, false, fmt.Errorf("parse %s: %w", path, err)
-	}
-
-	if parsed.Formatter == nil {
+	if formatter == nil {
 		return Mago{}, false, nil
 	}
 
-	parsed.Formatter.Path = path
+	encoded, err := json.Marshal(formatter)
+	if err != nil {
+		return Mago{}, false, fmt.Errorf("encode %s formatter: %w", path, err)
+	}
 
-	return *parsed.Formatter, true, nil
+	var mago Mago
+
+	if err := json.Unmarshal(encoded, &mago); err != nil {
+		return Mago{}, false, fmt.Errorf("parse %s formatter: %w", path, err)
+	}
+
+	mago.Path = path
+
+	return mago, true, nil
+}
+
+func findMagoFile(dir string, names []string) (string, error) {
+	present, err := dirNames(dir, names)
+	if err != nil {
+		return "", err
+	}
+
+	for _, name := range names {
+		if present[nameKey(name)] {
+			return filepath.Join(dir, name), nil
+		}
+	}
+
+	return "", nil
+}
+
+// Like Mago's load_layer, and unlike its docs, a file reached twice in one
+// load is an error, even through two different parents.
+func loadMagoFormatter(path string, visited map[string]bool) (map[string]any, error) {
+	canonical, err := canonicalPath(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if visited[canonical] {
+		return nil, fmt.Errorf("mago extends cycles back on %s", canonical)
+	}
+
+	visited[canonical] = true
+
+	doc, err := readMagoFile(canonical)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := magoExtends(canonical, doc["extends"])
+	if err != nil {
+		return nil, err
+	}
+
+	// The folder as written, not the canonical one, as Mago's Path::parent
+	// does: a symlinked config extends files next to the link.
+	baseDir := strings.TrimSuffix(path, filepath.Base(path))
+
+	var merged map[string]any
+
+	for _, entry := range entries {
+		parent, err := resolveMagoExtends(entry, baseDir)
+		if err != nil {
+			return nil, err
+		}
+
+		if parent == "" {
+			continue
+		}
+
+		formatter, err := loadMagoFormatter(parent, visited)
+		if err != nil {
+			return nil, err
+		}
+
+		merged = mergeMagoTables(merged, formatter)
+	}
+
+	own, ok := doc["formatter"].(map[string]any)
+	if !ok && doc["formatter"] != nil {
+		return nil, fmt.Errorf("parse %s: formatter must be a table", canonical)
+	}
+
+	return mergeMagoTables(merged, own), nil
+}
+
+func canonicalPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", path, err)
+	}
+
+	canonical, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", path, err)
+	}
+
+	return canonical, nil
+}
+
+func readMagoFile(path string) (map[string]any, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+
+	var doc map[string]any
+
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".toml":
+		err = toml.Unmarshal(raw, &doc)
+	case ".yaml", ".yml":
+		err = yaml.Unmarshal(raw, &doc)
+	case ".json":
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return nil, config.ParseJSONError(path, raw, err)
+		}
+	default:
+		return nil, fmt.Errorf("read %s: a Mago config must be TOML, YAML or JSON", path)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+
+	return doc, nil
+}
+
+func magoExtends(path string, value any) ([]string, error) {
+	switch extends := value.(type) {
+	case nil:
+		return nil, nil
+	case string:
+		return []string{extends}, nil
+	case []any:
+		entries := make([]string, 0, len(extends))
+
+		for _, item := range extends {
+			entry, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("parse %s: extends entries must be strings", path)
+			}
+
+			entries = append(entries, entry)
+		}
+
+		return entries, nil
+	}
+
+	return nil, fmt.Errorf("parse %s: extends must be a string or a list of strings", path)
+}
+
+// An empty result is a folder with no mago file, which Mago skips.
+func resolveMagoExtends(entry, baseDir string) (string, error) {
+	// Joined without cleaning, as Mago does, so `..` resolves through symlinks.
+	target := entry
+	if !filepath.IsAbs(target) {
+		target = baseDir + target
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		return "", fmt.Errorf("resolve mago extends %q: %w", entry, err)
+	}
+
+	if !info.IsDir() {
+		return target, nil
+	}
+
+	return findMagoFile(target, magoNames)
+}
+
+// Mago deep-merges layers, but every formatter key laravel-fmt reads is a
+// scalar, where the deep merge is a plain overwrite.
+func mergeMagoTables(base, overlay map[string]any) map[string]any {
+	if overlay == nil {
+		return base
+	}
+
+	if base == nil {
+		return overlay
+	}
+
+	maps.Copy(base, overlay)
+
+	return base
 }
 
 // An unknown preset gets Mago's defaults, since Mago has no unformatted state.

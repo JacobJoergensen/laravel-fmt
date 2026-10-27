@@ -377,6 +377,105 @@ func TestDetectPintMalformedJSONErrors(t *testing.T) {
 	}
 }
 
+func TestDetectPintMergesPintJSONOverTheExtendedFile(t *testing.T) {
+	dir := t.TempDir()
+
+	seedFileAt(t, dir, "shared/base.json", `{
+    "preset": "psr12",
+    "exclude": ["build", "storage"],
+    "rules": {
+        "concat_space": {"spacing": "one"},
+        "curly_braces_position": {
+            "functions_opening_brace": "same_line",
+            "classes_opening_brace": "same_line"
+        }
+    }
+}`)
+	seedFileAt(t, dir, "pint.json", `{
+    "extend": "./shared/base.json",
+    "exclude": ["cache"],
+    "rules": {
+        "curly_braces_position": {
+            "classes_opening_brace": "next_line_unless_newline_at_signature_end"
+        }
+    }
+}`)
+
+	pint, found, err := detectPint(dir)
+	if err != nil {
+		t.Fatalf("detectPint: %v", err)
+	}
+
+	if !found {
+		t.Fatal("detectPint reported not found, want found")
+	}
+
+	if pint.Preset != "psr12" {
+		t.Errorf("Preset = %q, want the base's psr12", pint.Preset)
+	}
+
+	if pint.ConcatSpace == nil || pint.ConcatSpace.Spacing != pintSpacingOne {
+		t.Errorf("ConcatSpace = %+v, want the base's spacing=one", pint.ConcatSpace)
+	}
+
+	wantBraces := &CurlyBracesPosition{
+		FunctionsOpeningBrace: pintBraceSameLine,
+		ClassesOpeningBrace:   pintBraceNextLine,
+	}
+
+	if !reflect.DeepEqual(pint.CurlyBracesPosition, wantBraces) {
+		t.Errorf("CurlyBracesPosition = %+v, want %+v", pint.CurlyBracesPosition, wantBraces)
+	}
+
+	wantExclude := []string{"cache", "storage"}
+
+	if !reflect.DeepEqual(pint.Exclude, wantExclude) {
+		t.Errorf("Exclude = %v, want %v (lists replace by index)", pint.Exclude, wantExclude)
+	}
+}
+
+func TestDetectPintRejectsBrokenExtend(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{
+			name:  "missing target",
+			files: map[string]string{"pint.json": `{"extend": "missing.json"}`},
+			want:  "missing.json",
+		},
+		{
+			name: "target extends again",
+			files: map[string]string{
+				"pint.json": `{"extend": "base.json"}`,
+				"base.json": `{"extend": "root.json"}`,
+				"root.json": `{"preset": "laravel"}`,
+			},
+			want: "cannot extend from more than 1 file",
+		},
+		{
+			name:  "extend is not a string",
+			files: map[string]string{"pint.json": `{"extend": ["base.json"]}`},
+			want:  "extend of type string",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for rel, body := range test.files {
+				seedFileAt(t, dir, rel, body)
+			}
+
+			_, _, err := detectPint(dir)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("detectPint err = %v, want one containing %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestDetectPintHeredocIndentation(t *testing.T) {
 	tests := []struct {
 		name string

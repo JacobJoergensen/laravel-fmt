@@ -1,6 +1,8 @@
 package detector
 
 import (
+	"maps"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -440,6 +442,45 @@ func TestNestedPrettierStylesheetSortsTheFilesBelowIt(t *testing.T) {
 
 	if resolveLayout(t, files, "app/a.blade.php").Tailwind {
 		t.Fatal("a file outside the config was sorted with its stylesheet")
+	}
+}
+
+func TestDirNamesFindsCandidatesInAnUnlistableFolder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod cannot make a folder unlistable on Windows")
+	}
+
+	dir := t.TempDir()
+	seedFileAt(t, dir, ".prettierrc.json", "{}")
+
+	if err := os.Symlink(filepath.Join(dir, "missing"), filepath.Join(dir, ".prettierrc.yml")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	//nolint:gosec // a folder mode: entering it needs the execute bit
+	if err := os.Chmod(dir, 0o311); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	//nolint:gosec // restores the folder so t.TempDir can remove it
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	if _, err := os.ReadDir(dir); err == nil {
+		t.Skip("the folder is still listable, as it is for root")
+	}
+
+	present, err := dirNames(dir, []string{".prettierrc.json", ".prettierrc.yml", ".prettierrc.yaml"})
+	if err != nil {
+		t.Fatalf("dirNames: %v", err)
+	}
+
+	want := map[string]bool{
+		nameKey(".prettierrc.json"): true,
+		nameKey(".prettierrc.yml"):  true,
+	}
+
+	if !maps.Equal(present, want) {
+		t.Errorf("present = %v, want %v (a dangling symlink is listed, so it counts)", present, want)
 	}
 }
 

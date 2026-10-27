@@ -133,7 +133,7 @@ func (f *File) UseTabs() bool { return f.IndentStyle == IndentStyleTab }
 func (f *File) SingleQuote() bool { return f.QuoteStyle != QuoteStyleDouble }
 
 // PHP holds the PHP options: Pint's laravel preset, overridden by pint.json,
-// .php-cs-fixer.php or mago.toml, and those by laravel-fmt.json.
+// .php-cs-fixer.php or a Mago config, and those by laravel-fmt.json.
 type PHP struct {
 	RemoveTrailingCloseTag    bool     `json:"removeTrailingCloseTag"`
 	SortUses                  bool     `json:"sortUses"`

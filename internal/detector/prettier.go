@@ -55,6 +55,15 @@ var prettierCandidates = []struct {
 	{".prettierrc.toml", prettierKindTOML},
 }
 
+var prettierCandidateNames = func() []string {
+	names := make([]string, len(prettierCandidates))
+	for i, candidate := range prettierCandidates {
+		names[i] = candidate.name
+	}
+
+	return names
+}()
+
 // PrettierResolver finds a file's Prettier config as Prettier does: the
 // nearest one, used whole. It is safe for concurrent use.
 type PrettierResolver struct {
@@ -215,7 +224,7 @@ func (s *stringOrSlice) UnmarshalYAML(unmarshal func(any) error) error {
 }
 
 func detectPrettier(root string) (Prettier, bool, error) {
-	present, err := dirNames(root)
+	present, err := dirNames(root, prettierCandidateNames)
 	if err != nil {
 		return Prettier{}, false, err
 	}
@@ -266,12 +275,16 @@ func detectPrettier(root string) (Prettier, bool, error) {
 }
 
 // One listing per directory is cheaper than a stat per candidate name, which
-// added 7% to a monorepo run.
-func dirNames(dir string) (map[string]bool, error) {
+// added 7% to a monorepo run. A directory that can be entered but not listed,
+// like a 0711 home folder, falls back to the stat per candidate.
+func dirNames(dir string, candidates []string) (map[string]bool, error) {
 	f, err := os.Open(dir)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		switch {
+		case errors.Is(err, os.ErrNotExist):
 			return map[string]bool{}, nil
+		case errors.Is(err, os.ErrPermission):
+			return statNames(dir, candidates)
 		}
 
 		return nil, fmt.Errorf("open %s: %w", dir, err)
@@ -282,6 +295,11 @@ func dirNames(dir string) (map[string]bool, error) {
 		err = closeErr
 	}
 
+	// A Windows ACL can allow opening the folder and deny reading it.
+	if errors.Is(err, os.ErrPermission) {
+		return statNames(dir, candidates)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("list %s: %w", dir, err)
 	}
@@ -289,6 +307,29 @@ func dirNames(dir string) (map[string]bool, error) {
 	set := make(map[string]bool, len(names))
 	for _, name := range names {
 		set[nameKey(name)] = true
+	}
+
+	return set, nil
+}
+
+// Lstat, not Stat, so a dangling symlink counts as present, as a listing
+// reports it.
+func statNames(dir string, candidates []string) (map[string]bool, error) {
+	set := make(map[string]bool, len(candidates))
+
+	for _, name := range candidates {
+		path := filepath.Join(dir, name)
+
+		_, err := os.Lstat(path)
+		if err == nil {
+			set[nameKey(name)] = true
+
+			continue
+		}
+
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("stat %s: %w", path, err)
+		}
 	}
 
 	return set, nil

@@ -27,6 +27,8 @@ var viteConfigNames = []string{
 
 var oxfmtConfigNames = []string{".oxfmtrc.json", ".oxfmtrc.jsonc", "oxfmt.config.ts", "oxfmt.config.mts"}
 
+var oxfmtCandidateNames = slices.Concat(oxfmtConfigNames, viteConfigNames)
+
 var fmtProperty = regexp.MustCompile(`(?m)^\s*fmt\s*:`)
 
 // adoptIgnores adds Prettier's and Pint's ignore lists, so moving from those
@@ -63,7 +65,7 @@ func adoptIgnores(cfg *config.File, ctx Context, anchor string) error {
 // A Vite+ config formats only with a `fmt` block, which `vp check` applies to
 // every file Oxfmt supports; without one it only builds.
 func oxfmtOwnsFrontend(dir string) (bool, error) {
-	names, err := dirNames(dir)
+	names, err := dirNames(dir, oxfmtCandidateNames)
 	if err != nil {
 		return false, err
 	}
