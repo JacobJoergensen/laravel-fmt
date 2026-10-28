@@ -213,7 +213,8 @@ func (p *parser) expect(kind Kind) Token {
 const maxErrors = 50
 
 func (p *parser) addError(pos Position, msg string) {
-	if len(p.errors) >= maxErrors {
+	// Past the depth cap every bracket still open reports itself unclosed.
+	if p.depthExceeded || len(p.errors) >= maxErrors {
 		return
 	}
 
@@ -499,8 +500,8 @@ func (p *parser) parseExpression(minPrec int) Expr {
 
 	if p.depth > maxNestingDepth {
 		if !p.depthExceeded {
-			p.depthExceeded = true
 			p.addError(tok.Span.Start, "maximum nesting depth exceeded")
+			p.depthExceeded = true
 		}
 
 		p.advance()

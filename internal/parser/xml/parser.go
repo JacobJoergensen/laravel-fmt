@@ -10,11 +10,27 @@ import (
 type xmlParser struct {
 	parserpkg.Cursor
 
-	errors []Error
+	errors        []Error
+	depth         int
+	depthExceeded bool
 }
 
+// maxNestingDepth caps element recursion: deeper, a pathological file
+// exhausts the Go stack, a fatal error no recover can catch.
+const maxNestingDepth = 500
+
 func (p *xmlParser) addError(pos Position, msg string) {
+	if p.depthExceeded {
+		return
+	}
+
 	p.errors = append(p.errors, Error{Pos: pos, Msg: msg})
+}
+
+func (p *xmlParser) exceedDepth() {
+	p.addError(p.Pos, "maximum nesting depth exceeded")
+	p.depthExceeded = true
+	p.AdvanceN(len(p.Src) - p.Pos.Offset)
 }
 
 func (p *xmlParser) parseNodes(stack [][]byte) []Node {
@@ -25,7 +41,9 @@ func (p *xmlParser) parseNodes(stack [][]byte) []Node {
 			break
 		}
 
-		nodes = append(nodes, p.parseNext(stack))
+		if n := p.parseNext(stack); n != nil {
+			nodes = append(nodes, n)
+		}
 	}
 
 	return nodes
@@ -224,6 +242,15 @@ func (p *xmlParser) parseProcessingInstruction() Node {
 }
 
 func (p *xmlParser) parseElement(stack [][]byte) Node {
+	p.depth++
+	defer func() { p.depth-- }()
+
+	if p.depth > maxNestingDepth {
+		p.exceedDepth()
+
+		return nil
+	}
+
 	openStart := p.Pos
 	p.Advance()
 	open := Span{Start: openStart, End: p.Pos}

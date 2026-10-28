@@ -76,6 +76,8 @@ func TestFormatLeavesAViewWithoutAComponentToBlade(t *testing.T) {
 	}{
 		{"xml prolog echo", "<?php echo '<?xml version=\"1.0\"?>'; ?>\n<urlset>\n@foreach ($items as $item)\n<url>{{ $item }}</url>\n@endforeach\n</urlset>\n"},
 		{"import only", "<?php use App\\Enums\\Status; ?>\n<div>{{ Status::Active->label() }}</div>\n"},
+		{"alt-syntax if", "<?php if ($show): ?>\n<div>{{ $x }}</div>\n<?php endif; ?>\n"},
+		{"brace if", "<?php if ($show) { ?>\n<p>x</p>\n<?php } ?>\n"},
 	}
 
 	cfg := config.Default()
@@ -100,7 +102,7 @@ func TestFormatLeavesAViewWithoutAComponentToBlade(t *testing.T) {
 }
 
 func TestFormatRejectsInvalidSource(t *testing.T) {
-	out, err := Format([]byte("<?php\nnew Foo(...);\n?>\n<div></div>\n"), config.Default())
+	out, err := Format([]byte("<?php\nnew class extends Component {\n    public $x = ;\n};\n?>\n<div></div>\n"), config.Default())
 
 	if err == nil {
 		t.Fatal("Format accepted invalid source; want a parse error")

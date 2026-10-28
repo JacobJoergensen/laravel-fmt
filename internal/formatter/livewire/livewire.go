@@ -38,14 +38,16 @@ func LooksLikeSFC(src []byte) bool {
 func Format(src []byte, cfg *config.File) ([]byte, error) {
 	file, errs := parser.Parse(src, bladefmt.Directives(cfg))
 
-	if err := formatter.JoinErrors(errs); err != nil {
-		return nil, fmt.Errorf("parse: %w", err)
-	}
-
 	// A plain view may open with `<?php` too (`<?php echo '<?xml …'; ?>`), and
-	// its block renders: reshaping it would change the page.
+	// its block renders: reshaping it would change the page. This runs before
+	// the error check because half a structure (`<?php if ($a): ?>`) cannot
+	// parse alone, while a broken component still recovers its class.
 	if !holdsComponent(file.PHP) {
 		return bladefmt.Format(src, cfg)
+	}
+
+	if err := formatter.JoinErrors(errs); err != nil {
+		return nil, fmt.Errorf("parse: %w", err)
 	}
 
 	hasPHP := file.PHP != nil && len(file.PHP.Stmts) > 0

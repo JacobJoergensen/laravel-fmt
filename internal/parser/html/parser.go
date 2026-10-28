@@ -16,10 +16,27 @@ type htmlParser struct {
 	// </name> close tags. Built lazily and reused so void/paired disambiguation
 	// is a binary search, not a per-element rescan. nil until built.
 	closeIndex map[string][]int
+
+	depth         int
+	depthExceeded bool
 }
 
+// maxNestingDepth caps element recursion: deeper, a pathological file
+// exhausts the Go stack, a fatal error no recover can catch.
+const maxNestingDepth = 500
+
 func (p *htmlParser) addError(pos Position, msg string) {
+	if p.depthExceeded {
+		return
+	}
+
 	p.errors = append(p.errors, Error{Pos: pos, Msg: msg})
+}
+
+func (p *htmlParser) exceedDepth() {
+	p.addError(p.Pos, "maximum nesting depth exceeded")
+	p.depthExceeded = true
+	p.AdvanceN(len(p.Src) - p.Pos.Offset)
 }
 
 func (p *htmlParser) parseNodes(stack [][]byte) []Node {
@@ -187,6 +204,15 @@ func (p *htmlParser) parseDoctype() Node {
 }
 
 func (p *htmlParser) parseElement(stack [][]byte) Node {
+	p.depth++
+	defer func() { p.depth-- }()
+
+	if p.depth > maxNestingDepth {
+		p.exceedDepth()
+
+		return nil
+	}
+
 	openStart := p.Pos
 	p.Advance()
 	open := Span{Start: openStart, End: p.Pos}

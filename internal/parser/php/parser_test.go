@@ -1075,3 +1075,14 @@ func TestParseAcceptsValidAndRejectsInvalidSyntax(t *testing.T) {
 		})
 	}
 }
+
+func TestDeepNestingReportsOneError(t *testing.T) {
+	n := maxNestingDepth + 50
+	src := "<?php\n$x = " + strings.Repeat("(", n) + "1" + strings.Repeat(")", n) + ";\n"
+
+	_, errs := Parse([]byte(src))
+
+	if len(errs) != 1 || errs[0].Msg != "maximum nesting depth exceeded" {
+		t.Fatalf("errors = %v, want one depth error", errs)
+	}
+}

@@ -11,8 +11,9 @@ import (
 type jsonParser struct {
 	parserpkg.Cursor
 
-	errors []Error
-	depth  int
+	errors        []Error
+	depth         int
+	depthExceeded bool
 
 	// jsonc enables comments and trailing commas (tsconfig.json and friends).
 	// Strict JSON keeps every comment/trailing-comma path inert.
@@ -28,7 +29,17 @@ type jsonParser struct {
 const maxNestingDepth = 500
 
 func (p *jsonParser) addError(pos Position, msg string) {
+	if p.depthExceeded {
+		return
+	}
+
 	p.errors = append(p.errors, Error{Pos: pos, Msg: msg})
+}
+
+func (p *jsonParser) exceedDepth() {
+	p.addError(p.Pos, "maximum nesting depth exceeded")
+	p.depthExceeded = true
+	p.AdvanceN(len(p.Src) - p.Pos.Offset)
 }
 
 func (p *jsonParser) parseDocument() Value {
@@ -145,7 +156,7 @@ func (p *jsonParser) parseValue() Value {
 	defer func() { p.depth-- }()
 
 	if p.depth > maxNestingDepth {
-		p.addError(p.Pos, "maximum nesting depth exceeded")
+		p.exceedDepth()
 
 		return nil
 	}

@@ -37,7 +37,19 @@ type bladeParser struct {
 	// changes the body's shape, not whether that closer is reached. Keying on
 	// the stack made every opener search once per depth it was reached at.
 	failedBlocks map[blockMemoKey]bool
+
+	// depthErr lives apart from errors because a block or element that rolls
+	// back truncates errors, and the cap must survive that. Once set, every
+	// node parse jumps to end, the position EOF was first reached at.
+	depth    int
+	depthErr *Error
+	end      Position
 }
+
+// maxNestingDepth caps elements and blocks together, since both recurse
+// through parseNext: deeper, a pathological file exhausts the Go stack, a
+// fatal error no recover can catch.
+const maxNestingDepth = 500
 
 type blockMemoKey struct {
 	offset int
@@ -129,7 +141,21 @@ var blockDirectiveBareBranches = map[string]map[string]bool{
 }
 
 func (p *bladeParser) addError(pos Position, msg string) {
+	if p.depthErr != nil {
+		return
+	}
+
 	p.errors = append(p.errors, Error{Pos: pos, Msg: msg})
+}
+
+func (p *bladeParser) exceedDepth() {
+	if p.depthErr == nil {
+		p.depthErr = &Error{Pos: p.Pos, Msg: "maximum nesting depth exceeded"}
+		p.AdvanceN(len(p.Src) - p.Pos.Offset)
+		p.end = p.Pos
+	}
+
+	p.Pos = p.end
 }
 
 // rehomeErrors moves PHP sub-parse errors onto file coordinates. The sub-parsers
@@ -173,6 +199,15 @@ func (p *bladeParser) parseFile() []Node {
 // directive bodies, and bounds void-element relaxation and the omitted-end-tag
 // boundary.
 func (p *bladeParser) parseNext(stack [][]byte) Node {
+	p.depth++
+	defer func() { p.depth-- }()
+
+	if p.depth > maxNestingDepth || p.depthErr != nil {
+		p.exceedDepth()
+
+		return nil
+	}
+
 	switch {
 	case p.StartsWith("{{--"):
 		return p.parseComment()

@@ -1,6 +1,7 @@
 package css
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -274,6 +275,37 @@ func TestAtRuleBlockAndStatementForms(t *testing.T) {
 				if at.Semicolon.End.Offset == 0 {
 					t.Fatalf("statement form missing semicolon span")
 				}
+			}
+		})
+	}
+}
+
+func TestParseCapsNestingDepth(t *testing.T) {
+	cases := []struct {
+		name       string
+		depth      int
+		wantErr    bool
+		wantColumn int
+	}{
+		{"at the cap", maxNestingDepth, false, 0},
+		{"past the cap", maxNestingDepth + 1, true, len("a{")*(maxNestingDepth+1) + 1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := strings.Repeat("a{", tc.depth) + strings.Repeat("}", tc.depth)
+			_, errs := Parse([]byte(src))
+
+			if !tc.wantErr {
+				if len(errs) != 0 {
+					t.Fatalf("errors = %v, want none", errs)
+				}
+
+				return
+			}
+
+			if len(errs) != 1 || errs[0].Msg != "maximum nesting depth exceeded" || errs[0].Pos.Column != tc.wantColumn {
+				t.Fatalf("errors = %v, want one depth error at column %d", errs, tc.wantColumn)
 			}
 		})
 	}

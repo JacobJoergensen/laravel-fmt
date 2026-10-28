@@ -10,15 +10,42 @@ import (
 type cssParser struct {
 	parserpkg.Cursor
 
-	errors []Error
+	errors        []Error
+	depth         int
+	depthExceeded bool
 }
 
+// maxNestingDepth caps block recursion: deeper, a pathological file exhausts
+// the Go stack, a fatal error no recover can catch.
+const maxNestingDepth = 500
+
 func (p *cssParser) addError(pos Position, msg string) {
+	if p.depthExceeded {
+		return
+	}
+
 	p.errors = append(p.errors, Error{Pos: pos, Msg: msg})
+}
+
+func (p *cssParser) exceedDepth() {
+	p.addError(p.Pos, "maximum nesting depth exceeded")
+	p.depthExceeded = true
+	p.AdvanceN(len(p.Src) - p.Pos.Offset)
 }
 
 func (p *cssParser) parseNodes(inBlock bool) []Node {
 	var nodes []Node
+
+	if inBlock {
+		p.depth++
+		defer func() { p.depth-- }()
+
+		if p.depth > maxNestingDepth {
+			p.exceedDepth()
+
+			return nil
+		}
+	}
 
 	for !p.Eof() {
 		p.skipWhitespace()

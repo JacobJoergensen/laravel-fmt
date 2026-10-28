@@ -242,17 +242,17 @@ func TestParseRejectsDeepNestingWithoutCrashing(t *testing.T) {
 		src = append(src, ']')
 	}
 
-	errCount := make(chan int, 1)
+	result := make(chan []Error, 1)
 
 	go func() {
 		_, errs := Parse(src)
-		errCount <- len(errs)
+		result <- errs
 	}()
 
 	select {
-	case got := <-errCount:
-		if got == 0 {
-			t.Fatalf("expected a depth-limit error on input nested %d deep", n)
+	case errs := <-result:
+		if len(errs) != 1 || errs[0].Msg != "maximum nesting depth exceeded" {
+			t.Fatalf("errors = %v, want one depth error on input nested %d deep", errs, n)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("Parse did not return on deeply nested input")

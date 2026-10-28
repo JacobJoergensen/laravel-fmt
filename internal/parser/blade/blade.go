@@ -17,6 +17,11 @@ func ParseAt(src []byte, start Position, dirs *Directives) (*File, []Error) {
 
 	p := &bladeParser{Src: src, Pos: start, dirs: dirs}
 	nodes := p.parseFile()
+	file := &File{Src: src, Nodes: nodes, Directives: dirs}
 
-	return &File{Src: src, Nodes: nodes, Directives: dirs}, p.errors
+	if p.depthErr != nil {
+		return file, append(p.errors, *p.depthErr)
+	}
+
+	return file, p.errors
 }

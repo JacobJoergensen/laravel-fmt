@@ -12,6 +12,9 @@
 * Fixed an invalid `package.json` failing the run instead of being passed over, as Prettier does
 * Fixed a shared Prettier config named in `package.json` being skipped for a `.prettierrc` Prettier itself would ignore
 * Fixed `init` run from a subfolder of a Laravel app writing a `laravel-fmt.json` that is never read
+* Fixed a Blade view opening with `<?php if (...): ?>` or `<?php if (...) { ?>` failing as a broken Livewire component
+* Fixed deeply nested CSS, HTML, XML or Blade crashing the whole run instead of reporting the file
+* Fixed a too-deeply nested JSON or PHP file reporting hundreds of follow-on errors after the depth error
 
 ## Version 0.5.0 (2026-10-26)
 * Added support for `.prettierrc.toml`
