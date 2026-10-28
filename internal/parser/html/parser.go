@@ -168,7 +168,7 @@ func (p *htmlParser) parseComment() Node {
 	if p.StartsWith("-->") {
 		p.AdvanceN(3)
 	} else {
-		p.addError(p.Pos, "expected --> to close HTML comment")
+		p.addError(openStart, "unterminated HTML comment")
 	}
 
 	return &Comment{

@@ -151,7 +151,7 @@ func (p *xmlParser) parseComment() Node {
 	if p.StartsWith("-->") {
 		p.AdvanceN(3)
 	} else {
-		p.addError(p.Pos, "expected --> to close comment")
+		p.addError(openStart, "unterminated comment")
 	}
 
 	return &Comment{Open: open, Text: text, Close: Span{Start: closeStart, End: p.Pos}}
@@ -174,7 +174,7 @@ func (p *xmlParser) parseCDATA() Node {
 	if p.StartsWith("]]>") {
 		p.AdvanceN(3)
 	} else {
-		p.addError(p.Pos, "expected ]]> to close CDATA section")
+		p.addError(openStart, "unterminated CDATA section")
 	}
 
 	return &CDATA{Open: open, Text: text, Close: Span{Start: closeStart, End: p.Pos}}
@@ -248,7 +248,7 @@ func (p *xmlParser) parseProcessingInstruction() Node {
 	if p.StartsWith("?>") {
 		p.AdvanceN(2)
 	} else {
-		p.addError(p.Pos, "expected ?> to close processing instruction")
+		p.addError(openStart, "unterminated processing instruction")
 	}
 
 	return &PI{Open: open, Text: text, Close: Span{Start: closeStart, End: p.Pos}}

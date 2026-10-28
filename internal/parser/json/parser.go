@@ -201,7 +201,7 @@ func (p *jsonParser) parseObject() *Object {
 
 	for {
 		if p.Eof() {
-			p.addError(p.Pos, "expected } to close object")
+			p.addError(start, "unclosed object")
 			obj.Dangling = lead
 			obj.Range = Span{Start: start, End: p.Pos}
 
@@ -241,7 +241,7 @@ func (p *jsonParser) parseObject() *Object {
 		mid, _ := p.leadingComments()
 
 		if p.Eof() {
-			p.addError(p.Pos, "expected } to close object")
+			p.addError(start, "unclosed object")
 			obj.Dangling = mid
 			obj.Range = Span{Start: start, End: p.Pos}
 
@@ -313,7 +313,7 @@ func (p *jsonParser) parseArray() *Array {
 		mid, _ := p.leadingComments()
 
 		if p.Eof() {
-			p.addError(p.Pos, "expected ] to close array")
+			p.addError(start, "unclosed array")
 			arr.Dangling = mid
 			arr.Range = Span{Start: start, End: p.Pos}
 
@@ -382,7 +382,7 @@ func (p *jsonParser) parseString() *String {
 			p.Advance()
 
 			if p.Eof() {
-				p.addError(p.Pos, "unterminated string escape")
+				p.addError(start, "unterminated string")
 
 				return &String{
 					Range: Span{Start: start, End: p.Pos},
@@ -402,7 +402,7 @@ func (p *jsonParser) parseString() *String {
 		}
 	}
 
-	p.addError(p.Pos, "unterminated string")
+	p.addError(start, "unterminated string")
 
 	return &String{
 		Range: Span{Start: start, End: p.Pos},

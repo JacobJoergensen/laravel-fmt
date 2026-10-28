@@ -821,3 +821,45 @@ func TestFormatSpacesAlpineNotOperatorOnlyWithNotOperatorSpace(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatFormatsAJSONScriptBody(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			"json-ld",
+			"<script type=\"application/ld+json\">\n{\"@type\":\"Organization\",\n  \"sameAs\":[\"a\",\"b\"]}\n</script>\n",
+			"<script type=\"application/ld+json\">\n    {\n        \"@type\": \"Organization\",\n        \"sameAs\": [\"a\", \"b\"]\n    }\n</script>\n",
+		},
+		{
+			"importmap in any case",
+			"<script type=\"ImportMap\">{\"imports\":{\"vue\":\"/vue.js\"}}</script>\n",
+			"<script type=\"ImportMap\">\n    { \"imports\": { \"vue\": \"/vue.js\" } }\n</script>\n",
+		},
+		{
+			"body that is not JSON",
+			"<script type=\"application/json\">{ broken</script>\n",
+			"<script type=\"application/json\">\n    { broken\n</script>\n",
+		},
+		{
+			"body holding a Blade echo",
+			"<script type=\"application/json\">{\"a\": {{ $a }}}</script>\n",
+			"<script type=\"application/json\">\n    {\"a\": {{ $a }}}\n</script>\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent:\n=== once ===\n%q\n=== twice ===\n%q", got, twice)
+			}
+		})
+	}
+}

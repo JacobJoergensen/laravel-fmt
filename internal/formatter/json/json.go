@@ -51,6 +51,22 @@ func Format(filename string, src []byte, cfg *config.File) ([]byte, error) {
 	return w.Bytes(), nil
 }
 
+// EmitScriptBody formats a JSON <script> body into w one level under the tag,
+// or emits nothing and returns false when the body is not strict JSON.
+func EmitScriptBody(w *formatter.Writer, src []byte) bool {
+	file, errs := parser.Parse(src)
+	if len(errs) > 0 || file.Root == nil {
+		return false
+	}
+
+	w.Indent()
+	w.Newline()
+	emitFile(w, file)
+	w.Dedent()
+
+	return true
+}
+
 // isJSONCFilename reports whether filename is a JSONC document: a `.jsonc` file,
 // or a `tsconfig.*`/`jsconfig.*` config (which allow comments and trailing commas
 // by convention). Every other `.json` is parsed as strict RFC 8259 JSON.

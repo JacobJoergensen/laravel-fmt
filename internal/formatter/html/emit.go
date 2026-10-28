@@ -7,6 +7,7 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/alpine"
 	cssfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/css"
+	jsonfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/json"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/tailwind"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/html"
 )
@@ -578,6 +579,10 @@ func EmitRawTextContent(w *formatter.Writer, el *parser.Element, cfg *config.Fil
 		return
 	}
 
+	if isJSONScript(el) && emitScriptJSON(w, raw, php) {
+		return
+	}
+
 	if isShiftableScript(el) && emitShiftedScript(w, raw, base, php, rawPHPLiterals(el.Children)) {
 		return
 	}
@@ -716,6 +721,16 @@ func emitStyleCSS(w *formatter.Writer, raw []byte, cfg *config.File) bool {
 	}
 
 	return cssfmt.EmitStyleBody(w, raw, cfg)
+}
+
+// emitScriptJSON leaves a body holding PHP or a Blade echo to the shift: it is
+// not JSON until the template renders.
+func emitScriptJSON(w *formatter.Writer, raw []byte, php []parser.Span) bool {
+	if len(php) > 0 || bytes.Contains(raw, []byte("{{")) || bytes.Contains(raw, []byte("{!!")) {
+		return false
+	}
+
+	return jsonfmt.EmitScriptBody(w, raw)
 }
 
 // EmitRcdataContent writes a <textarea> or <title> body untrimmed, since its

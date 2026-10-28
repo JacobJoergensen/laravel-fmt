@@ -1315,3 +1315,24 @@ func TestBuildCallWrappingOnlyAnArrayHugsAsTheArrayDoes(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatEmptyInputStaysEmpty(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"empty", "", ""},
+		{"blank lines", "\n\n", ""},
+		{"whitespace", "  \n", ""},
+		{"open tag alone", "<?php", "<?php\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mustFormat(t, []byte(tc.src), config.Default()); string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

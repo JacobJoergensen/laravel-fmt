@@ -25,6 +25,27 @@ var scriptTypes = map[string]bool{
 	"speculationrules":       true,
 }
 
+var jsonScriptTypes = map[string]bool{
+	"application/json":    true,
+	"application/ld+json": true,
+	"importmap":           true,
+	"speculationrules":    true,
+}
+
+func isJSONScript(el *parser.Element) bool {
+	if !bytes.EqualFold(el.Name, []byte("script")) {
+		return false
+	}
+
+	for _, a := range el.Attributes {
+		if bytes.EqualFold(a.Name, []byte("type")) {
+			return !a.Bound && a.Parts == nil && jsonScriptTypes[string(bytes.ToLower(bytes.TrimSpace(a.Value)))]
+		}
+	}
+
+	return false
+}
+
 func isShiftableScript(el *parser.Element) bool {
 	if !bytes.EqualFold(el.Name, []byte("script")) {
 		return false

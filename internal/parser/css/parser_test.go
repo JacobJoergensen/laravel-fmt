@@ -310,3 +310,33 @@ func TestParseCapsNestingDepth(t *testing.T) {
 		})
 	}
 }
+
+func TestUnterminatedConstructIsReportedAtItsOpener(t *testing.T) {
+	cases := []struct {
+		name, src, wantMsg string
+		wantLine, wantCol  int
+	}{
+		{"comment", "a {}\n/* c\n\n", "unterminated comment", 2, 1},
+		{"string", "a { b: \"x;\n}\n", "unterminated string", 1, 8},
+		{"rule block", "a {\n  b: c;\n\n", "unclosed rule block", 1, 3},
+		{"at-rule block", "@media x {\n  a {}\n\n", "unclosed at-rule block", 1, 10},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errs := Parse([]byte(tc.src))
+
+			for _, err := range errs {
+				if err.Msg == tc.wantMsg {
+					if err.Pos.Line != tc.wantLine || err.Pos.Column != tc.wantCol {
+						t.Fatalf("%q at %d:%d, want %d:%d", err.Msg, err.Pos.Line, err.Pos.Column, tc.wantLine, tc.wantCol)
+					}
+
+					return
+				}
+			}
+
+			t.Fatalf("errors = %v, want %q", errs, tc.wantMsg)
+		})
+	}
+}

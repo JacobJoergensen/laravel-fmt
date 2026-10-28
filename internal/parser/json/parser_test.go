@@ -334,3 +334,32 @@ func TestParseRecordsABlankLineBeforeAnItem(t *testing.T) {
 		}
 	}
 }
+
+func TestUnterminatedConstructIsReportedAtItsOpener(t *testing.T) {
+	cases := []struct {
+		name, src, wantMsg string
+		wantLine, wantCol  int
+	}{
+		{"object", "{\n  \"a\": 1,\n\n", "unclosed object", 1, 1},
+		{"array", "[\n  1\n\n", "unclosed array", 1, 1},
+		{"string", "[\"abc", "unterminated string", 1, 2},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errs := Parse([]byte(tc.src))
+
+			for _, err := range errs {
+				if err.Msg == tc.wantMsg {
+					if err.Pos.Line != tc.wantLine || err.Pos.Column != tc.wantCol {
+						t.Fatalf("%q at %d:%d, want %d:%d", err.Msg, err.Pos.Line, err.Pos.Column, tc.wantLine, tc.wantCol)
+					}
+
+					return
+				}
+			}
+
+			t.Fatalf("errors = %v, want %q", errs, tc.wantMsg)
+		})
+	}
+}

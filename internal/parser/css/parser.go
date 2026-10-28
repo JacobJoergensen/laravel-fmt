@@ -115,7 +115,7 @@ func (p *cssParser) parseComment() Node {
 		p.Advance()
 		p.Advance()
 	} else {
-		p.addError(p.Pos, "expected */ to close comment")
+		p.addError(openStart, "unterminated comment")
 	}
 
 	return &Comment{
@@ -165,7 +165,7 @@ func (p *cssParser) parseAtRule() Node {
 			p.Advance()
 			rule.RBrace = Span{Start: rbStart, End: p.Pos}
 		} else {
-			p.addError(p.Pos, "expected } to close at-rule block")
+			p.addError(braceStart, "unclosed at-rule block")
 		}
 	case ';':
 		semiStart := p.Pos
@@ -205,7 +205,7 @@ func (p *cssParser) parseRule() Node {
 		p.Advance()
 		rule.RBrace = Span{Start: rbStart, End: p.Pos}
 	} else {
-		p.addError(p.Pos, "expected } to close rule block")
+		p.addError(braceStart, "unclosed rule block")
 	}
 
 	return rule
@@ -399,6 +399,7 @@ func (p *cssParser) skipWhitespace() {
 }
 
 func (p *cssParser) skipString(quote byte) {
+	start := p.Pos
 	p.Advance()
 
 	for !p.Eof() {
@@ -423,10 +424,11 @@ func (p *cssParser) skipString(quote byte) {
 		p.Advance()
 	}
 
-	p.addError(p.Pos, "unterminated string")
+	p.addError(start, "unterminated string")
 }
 
 func (p *cssParser) skipBlockComment() {
+	start := p.Pos
 	p.Advance()
 	p.Advance()
 
@@ -441,7 +443,7 @@ func (p *cssParser) skipBlockComment() {
 		p.Advance()
 	}
 
-	p.addError(p.Pos, "unterminated comment")
+	p.addError(start, "unterminated comment")
 }
 
 func (p *cssParser) readIdent() []byte {

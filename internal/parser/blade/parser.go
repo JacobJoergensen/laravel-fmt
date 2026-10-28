@@ -512,17 +512,21 @@ func (p *bladeParser) parseEcho() Node {
 		p.Advance()
 	}
 
+	closeStart := p.Pos
+
+	// Without a closer the rest of the file is no echo's arguments; parsing it
+	// as PHP would report its markup first.
+	if !p.StartsWith(closer) {
+		p.addError(openStart, "unterminated Blade echo")
+
+		return &EchoNode{Open: open, Close: Span{Start: closeStart, End: p.Pos}}
+	}
+
 	content := p.Src[contentOffset:p.Pos.Offset]
 	args, tokens := p.parseEchoArgs(content, open.End, false)
 
-	closeStart := p.Pos
-
-	if p.StartsWith(closer) {
-		p.AdvanceN(len(closer))
-		p.takeSwallowedCR()
-	} else {
-		p.addError(p.Pos, "expected "+closer+" to close Blade echo")
-	}
+	p.AdvanceN(len(closer))
+	p.takeSwallowedCR()
 
 	return &EchoNode{
 		Open: open, Args: args, Tokens: tokens,
@@ -541,17 +545,19 @@ func (p *bladeParser) parseRawEcho() Node {
 		p.Advance()
 	}
 
+	closeStart := p.Pos
+
+	if !p.StartsWith("!!}") {
+		p.addError(openStart, "unterminated Blade raw echo")
+
+		return &RawEchoNode{Open: open, Close: Span{Start: closeStart, End: p.Pos}}
+	}
+
 	content := p.Src[contentOffset:p.Pos.Offset]
 	args, tokens := p.parseEchoArgs(content, open.End, true)
 
-	closeStart := p.Pos
-
-	if p.StartsWith("!!}") {
-		p.AdvanceN(3)
-		p.takeSwallowedCR()
-	} else {
-		p.addError(p.Pos, "expected !!} to close Blade raw echo")
-	}
+	p.AdvanceN(3)
+	p.takeSwallowedCR()
 
 	return &RawEchoNode{
 		Open: open, Args: args, Tokens: tokens,
@@ -622,7 +628,7 @@ func (p *bladeParser) parseComment() Node {
 	if p.StartsWith("--}}") {
 		p.AdvanceN(4)
 	} else {
-		p.addError(p.Pos, "expected --}} to close Blade comment")
+		p.addError(openStart, "unterminated Blade comment")
 	}
 
 	return &CommentNode{
@@ -1124,7 +1130,7 @@ func (p *bladeParser) parseHTMLComment() Node {
 	if p.StartsWith("-->") {
 		p.AdvanceN(3)
 	} else {
-		p.addError(p.Pos, "expected --> to close HTML comment")
+		p.addError(openStart, "unterminated HTML comment")
 	}
 
 	return &html.Comment{

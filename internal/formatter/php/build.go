@@ -114,6 +114,11 @@ func BuildFile(file *parser.File, cfg *config.File) []byte {
 	// this covers livewire, which reaches the builder directly.
 	file.Stmts = stripTrailingBlankHTML(file.Stmts)
 
+	// Nothing but whitespace: formatted like an empty file in every language.
+	if len(file.Stmts) == 0 {
+		return nil
+	}
+
 	if isMixedMode(file.Stmts) {
 		return b.buildMixed(file)
 	}

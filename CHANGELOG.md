@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+* Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON
+* Improved an unclosed string, comment, block or Blade echo in CSS, JSON, XML, HTML or Blade to be reported where it opens instead of at the end of the file
+* Fixed an empty or whitespace-only PHP file being given a lone line break
 
 ## Version 0.6.0 (2026-10-28)
 * Added support for Mago's `extends`, so formatter settings from a shared Mago config are used
