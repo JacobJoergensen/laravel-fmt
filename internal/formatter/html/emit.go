@@ -265,7 +265,8 @@ func emitAttr(w *formatter.Writer, src []byte, a *parser.Attr, cfg *config.File)
 
 	value := a.Value
 	if !a.Bound && cfg.Tailwind && IsClassAttr(a.Name) {
-		value = []byte(tailwind.Sort(cfg.TailwindTheme, string(value)))
+		classes := bytes.Trim(value, tailwind.ClassSeparators)
+		value = []byte(tailwind.Sort(cfg.TailwindTheme, string(classes)))
 	}
 
 	if !a.Bound && alpine.IsAlpineJSAttr(a.Name) {

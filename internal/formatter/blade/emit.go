@@ -2272,10 +2272,9 @@ func (e *emitter) sortMergedClass(defaults php.Expr) {
 	}
 }
 
-// sortClassSegment runs tailwind.Sort on a text segment's inner content,
-// preserving leading and trailing whitespace verbatim. The boundary space
-// matters because the segment abuts an echo: dropping it would collapse
-// `px-4 bg-white {{ $x }}` to `px-4 bg-white{{ $x }}`.
+// Edge whitespace that abuts an echo (pinFirst, pinLast) stays: dropping it
+// would fuse `bg-white {{ $x }}` into `bg-white{{ $x }}`. At the value's outer
+// edge it separates nothing and is trimmed, as HTML trims it.
 func sortClassSegment(theme *tailwind.Theme, text []byte, pinFirst, pinLast bool) []byte {
 	// A real class never contains a brace (arbitrary values use `[...]`). A segment
 	// that does could, once reordered, place a token ending in `{` against a
@@ -2288,7 +2287,11 @@ func sortClassSegment(theme *tailwind.Theme, text []byte, pinFirst, pinLast bool
 	inner := bytes.Trim(text, tailwind.ClassSeparators)
 
 	if len(inner) == 0 {
-		return text
+		if pinFirst && pinLast {
+			return text
+		}
+
+		return inner
 	}
 
 	before, after, ok := bytes.Cut(text, inner)
@@ -2297,8 +2300,15 @@ func sortClassSegment(theme *tailwind.Theme, text []byte, pinFirst, pinLast bool
 		return text
 	}
 
-	leading := before
-	trailing := after
+	var leading, trailing []byte
+
+	if pinFirst {
+		leading = before
+	}
+
+	if pinLast {
+		trailing = after
+	}
 
 	// Edge whitespace ends the fragment, so the token beside it is a whole class.
 	pinFirst = pinFirst && len(leading) == 0

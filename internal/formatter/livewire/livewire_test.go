@@ -111,6 +111,16 @@ func TestFormatRejectsInvalidSource(t *testing.T) {
 	}
 }
 
+func TestFormatKeepsANoBreakSpaceTemplate(t *testing.T) {
+	src := []byte("<?php\n\nnew class extends Component {};\n?>\n\n\u00a0\n")
+
+	got := mustFormat(t, src, config.Default())
+
+	if !bytes.Equal(got, src) {
+		t.Fatalf("got %q, want the input unchanged", got)
+	}
+}
+
 func mustFormat(t *testing.T, src []byte, cfg *config.File) []byte {
 	t.Helper()
 

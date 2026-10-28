@@ -367,6 +367,37 @@ func TestParseEditorConfigRoot(t *testing.T) {
 	}
 }
 
+func TestParseEditorConfigIgnoresLeadingBOM(t *testing.T) {
+	cases := []struct {
+		name     string
+		raw      string
+		wantRoot bool
+	}{
+		{"root preamble", "\uFEFFroot = true\n\n[*]\nindent_size = 2\n", true},
+		{"section first", "\uFEFF[*]\nindent_size = 2\n", false},
+	}
+
+	want := []EditorConfigSection{{Pattern: "*", IndentSize: 2}}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var ec EditorConfig
+
+			if err := parseEditorConfig([]byte(tc.raw), &ec); err != nil {
+				t.Fatalf("parseEditorConfig: %v", err)
+			}
+
+			if ec.Root != tc.wantRoot {
+				t.Fatalf("Root = %v, want %v", ec.Root, tc.wantRoot)
+			}
+
+			if !reflect.DeepEqual(ec.Sections, want) {
+				t.Fatalf("Sections = %#v, want %#v", ec.Sections, want)
+			}
+		})
+	}
+}
+
 func TestNewEditorConfigResolverReadErrorIsEager(t *testing.T) {
 	dir := t.TempDir()
 

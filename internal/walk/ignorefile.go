@@ -12,7 +12,8 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
 )
 
-const utf8BOM = "\uFEFF"
+// UTF8BOM is the UTF-8 byte order mark.
+const UTF8BOM = "\uFEFF"
 
 // ReadIgnoreFile returns a gitignore-syntax file's lines with only the line
 // endings and a leading BOM removed. A missing file returns (nil, nil), and so
@@ -28,7 +29,7 @@ func ReadIgnoreFile(path string) ([]string, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	content := strings.TrimPrefix(string(raw), utf8BOM)
+	content := strings.TrimPrefix(string(raw), UTF8BOM)
 
 	var lines []string
 

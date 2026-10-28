@@ -25,8 +25,8 @@ func emitNodeVerbatim(w *formatter.Writer, src []byte, node parser.Node) {
 	// would add a blank line on every pass.
 	if _, ok := node.(*parser.Text); ok {
 		raw := src[start:end]
-		start += len(raw) - len(bytes.TrimLeft(raw, " \t\r\n\f\v"))
-		end = start + len(bytes.Trim(raw, " \t\r\n\f\v"))
+		start += len(raw) - len(bytes.TrimLeft(raw, xmlSpace))
+		end = start + len(bytes.Trim(raw, xmlSpace))
 	}
 
 	formatter.EmitVerbatim(w, src, start, end)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
+	"github.com/JacobJoergensen/laravel-fmt/internal/walk"
 )
 
 const editorConfigFileName = ".editorconfig"
@@ -218,6 +219,7 @@ func readEditorConfig(dir string) (*EditorConfig, bool, error) {
 }
 
 func parseEditorConfig(raw []byte, ec *EditorConfig) error {
+	raw = bytes.TrimPrefix(raw, []byte(walk.UTF8BOM))
 	scanner := bufio.NewScanner(bytes.NewReader(raw))
 
 	var current *EditorConfigSection

@@ -209,6 +209,34 @@ func TestFormatTailwindEnabled(t *testing.T) {
 	}
 }
 
+func TestFormatTailwindTrimsClassValueEdges(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"several classes", `<div class=" p-4  flex "></div>`, `<div class="flex p-4"></div>`},
+		{"one class", `<div class=" flex "></div>`, `<div class="flex"></div>`},
+		{"whitespace only", `<div class="  "></div>`, `<div class=""></div>`},
+	}
+
+	cfg := config.Default()
+	cfg.Tailwind = true
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src+"\n"), cfg)
+			if string(got) != tc.want+"\n" {
+				t.Fatalf("got %q, want %q", got, tc.want+"\n")
+			}
+
+			if twice := mustFormat(t, got, cfg); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent:\n=== once ===\n%q\n=== twice ===\n%q", got, twice)
+			}
+		})
+	}
+}
+
 func TestFormatRejectsInvalidSource(t *testing.T) {
 	out, err := Format([]byte("<!-- unclosed"), config.Default())
 

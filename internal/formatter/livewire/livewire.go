@@ -14,9 +14,9 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
 	bladefmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/blade"
+	htmlfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/html"
 	phpfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/php"
 	bladeparser "github.com/JacobJoergensen/laravel-fmt/internal/parser/blade"
-	htmlparser "github.com/JacobJoergensen/laravel-fmt/internal/parser/html"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/livewire"
 	phpparser "github.com/JacobJoergensen/laravel-fmt/internal/parser/php"
 )
@@ -111,13 +111,9 @@ func eol(cfg *config.File) string {
 // decision, since the emit path drops those nodes anyway.
 func hasContent(nodes []bladeparser.Node) bool {
 	for _, n := range nodes {
-		if t, ok := n.(*htmlparser.Text); ok {
-			if len(bytes.TrimSpace(t.Text)) == 0 {
-				continue
-			}
+		if !htmlfmt.IsWhitespaceText(n) {
+			return true
 		}
-
-		return true
 	}
 
 	return false

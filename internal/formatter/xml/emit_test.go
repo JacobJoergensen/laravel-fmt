@@ -142,6 +142,7 @@ func TestCharacterDataIsByteExact(t *testing.T) {
 		{"xml:space with text", "<root>\n    <pre xml:space=\"preserve\">a\nb</pre>\n</root>\n"},
 		{"xml:space with elements", "<root xml:space=\"preserve\">\n  <a>x</a>\n     <b>y</b>\n</root>\n"},
 		{"trailing spaces in content", "<root>\n    <t>one   \ntwo</t>\n</root>\n"},
+		{"no-break space between elements", "<root>\n    <a>x</a>\u00a0<b>y</b>\n</root>\n"},
 	}
 
 	for _, tc := range cases {

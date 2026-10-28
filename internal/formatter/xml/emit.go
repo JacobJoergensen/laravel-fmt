@@ -8,6 +8,10 @@ import (
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/xml"
 )
 
+// xmlSpace is XML 1.0's S production. bytes.TrimSpace would also strip a
+// no-break space or NEL, which is character data.
+const xmlSpace = " \t\r\n"
+
 func emitFile(w *formatter.Writer, file *parser.File, cfg *config.File) {
 	first := true
 
@@ -208,8 +212,8 @@ func emitVerbatimRange(w *formatter.Writer, src []byte, startOffset, endOffset i
 func emitTopLevelText(w *formatter.Writer, src []byte, t *parser.Text) {
 	start, end := t.Start.Offset, t.End.Offset
 	raw := src[start:end]
-	start += len(raw) - len(bytes.TrimLeft(raw, " \t\r\n\f\v"))
-	end = start + len(bytes.Trim(raw, " \t\r\n\f\v"))
+	start += len(raw) - len(bytes.TrimLeft(raw, xmlSpace))
+	end = start + len(bytes.Trim(raw, xmlSpace))
 	emitVerbatimRange(w, src, start, end)
 }
 
@@ -223,7 +227,7 @@ func isStructuralContent(children []parser.Node) bool {
 		case *parser.CDATA:
 			return false
 		case *parser.Text:
-			if len(bytes.TrimSpace(n.Text)) > 0 {
+			if len(bytes.Trim(n.Text, xmlSpace)) > 0 {
 				return false
 			}
 		}
@@ -238,7 +242,7 @@ func isWhitespaceText(node parser.Node) bool {
 		return false
 	}
 
-	return len(bytes.TrimSpace(t.Text)) == 0
+	return len(bytes.Trim(t.Text, xmlSpace)) == 0
 }
 
 func blankLineInText(node parser.Node) bool {

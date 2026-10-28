@@ -5,6 +5,9 @@
 * Added detection of `mago.yaml`, `mago.yml`, `mago.json` and `mago.dist.*` configs
 * Added support for Pint's `extend`, so rules and excludes from a shared `pint.json` are used
 * Fixed a parent folder that can be entered but not listed, like a `0711` home folder, failing the run
+* Fixed a no-break space between XML elements, or as a Livewire component's whole template, being removed
+* Fixed Tailwind class sorting keeping the spaces at the edges of a Blade `class` value, and of a one-class HTML value
+* Fixed an `.editorconfig` saved with a BOM losing its `root = true` or its first section
 
 ## Version 0.5.0 (2026-10-26)
 * Added support for `.prettierrc.toml`
