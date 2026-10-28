@@ -17,6 +17,10 @@ import (
 type Loaded struct {
 	File     File
 	UserKeys map[string]bool
+
+	// IgnoreAnchor is the directory the ignore patterns were read from, so the
+	// directory they match paths against.
+	IgnoreAnchor string
 }
 
 // LoadFrom reads workDir's laravel-fmt.json onto base; a missing file leaves

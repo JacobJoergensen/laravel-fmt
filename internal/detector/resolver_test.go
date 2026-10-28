@@ -4,7 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/tailwind"
+	"github.com/JacobJoergensen/laravel-fmt/internal/walk"
 )
 
 func monorepo(t *testing.T) (workspace, file string) {
@@ -151,6 +153,44 @@ func TestResolverGivesEachProjectItsOwnTheme(t *testing.T) {
 
 		if got := tailwind.Sort(project.Cfg.TailwindTheme, "text-brand font-bold"); got != sorted {
 			t.Errorf("%s sorted %q, want its own theme's %q", dir, got, sorted)
+		}
+	}
+}
+
+func TestNestedPackageUsesTheApplicationsIgnores(t *testing.T) {
+	app := t.TempDir()
+	seedFileAt(t, app, "composer.json", "{}")
+	seedFileAt(t, app, "artisan", "")
+	seedFileAt(t, app, ".prettierignore", "packages/foo/src/Ignored.php\n")
+	seedFileAt(t, app, "pint.json", `{"preset":"laravel","exclude":["packages/foo/src/excluded"]}`)
+	seedFileAt(t, app, "packages/foo/composer.json", `{"name":"acme/foo"}`)
+
+	loaders := map[string]func(string, Context) (config.Loaded, error){
+		"default load": LoadConfig,
+		"--no-config":  func(_ string, ctx Context) (config.Loaded, error) { return LoadDefaults(ctx) },
+	}
+
+	files := []string{"packages/foo/src/Ignored.php", "packages/foo/src/excluded/E.php"}
+
+	for name, load := range loaders {
+		for _, rel := range files {
+			t.Run(name+" "+rel, func(t *testing.T) {
+				path := filepath.Join(app, filepath.FromSlash(rel))
+
+				project, err := NewResolver(load).For(path)
+				if err != nil {
+					t.Fatalf("For: %v", err)
+				}
+
+				ignored, err := walk.IgnoresFile(project.IgnoreAnchor(), &project.Cfg, path)
+				if err != nil {
+					t.Fatalf("IgnoresFile: %v", err)
+				}
+
+				if !ignored {
+					t.Fatalf("%s is not ignored; the application's ignores were read from %s", rel, project.IgnoreAnchor())
+				}
+			})
 		}
 	}
 }

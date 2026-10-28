@@ -17,7 +17,7 @@ var initForce bool
 
 var initCmd = &cobra.Command{
 	Use:   "init",
-	Short: "Generate a default laravel-fmt.json configuration file",
+	Short: "Create a laravel-fmt.json that overrides nothing, ready for your own settings",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		workDir, err := os.Getwd()
 		if err != nil {
@@ -46,14 +46,7 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf("check %s: %w", shown, err)
 		}
 
-		cfg := config.Default()
-		detector.Apply(cfg, ctx)
-		contents, err := config.Generate(cfg)
-		if err != nil {
-			return fmt.Errorf("generate config: %w", err)
-		}
-
-		if err := os.WriteFile(path, contents, 0o644); err != nil { //nolint:gosec // a config file is read like source, not a secret
+		if err := os.WriteFile(path, config.Skeleton(), 0o644); err != nil { //nolint:gosec // a config file is read like source, not a secret
 			return fmt.Errorf("write %s: %w", shown, err)
 		}
 

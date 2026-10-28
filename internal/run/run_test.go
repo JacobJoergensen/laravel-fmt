@@ -169,3 +169,25 @@ func TestStdinFormatsForTheProjectOfItsPath(t *testing.T) {
 		})
 	}
 }
+
+func TestStdinPathRelativeToASubfolderKeepsItsLanguageRules(t *testing.T) {
+	const guideline = "## Rules\n\n<div><p>Use @{{ $x }}</p></div>\n"
+
+	writeProject(t, map[string]string{
+		"composer.json": `{"name":"acme/pkg"}`,
+		"resources/boost/guidelines/core.blade.php": guideline,
+	})
+	t.Chdir("resources")
+
+	var stdout bytes.Buffer
+
+	streams := Streams{In: strings.NewReader(guideline), Out: &stdout, Err: &bytes.Buffer{}}
+
+	if err := Format(&Options{StdinFilepath: "boost/guidelines/core.blade.php"}, streams); err != nil {
+		t.Fatalf("Format = %v", err)
+	}
+
+	if stdout.String() != guideline {
+		t.Fatalf("stdout = %q, want the guideline unchanged", stdout.String())
+	}
+}

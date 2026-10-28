@@ -10,9 +10,11 @@ import (
 )
 
 // LoadConfig layers laravel-fmt.json over the detected settings, so the
-// user's keys win.
-func LoadConfig(workDir string, ctx Context) (config.Loaded, error) {
-	dir := workDir
+// user's keys win. Its first argument, the Resolver's project root, goes
+// unused: ignores are read where the detected tools are, ctx.ConfigDir, which
+// is the Laravel root for a package nested in an application.
+func LoadConfig(_ string, ctx Context) (config.Loaded, error) {
+	dir := ctx.ConfigDir()
 
 	if ctx.ConfigPath != "" {
 		dir = filepath.Dir(ctx.ConfigPath)
@@ -34,6 +36,8 @@ func LoadConfig(workDir string, ctx Context) (config.Loaded, error) {
 		return config.Loaded{}, err
 	}
 
+	loaded.IgnoreAnchor = dir
+
 	return loaded, nil
 }
 
@@ -44,11 +48,7 @@ func LoadDefaults(ctx Context) (config.Loaded, error) {
 	cfg := config.Default()
 	Apply(cfg, ctx)
 
-	anchor := ctx.WorkDir
-
-	if ctx.Laravel != nil {
-		anchor = ctx.Laravel.Root
-	}
+	anchor := ctx.ConfigDir()
 
 	if err := adoptIgnores(cfg, ctx, anchor); err != nil {
 		return config.Loaded{}, err
@@ -58,7 +58,7 @@ func LoadDefaults(ctx Context) (config.Loaded, error) {
 		return config.Loaded{}, err
 	}
 
-	return config.Loaded{File: *cfg}, nil
+	return config.Loaded{File: *cfg, IgnoreAnchor: anchor}, nil
 }
 
 // LoadConfigFile is LoadConfig for --config; a missing file is an error,
@@ -84,6 +84,8 @@ func LoadConfigFile(configPath string, ctx Context) (config.Loaded, error) {
 	if err := resolveTailwind(&loaded.File, ctx, filepath.Dir(absConfig)); err != nil {
 		return config.Loaded{}, err
 	}
+
+	loaded.IgnoreAnchor = filepath.Dir(absConfig)
 
 	return loaded, nil
 }

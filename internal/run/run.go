@@ -468,7 +468,14 @@ func (r *runner) stdin(projects *detector.Resolver) error {
 		config.DisableRelocatingPasses(cfg)
 	}
 
-	out, err := dispatch.File(r.opts.StdinFilepath, src, cfg)
+	// Language rules read the path itself (a Boost guideline under
+	// resources/boost/ is Markdown), so they get it as the walk does, absolute.
+	path, err := filepath.Abs(r.opts.StdinFilepath)
+	if err != nil {
+		return fmt.Errorf("resolve %s: %w", r.opts.StdinFilepath, err)
+	}
+
+	out, err := dispatch.File(path, src, cfg)
 	if err != nil {
 		// The label is the caller's and names no file read here, so an editor
 		// gets back exactly what it sent.
@@ -480,7 +487,7 @@ func (r *runner) stdin(projects *detector.Resolver) error {
 	if r.opts.ranged() {
 		start, end := r.opts.resolveRange(len(src))
 		parses := func(b []byte) bool {
-			_, err := dispatch.File(r.opts.StdinFilepath, b, cfg)
+			_, err := dispatch.File(path, b, cfg)
 
 			return err == nil
 		}
@@ -516,7 +523,9 @@ func (r *runner) projectIgnores(projects *detector.Resolver, name string) (bool,
 	return walk.IgnoresFile(anchor, &project.Cfg, path)
 }
 
-// The explanation goes to stderr so stdout stays usable as a laravel-fmt.json.
+// The explanation goes to stderr so stdout stays the config alone, as JSON. It
+// is one file's resolved settings: copied into laravel-fmt.json, every key in
+// it would override the project's own tools.
 func (r *runner) showConfig(projects *detector.Resolver) error {
 	cfg, err := resolveFileConfig(projects, r.opts.ShowConfig)
 	if err != nil {

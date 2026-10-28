@@ -3,7 +3,10 @@
 ## Unreleased
 * Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON
 * Improved an unclosed string, comment, block or Blade echo in CSS, JSON, XML, HTML or Blade to be reported where it opens instead of at the end of the file
+* Improved `init` to write only the schema reference, so the new `laravel-fmt.json` no longer overrides `.editorconfig`, Prettier, Pint or Mago
 * Fixed an empty or whitespace-only PHP file being given a lone line break
+* Fixed a package nested in a Laravel app ignoring the app's `.prettierignore` and Pint excludes when formatted on save
+* Fixed `--stdin-filepath` relative to a subfolder applying HTML layout to a Laravel Boost guideline
 
 ## Version 0.6.0 (2026-10-28)
 * Added support for Mago's `extends`, so formatter settings from a shared Mago config are used

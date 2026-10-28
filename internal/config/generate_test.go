@@ -33,3 +33,30 @@ func TestGenerateRoundTrips(t *testing.T) {
 		t.Fatalf("generated config did not round-trip:\n got %+v\nwant %+v", loaded.File, *Default())
 	}
 }
+
+func TestSkeletonOverridesNothing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+
+	if err := os.WriteFile(path, Skeleton(), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	detected := Default()
+	detected.PrintWidth = 99
+	detected.TabWidth = 2
+
+	loaded, err := LoadFile(detected, path)
+	if err != nil {
+		t.Fatalf("LoadFile of the skeleton: %v", err)
+	}
+
+	if !reflect.DeepEqual(loaded.File, *detected) {
+		t.Fatalf("loaded = %+v, want the detected base unchanged", loaded.File)
+	}
+
+	for key := range loaded.UserKeys {
+		if key != "$schema" {
+			t.Fatalf("UserKeys holds %q, want no setting", key)
+		}
+	}
+}

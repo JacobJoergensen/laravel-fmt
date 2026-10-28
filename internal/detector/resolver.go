@@ -19,16 +19,13 @@ type Project struct {
 	Ctx      Context
 	Cfg      config.File
 	UserKeys map[string]bool
+
+	ignoreAnchor string
 }
 
-// IgnoreAnchor returns the directory the project's ignore patterns are written
-// from: its laravel-fmt.json's, or the project root when it has none.
+// IgnoreAnchor returns the directory the project's ignore patterns were read from.
 func (p *Project) IgnoreAnchor() string {
-	if p.Ctx.ConfigPath != "" {
-		return filepath.Dir(p.Ctx.ConfigPath)
-	}
-
-	return p.Root
+	return p.ignoreAnchor
 }
 
 // Resolver maps a file to its project and that project's configuration.
@@ -79,7 +76,7 @@ func (r *Resolver) ForDir(dir string) (*Project, error) {
 		return nil, err
 	}
 
-	project := &Project{Root: root, Ctx: ctx, Cfg: loaded.File, UserKeys: loaded.UserKeys}
+	project := &Project{Root: root, Ctx: ctx, Cfg: loaded.File, UserKeys: loaded.UserKeys, ignoreAnchor: loaded.IgnoreAnchor}
 	stored, _ := r.projects.LoadOrStore(root, project)
 	project, _ = stored.(*Project)
 
