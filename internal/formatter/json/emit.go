@@ -23,7 +23,13 @@ func emitFile(w *formatter.Writer, file *parser.File) {
 		return
 	}
 
-	emitValue(w, file.Src, file.Root)
+	if hasIgnoreDirective(file.Leading) {
+		root := file.Root.Span()
+		emitVerbatimRange(w, file.Src, root.Start.Offset, root.End.Offset)
+	} else {
+		emitValue(w, file.Src, file.Root)
+	}
+
 	emitTrailingComment(w, file.Src, file.RootTrailing)
 
 	for _, c := range file.Trailing {
@@ -60,7 +66,15 @@ func emitObject(w *formatter.Writer, src []byte, o *parser.Object) {
 		func(m *parser.Member) []parser.Comment { return m.Leading },
 		func(m *parser.Member) *parser.Comment { return m.Trailing },
 		func(m *parser.Member) bool { return m.BlankBefore },
-		func(m *parser.Member) { emitMember(w, src, m) })
+		func(m *parser.Member) {
+			if hasIgnoreDirective(m.Leading) {
+				emitVerbatimRange(w, src, m.Key.Range.Start.Offset, m.Value.Span().End.Offset)
+
+				return
+			}
+
+			emitMember(w, src, m)
+		})
 }
 
 // emitMember puts the value on a new line after a line comment that follows
@@ -96,7 +110,16 @@ func emitArray(w *formatter.Writer, src []byte, a *parser.Array) {
 		func(e *parser.Element) []parser.Comment { return e.Leading },
 		func(e *parser.Element) *parser.Comment { return e.Trailing },
 		func(e *parser.Element) bool { return e.BlankBefore },
-		func(e *parser.Element) { emitValue(w, src, e.Value) })
+		func(e *parser.Element) {
+			if hasIgnoreDirective(e.Leading) {
+				value := e.Value.Span()
+				emitVerbatimRange(w, src, value.Start.Offset, value.End.Offset)
+
+				return
+			}
+
+			emitValue(w, src, e.Value)
+		})
 }
 
 // emitContainer's flat layout writes no comments, so flatFits must be false

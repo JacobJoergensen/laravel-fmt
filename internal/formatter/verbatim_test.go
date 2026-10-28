@@ -101,3 +101,32 @@ func TestEmitVerbatimRebasedTrimIsPerVariant(t *testing.T) {
 		t.Fatalf("keep-trailing variant deleted bytes: got %q", got)
 	}
 }
+
+func TestNormalizeLoneCR(t *testing.T) {
+	cases := []struct {
+		name      string
+		raw       string
+		want      string
+		untouched bool
+	}{
+		{"lone CR", "a\rb\r", "a\nb\n", false},
+		{"CRLF stays", "a\r\nb\r\n", "a\r\nb\r\n", true},
+		{"CR before a CRLF", "a\r\r\nb", "a\n\r\nb", false},
+		{"no CR", "a\nb", "a\nb", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(tc.raw)
+			got := NormalizeLoneCR(raw)
+
+			if string(got) != tc.want {
+				t.Fatalf("NormalizeLoneCR(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+
+			if tc.untouched && &got[0] != &raw[0] {
+				t.Fatal("NormalizeLoneCR copied input that holds no lone CR")
+			}
+		})
+	}
+}

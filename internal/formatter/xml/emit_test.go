@@ -2,6 +2,7 @@ package xml
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
@@ -164,5 +165,24 @@ func TestElementOnlyContentStillIndents(t *testing.T) {
 
 	if string(got) != want {
 		t.Fatalf("element-only content stopped indenting.\n=== got ===\n%q\n=== want ===\n%q", got, want)
+	}
+}
+
+func TestFormatReadsALoneCRAsItsLFTwin(t *testing.T) {
+	cases := map[string]string{
+		"text":                          "<root>\r    <t>a\rb</t>\r</root>\n",
+		"a blank line between children": "<root>\r<a/>\r\r<b/>\r</root>\n",
+		"cdata":                         "<root>\r    <d><![CDATA[a\rb]]></d>\r</root>\n",
+	}
+
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := mustFormat(t, []byte(src), config.Default())
+			lf := strings.ReplaceAll(src, "\r", "\n")
+
+			if want := mustFormat(t, []byte(lf), config.Default()); !bytes.Equal(got, want) {
+				t.Fatalf("a lone CR formats unlike its LF twin.\n=== CR ===\n%q\n=== LF ===\n%q", got, want)
+			}
+		})
 	}
 }

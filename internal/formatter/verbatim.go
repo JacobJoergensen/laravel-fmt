@@ -286,3 +286,36 @@ func skipIndent(line []byte, limit int) int {
 
 	return n
 }
+
+// NormalizeLoneCR rewrites a `\r` not followed by `\n` to `\n`, returning raw
+// untouched when there is none. YAML 1.2.2 section 5.4 and XML 1.0 section
+// 2.11 read a lone CR as a line break, while the verbatim writer breaks only
+// on `\n`.
+//
+// Other languages must not use this: a lone CR in a PHP string is data.
+func NormalizeLoneCR(raw []byte) []byte {
+	if !hasLoneCR(raw) {
+		return raw
+	}
+
+	out := make([]byte, len(raw))
+	copy(out, raw)
+
+	for i, c := range out {
+		if c == '\r' && (i+1 >= len(out) || out[i+1] != '\n') {
+			out[i] = '\n'
+		}
+	}
+
+	return out
+}
+
+func hasLoneCR(raw []byte) bool {
+	for i, c := range raw {
+		if c == '\r' && (i+1 >= len(raw) || raw[i+1] != '\n') {
+			return true
+		}
+	}
+
+	return false
+}

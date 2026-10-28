@@ -15,6 +15,7 @@ func TestAttributeMustBeQuoted(t *testing.T) {
 		{"single quoted", `<a x='y'/>`, false},
 		{"bare name", `<a x/>`, true},
 		{"unquoted value", `<a x=y/>`, true},
+		{"character that cannot start a name", `<a b="1" $/>`, true},
 	}
 
 	for _, tc := range cases {
@@ -136,6 +137,48 @@ func TestParseCapsNestingDepth(t *testing.T) {
 
 			if len(errs) != 1 || errs[0].Msg != "maximum nesting depth exceeded" || errs[0].Pos.Column != tc.wantColumn {
 				t.Fatalf("errors = %v, want one depth error at column %d", errs, tc.wantColumn)
+			}
+		})
+	}
+}
+
+func TestNameFollowsXMLNameCharacters(t *testing.T) {
+	cases := []struct {
+		name        string
+		src         string
+		wantErr     bool
+		wantElement string
+		wantAttr    string
+	}{
+		{"accented element", "<café/>", false, "café", ""},
+		{"ideographic element", "<名前>x</名前>", false, "名前", ""},
+		{"accented attribute", `<a ü="1"/>`, false, "a", "ü"},
+		{"middle dot after the first character", "<a·b/>", false, "a·b", ""},
+		{"middle dot first", "<·a/>", true, "", ""},
+		{"digit first", "<1a/>", true, "", ""},
+		{"colon first", "<:a/>", false, ":a", ""},
+		{"byte that is not UTF-8", "<a\xff/>", true, "", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			file, errs := Parse([]byte(tc.src))
+
+			if gotErr := len(errs) > 0; gotErr != tc.wantErr {
+				t.Fatalf("errors = %v, want error %v", errs, tc.wantErr)
+			}
+
+			if tc.wantErr {
+				return
+			}
+
+			el, ok := file.Nodes[0].(*Element)
+			if !ok || string(el.Name) != tc.wantElement {
+				t.Fatalf("first node = %+v, want element %q", file.Nodes[0], tc.wantElement)
+			}
+
+			if tc.wantAttr != "" && (len(el.Attributes) != 1 || string(el.Attributes[0].Name) != tc.wantAttr) {
+				t.Fatalf("attributes = %+v, want one named %q", el.Attributes, tc.wantAttr)
 			}
 		})
 	}

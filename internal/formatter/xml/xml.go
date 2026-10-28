@@ -18,6 +18,7 @@ import (
 // diagnostic. Indentation follows cfg, since XML has no tool-owned indent
 // convention.
 func Format(src []byte, cfg *config.File) ([]byte, error) {
+	src = formatter.NormalizeLoneCR(src)
 	file, errs := parser.Parse(src)
 
 	if err := formatter.JoinErrors(errs); err != nil {

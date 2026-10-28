@@ -26,7 +26,7 @@ func Format(src []byte, cfg *config.File) ([]byte, error) {
 	// Lone CRs are normalized at intake so the parser, the freeze decision and
 	// the emitter read the same bytes; normalizing only in the emitter removes
 	// the bail that froze the file, and the next pass formats it differently.
-	src = loneCRNormalized(src)
+	src = formatter.NormalizeLoneCR(src)
 
 	file, errs := parser.Parse(src)
 

@@ -395,41 +395,6 @@ func emitBlockScalar(w *formatter.Writer, src []byte, n *parser.BlockScalar) {
 	formatter.EmitVerbatimStrippingKeepTrailing(w, raw, n.Indent)
 }
 
-// loneCRNormalized rewrites a `\r` that is not part of a `\r\n` to `\n`,
-// returning raw untouched when there is none. YAML 1.2.2 requires it: [28]
-// b-break admits a lone CR, and 5.4 reads a break inside scalar content as one
-// line feed. The parser already ends a line on a lone CR while the verbatim
-// writer breaks only on `\n`, so a span holding one would otherwise come back
-// as a single line.
-//
-// Other languages must not share this: a lone CR in a PHP string is data.
-func loneCRNormalized(raw []byte) []byte {
-	if !hasLoneCR(raw) {
-		return raw
-	}
-
-	out := make([]byte, len(raw))
-	copy(out, raw)
-
-	for i, c := range out {
-		if c == '\r' && (i+1 >= len(out) || out[i+1] != '\n') {
-			out[i] = '\n'
-		}
-	}
-
-	return out
-}
-
-func hasLoneCR(raw []byte) bool {
-	for i, c := range raw {
-		if c == '\r' && (i+1 >= len(raw) || raw[i+1] != '\n') {
-			return true
-		}
-	}
-
-	return false
-}
-
 func hasSpan(s parser.Span) bool {
 	return s.End.Offset > s.Start.Offset
 }

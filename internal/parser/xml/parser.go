@@ -3,6 +3,7 @@ package xml
 import (
 	"bytes"
 	"slices"
+	"unicode/utf8"
 
 	parserpkg "github.com/JacobJoergensen/laravel-fmt/internal/parser"
 )
@@ -89,11 +90,23 @@ func (p *xmlParser) parseNext(stack [][]byte) Node {
 }
 
 func (p *xmlParser) isTagOpen() bool {
-	return p.Peek() == '<' && isNameStart(p.PeekAt(1))
+	if p.Peek() != '<' {
+		return false
+	}
+
+	r := p.runeAt(1)
+
+	return isNameStart(r)
 }
 
 func (p *xmlParser) isTagClose() bool {
-	return p.Peek() == '<' && p.PeekAt(1) == '/' && isNameStart(p.PeekAt(2))
+	if p.Peek() != '<' || p.PeekAt(1) != '/' {
+		return false
+	}
+
+	r := p.runeAt(2)
+
+	return isNameStart(r)
 }
 
 // A `<` that starts none of these is not well-formed XML.
@@ -364,6 +377,7 @@ func (p *xmlParser) readAttrs() []*Attr {
 		a := p.readAttr()
 
 		if a == nil {
+			p.addError(p.Pos, "expected an attribute name")
 			p.Advance()
 
 			continue
@@ -440,14 +454,62 @@ func (p *xmlParser) readAttrValue(attr *Attr) {
 	attr.Value = p.Src[contentOffset:p.Pos.Offset]
 }
 
-func (p *xmlParser) readName() []byte {
-	startOff := p.Pos.Offset
-
-	for !p.Eof() && isNameByte(p.Peek()) {
-		p.Advance()
+// asciiNameChar is isNameChar for the bytes below utf8.RuneSelf. Names are
+// nearly all ASCII, and calling isNameChar per byte, too large to inline,
+// cost the whole format 10%.
+var asciiNameChar = func() (table [utf8.RuneSelf]bool) {
+	for c := range table {
+		table[c] = isNameChar(rune(c))
 	}
 
-	return p.Src[startOff:p.Pos.Offset]
+	return table
+}()
+
+func (p *xmlParser) readName() []byte {
+	start := p.Pos.Offset
+	end := start
+
+	for end < len(p.Src) {
+		if c := p.Src[end]; c < utf8.RuneSelf {
+			if !asciiNameChar[c] {
+				break
+			}
+
+			end++
+
+			continue
+		}
+
+		r, size := utf8.DecodeRune(p.Src[end:])
+		if r == utf8.RuneError && size <= 1 || !isNameChar(r) {
+			break
+		}
+
+		end += size
+	}
+
+	p.AdvanceN(end - start)
+
+	return p.Src[start:end]
+}
+
+// runeAt decodes the rune n bytes past the cursor. A byte that is not UTF-8
+// reads as -1, which no name holds; a U+FFFD written out in full is a valid
+// rune.
+func (p *xmlParser) runeAt(n int) rune {
+	off := min(p.Pos.Offset+n, len(p.Src))
+
+	if off < len(p.Src) && p.Src[off] < utf8.RuneSelf {
+		return rune(p.Src[off])
+	}
+
+	r, size := utf8.DecodeRune(p.Src[off:])
+
+	if r == utf8.RuneError && size <= 1 {
+		return -1
+	}
+
+	return r
 }
 
 func (p *xmlParser) skipTagWhitespace() {
@@ -456,12 +518,25 @@ func (p *xmlParser) skipTagWhitespace() {
 	}
 }
 
-func isNameStart(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+// isNameStart is XML 1.0 (fifth edition) production [4] NameStartChar.
+func isNameStart(r rune) bool {
+	switch {
+	case r == ':', r == '_', r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z':
+		return true
+	case r < 0xC0:
+		return false
+	}
+
+	return r <= 0xD6 || r >= 0xD8 && r <= 0xF6 || r >= 0xF8 && r <= 0x2FF ||
+		r >= 0x370 && r <= 0x37D || r >= 0x37F && r <= 0x1FFF || r >= 0x200C && r <= 0x200D ||
+		r >= 0x2070 && r <= 0x218F || r >= 0x2C00 && r <= 0x2FEF || r >= 0x3001 && r <= 0xD7FF ||
+		r >= 0xF900 && r <= 0xFDCF || r >= 0xFDF0 && r <= 0xFFFD || r >= 0x10000 && r <= 0xEFFFF
 }
 
-func isNameByte(c byte) bool {
-	return isNameStart(c) || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == ':'
+// isNameChar is production [4a] NameChar.
+func isNameChar(r rune) bool {
+	return isNameStart(r) || r == '-' || r == '.' || r >= '0' && r <= '9' || r == 0xB7 ||
+		r >= 0x300 && r <= 0x36F || r >= 0x203F && r <= 0x2040
 }
 
 func isSpaceByte(c byte) bool {
