@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.6.0 (2026-10-28)
 * Added support for Mago's `extends`, so formatter settings from a shared Mago config are used
 * Added detection of `mago.yaml`, `mago.yml`, `mago.json` and `mago.dist.*` configs
 * Added support for Pint's `extend`, so rules and excludes from a shared `pint.json` are used
