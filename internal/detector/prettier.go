@@ -22,6 +22,7 @@ import (
 
 const (
 	prettierKindPackageJSON = iota
+	prettierKindPackageYAML
 	prettierKindConfig
 	prettierKindTOML
 	prettierKindUnsupported
@@ -35,6 +36,7 @@ var prettierCandidates = []struct {
 	kind int
 }{
 	{"package.json", prettierKindPackageJSON},
+	{"package.yaml", prettierKindPackageYAML},
 	{".prettierrc", prettierKindConfig},
 	{".prettierrc.json", prettierKindConfig},
 	{".prettierrc.yml", prettierKindConfig},
@@ -250,8 +252,8 @@ func detectPrettier(root string) (Prettier, bool, error) {
 		}
 
 		switch candidate.kind {
-		case prettierKindPackageJSON:
-			prettier, found, err := loadPrettierFromPackageJSON(path)
+		case prettierKindPackageJSON, prettierKindPackageYAML:
+			prettier, found, err := loadPrettierFromPackage(path, candidate.kind)
 			if err != nil {
 				return Prettier{}, false, err
 			}
@@ -381,30 +383,41 @@ func prettierTOMLAsJSON(path string, raw []byte) ([]byte, error) {
 	return encoded, nil
 }
 
-func loadPrettierFromPackageJSON(path string) (Prettier, bool, error) {
+func loadPrettierFromPackage(path string, kind int) (Prettier, bool, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Prettier{}, false, fmt.Errorf("read %s: %w", path, err)
 	}
 
 	var pkg struct {
-		Prettier json.RawMessage `json:"prettier"`
+		Prettier any `json:"prettier" yaml:"prettier"`
 	}
 
-	if err := json.Unmarshal(raw, &pkg); err != nil {
-		return Prettier{}, false, config.ParseJSONError(path, raw, err)
+	if kind == prettierKindPackageYAML {
+		err = yaml.Unmarshal(raw, &pkg)
+	} else {
+		err = json.Unmarshal(raw, &pkg)
 	}
 
-	if len(pkg.Prettier) == 0 {
+	if err != nil {
+		return Prettier{}, false, nil //nolint:nilerr // Prettier skips a manifest it cannot parse; formatting the file reports it
+	}
+
+	switch pkg.Prettier.(type) {
+	case nil:
 		return Prettier{}, false, nil
+	case string:
+		// A shared config Prettier resolves as a Node module, which laravel-fmt
+		// cannot. Prettier stops here, so the search does too.
+		return Prettier{Path: path, Unread: true}, true, nil
 	}
 
-	// A string value points to another config file; following it is out of scope.
-	if pkg.Prettier[0] == '"' {
-		return Prettier{}, false, nil
+	encoded, err := json.Marshal(pkg.Prettier)
+	if err != nil {
+		return Prettier{}, false, fmt.Errorf("parse %s: %w", path, err)
 	}
 
-	prettier, err := parsePrettierConfig(path, pkg.Prettier)
+	prettier, err := parsePrettierConfig(path, encoded)
 	if err != nil {
 		return Prettier{}, false, err
 	}

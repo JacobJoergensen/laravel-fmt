@@ -123,19 +123,33 @@ func TestShowConfigExplainsItsSourcesOnStderr(t *testing.T) {
 }
 
 func TestUnreadPrettierConfigIsWarnedOnEveryRun(t *testing.T) {
-	writeProject(t, map[string]string{
-		"prettier.config.js": "export default {}\n",
-		"app/A.php":          "<?php\n",
-	})
-
-	var stderr bytes.Buffer
-
-	if err := Format(&Options{Check: true}, Streams{Out: &bytes.Buffer{}, Err: &stderr}); err != nil {
-		t.Fatalf("Format(--check) = %v", err)
+	cases := []struct {
+		name string
+		file string
+		body string
+		want string
+	}{
+		{"JS config", "prettier.config.js", "export default {}\n", "prettier.config.js: not read, laravel-fmt reads only JSON"},
+		{"shared config", "package.json", "{\n  \"prettier\": \"@vendor/prettier-config\"\n}\n", `package.json: not read, laravel-fmt can't load the shared config`},
 	}
 
-	if !strings.Contains(stderr.String(), "prettier.config.js: not read") {
-		t.Fatalf("stderr %q does not warn about the unread Prettier config", stderr.String())
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			writeProject(t, map[string]string{
+				tc.file:     tc.body,
+				"app/A.php": "<?php\n",
+			})
+
+			var stderr bytes.Buffer
+
+			if err := Format(&Options{Check: true}, Streams{Out: &bytes.Buffer{}, Err: &stderr}); err != nil {
+				t.Fatalf("Format(--check) = %v", err)
+			}
+
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("stderr %q does not contain %q", stderr.String(), tc.want)
+			}
+		})
 	}
 }
 

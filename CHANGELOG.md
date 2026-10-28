@@ -4,10 +4,14 @@
 * Added support for Mago's `extends`, so formatter settings from a shared Mago config are used
 * Added detection of `mago.yaml`, `mago.yml`, `mago.json` and `mago.dist.*` configs
 * Added support for Pint's `extend`, so rules and excludes from a shared `pint.json` are used
+* Added support for a Prettier config in `package.yaml`
 * Fixed a parent folder that can be entered but not listed, like a `0711` home folder, failing the run
 * Fixed a no-break space between XML elements, or as a Livewire component's whole template, being removed
 * Fixed Tailwind class sorting keeping the spaces at the edges of a Blade `class` value, and of a one-class HTML value
 * Fixed an `.editorconfig` saved with a BOM losing its `root = true` or its first section
+* Fixed an invalid `package.json` failing the run instead of being passed over, as Prettier does
+* Fixed a shared Prettier config named in `package.json` being skipped for a `.prettierrc` Prettier itself would ignore
+* Fixed `init` run from a subfolder of a Laravel app writing a `laravel-fmt.json` that is never read
 
 ## Version 0.5.0 (2026-10-26)
 * Added support for `.prettierrc.toml`

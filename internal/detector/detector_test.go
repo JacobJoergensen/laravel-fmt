@@ -209,6 +209,46 @@ func TestDetectDoesNotProbeAboveTheApplicationRoot(t *testing.T) {
 	}
 }
 
+func TestConfigDirIsWhereTheConfigIsRead(t *testing.T) {
+	app := t.TempDir()
+	seedFileAt(t, app, "composer.json", "{}")
+	seedFileAt(t, app, "artisan", "")
+
+	outside := t.TempDir()
+
+	cases := []struct {
+		name    string
+		workDir string
+		want    string
+	}{
+		{"application subfolder", filepath.Join(app, "app", "Models"), app},
+		{"outside an application", outside, outside},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.MkdirAll(tc.workDir, 0o750); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+
+			seedFileAt(t, tc.want, config.FileName, "{}")
+
+			ctx, err := Detect(tc.workDir)
+			if err != nil {
+				t.Fatalf("Detect: %v", err)
+			}
+
+			if got := ctx.ConfigDir(); got != tc.want {
+				t.Fatalf("ConfigDir() = %q, want %q", got, tc.want)
+			}
+
+			if want := filepath.Join(tc.want, config.FileName); ctx.ConfigPath != want {
+				t.Fatalf("ConfigPath = %q, want %q", ctx.ConfigPath, want)
+			}
+		})
+	}
+}
+
 func seedFileAt(t *testing.T, dir, rel, body string) {
 	t.Helper()
 

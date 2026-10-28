@@ -192,20 +192,6 @@ func TestDetectPrettierPackageJSONWithoutKeyNotDetected(t *testing.T) {
 	}
 }
 
-func TestDetectPrettierPackageJSONStringReferenceNotDetected(t *testing.T) {
-	dir := t.TempDir()
-	seedFileAt(t, dir, "package.json", `{"prettier": "./my-config.json"}`)
-
-	_, found, err := detectPrettier(dir)
-	if err != nil {
-		t.Fatalf("detectPrettier: %v", err)
-	}
-
-	if found {
-		t.Fatal("detectPrettier reported found for a string reference, want not found")
-	}
-}
-
 func TestDetectPrettierUnsupportedFormIsUnreadAndAdoptsNothing(t *testing.T) {
 	dir := t.TempDir()
 	seedFileAt(t, dir, ".prettierrc.js", `module.exports = { printWidth: 100 }`)
@@ -514,6 +500,69 @@ func TestDetectPrettierFollowsPrettiersSearchOrder(t *testing.T) {
 			name:       "prettier.config.mts is found",
 			files:      map[string]string{"prettier.config.mts": "export default {}"},
 			wantFile:   "prettier.config.mts",
+			wantUnread: true,
+		},
+		{
+			name: "an invalid package.json is passed over",
+			files: map[string]string{
+				"package.json": `{"prettier": {"printWidth": 100}`,
+				".prettierrc":  `{"printWidth": 70}`,
+			},
+			wantFile:  ".prettierrc",
+			wantWidth: 70,
+		},
+		{
+			name: "a shared config in package.json stops the search",
+			files: map[string]string{
+				"package.json": `{"prettier": "@vendor/prettier-config"}`,
+				".prettierrc":  `{"printWidth": 70}`,
+			},
+			wantFile:   "package.json",
+			wantUnread: true,
+		},
+		{
+			name: "package.json wins over package.yaml",
+			files: map[string]string{
+				"package.json": `{"prettier": {"printWidth": 100}}`,
+				"package.yaml": "prettier:\n  printWidth: 90\n",
+			},
+			wantFile:  "package.json",
+			wantWidth: 100,
+		},
+		{
+			name: "package.yaml wins over .prettierrc",
+			files: map[string]string{
+				"package.yaml": "prettier:\n  printWidth: 90\n",
+				".prettierrc":  `{"printWidth": 70}`,
+			},
+			wantFile:  "package.yaml",
+			wantWidth: 90,
+		},
+		{
+			name: "package.yaml without a prettier key is passed over",
+			files: map[string]string{
+				"package.yaml": "name: app\n",
+				".prettierrc":  `{"printWidth": 70}`,
+			},
+			wantFile:  ".prettierrc",
+			wantWidth: 70,
+		},
+		{
+			name: "an invalid package.yaml is passed over",
+			files: map[string]string{
+				"package.yaml": "prettier: [\n",
+				".prettierrc":  `{"printWidth": 70}`,
+			},
+			wantFile:  ".prettierrc",
+			wantWidth: 70,
+		},
+		{
+			name: "a shared config in package.yaml stops the search",
+			files: map[string]string{
+				"package.yaml": "prettier: \"@vendor/prettier-config\"\n",
+				".prettierrc":  `{"printWidth": 70}`,
+			},
+			wantFile:   "package.yaml",
 			wantUnread: true,
 		},
 	}

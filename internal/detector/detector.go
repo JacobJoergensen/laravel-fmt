@@ -24,6 +24,15 @@ type Context struct {
 	Tailwind         *Tailwind
 }
 
+// ConfigDir returns the directory laravel-fmt.json belongs in.
+func (c Context) ConfigDir() string {
+	if c.Laravel != nil {
+		return c.Laravel.Root
+	}
+
+	return c.WorkDir
+}
+
 // Detect probes workDir, or the Laravel root above it when there is one.
 func Detect(workDir string) (Context, error) {
 	return detectWith(workDir, &probeMemo{})
@@ -45,10 +54,10 @@ func detectWith(workDir string, memo *probeMemo) (Context, error) {
 	// Inside a project the config comes from its root alone, so no
 	// laravel-fmt.json further down can make a file format differently
 	// depending on which paths the run was given.
-	configFrom, configStopAt := workDir, ""
+	configFrom, configStopAt := ctx.ConfigDir(), ""
 
 	if laravelFound {
-		configFrom, configStopAt = laravel.Root, laravel.Root
+		configStopAt = laravel.Root
 	}
 
 	configPath, err := findConfig(configFrom, configStopAt, memo)

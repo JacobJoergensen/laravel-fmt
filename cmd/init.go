@@ -24,21 +24,26 @@ var initCmd = &cobra.Command{
 			return fmt.Errorf("resolve working directory: %w", err)
 		}
 
-		path := filepath.Join(workDir, config.FileName)
+		ctx, err := detector.Detect(workDir)
+		if err != nil {
+			return fmt.Errorf("detect project context: %w", err)
+		}
+
+		path := filepath.Join(ctx.ConfigDir(), config.FileName)
+
+		shown, err := filepath.Rel(workDir, path)
+		if err != nil {
+			shown = path
+		}
 
 		_, err = os.Stat(path)
 
 		if err == nil && !initForce {
-			return fmt.Errorf("%s already exists (use --force to overwrite)", config.FileName)
+			return fmt.Errorf("%s already exists (use --force to overwrite)", shown)
 		}
 
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("check %s: %w", config.FileName, err)
-		}
-
-		ctx, err := detector.Detect(workDir)
-		if err != nil {
-			return fmt.Errorf("detect project context: %w", err)
+			return fmt.Errorf("check %s: %w", shown, err)
 		}
 
 		cfg := config.Default()
@@ -49,10 +54,10 @@ var initCmd = &cobra.Command{
 		}
 
 		if err := os.WriteFile(path, contents, 0o644); err != nil { //nolint:gosec // a config file is read like source, not a secret
-			return fmt.Errorf("write %s: %w", config.FileName, err)
+			return fmt.Errorf("write %s: %w", shown, err)
 		}
 
-		cmd.PrintErrf("%s%s%s %sCreated %s%s\n", terminal.Green, terminal.CheckMark, terminal.Reset, terminal.Bold, config.FileName, terminal.Reset)
+		cmd.PrintErrf("%s%s%s %sCreated %s%s\n", terminal.Green, terminal.CheckMark, terminal.Reset, terminal.Bold, shown, terminal.Reset)
 
 		return nil
 	},

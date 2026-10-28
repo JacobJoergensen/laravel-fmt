@@ -115,7 +115,12 @@ func (r *runner) warnUnreadPrettier(ctx detector.Context) {
 		return
 	}
 
-	r.warnConfigFile(ctx.Prettier.Path, "not read, laravel-fmt reads only JSON, YAML and TOML Prettier configs")
+	switch filepath.Base(ctx.Prettier.Path) {
+	case "package.json", "package.yaml":
+		r.warnConfigFile(ctx.Prettier.Path, `not read, laravel-fmt can't load the shared config its "prettier" key names`)
+	default:
+		r.warnConfigFile(ctx.Prettier.Path, "not read, laravel-fmt reads only JSON, YAML and TOML Prettier configs")
+	}
 }
 
 func (r *runner) explainConfig(projects *detector.Resolver, cfg *config.File) error {
