@@ -240,7 +240,7 @@ func detectPrettier(root string) (Prettier, bool, error) {
 
 		info, err := os.Stat(path)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+			if upward.Absent(err) {
 				continue
 			}
 
@@ -283,7 +283,7 @@ func dirNames(dir string, candidates []string) (map[string]bool, error) {
 	f, err := os.Open(dir)
 	if err != nil {
 		switch {
-		case errors.Is(err, os.ErrNotExist):
+		case upward.Absent(err):
 			return map[string]bool{}, nil
 		case errors.Is(err, os.ErrPermission):
 			return statNames(dir, candidates)
@@ -329,7 +329,7 @@ func statNames(dir string, candidates []string) (map[string]bool, error) {
 			continue
 		}
 
-		if !errors.Is(err, os.ErrNotExist) {
+		if !upward.Absent(err) {
 			return nil, fmt.Errorf("stat %s: %w", path, err)
 		}
 	}

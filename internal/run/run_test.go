@@ -191,3 +191,28 @@ func TestStdinPathRelativeToASubfolderKeepsItsLanguageRules(t *testing.T) {
 		t.Fatalf("stdout = %q, want the guideline unchanged", stdout.String())
 	}
 }
+
+func TestStdinPathNoFileCanHaveFormatsAsAnyOther(t *testing.T) {
+	// app/ must exist: under a missing parent Windows reports not-exist, and
+	// only under a real one does it answer ERROR_INVALID_NAME.
+	writeProject(t, map[string]string{
+		"composer.json": `{"name":"acme/pkg"}`,
+		"app/B.php":     "<?php\n",
+	})
+
+	for _, path := range []string{"app/**/A.php", "app/what?/A.php"} {
+		t.Run(path, func(t *testing.T) {
+			var stdout bytes.Buffer
+
+			streams := Streams{In: strings.NewReader("<?php\n$a=1;\n"), Out: &stdout, Err: &bytes.Buffer{}}
+
+			if err := Format(&Options{StdinFilepath: path}, streams); err != nil {
+				t.Fatalf("Format = %v", err)
+			}
+
+			if want := "<?php\n\n$a = 1;\n"; stdout.String() != want {
+				t.Fatalf("stdout = %q, want %q", stdout.String(), want)
+			}
+		})
+	}
+}

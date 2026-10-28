@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/JacobJoergensen/laravel-fmt/internal/lsp"
 	"github.com/JacobJoergensen/laravel-fmt/internal/run"
 	"github.com/JacobJoergensen/laravel-fmt/internal/terminal"
 )
@@ -82,15 +83,21 @@ func Execute() error {
 const (
 	exitDrift = 1
 	exitError = 2
+
+	// The LSP specification exits 1 when the client sends exit before shutdown.
+	exitWithoutShutdown = 1
 )
 
 // ExitCode maps an Execute error to Prettier's exit contract.
 func ExitCode(err error) int {
-	if errors.Is(err, run.ErrDrift) {
+	switch {
+	case errors.Is(err, run.ErrDrift):
 		return exitDrift
+	case errors.Is(err, lsp.ErrExitWithoutShutdown):
+		return exitWithoutShutdown
+	default:
+		return exitError
 	}
-
-	return exitError
 }
 
 // version and commit are stamped by the release build via -ldflags -X (see

@@ -3,6 +3,8 @@ package detector
 import (
 	"os"
 	"sync"
+
+	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
 )
 
 // probeKind names one of the upward-walking probes, so two of them asking
@@ -78,7 +80,7 @@ func (memo *probeMemo) statExists(path string) (bool, error) {
 	switch _, err := os.Stat(path); {
 	case err == nil:
 		entry.exists = true
-	case !absent(err):
+	case !upward.Absent(err):
 		entry.err = err
 	}
 

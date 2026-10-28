@@ -1,14 +1,13 @@
 package detector
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/tailwind"
+	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
 )
 
 // Tailwind is a detected Tailwind v4 install. v3 is never detected: the
@@ -41,7 +40,7 @@ func detectTailwind(root string) (Tailwind, bool, error) {
 		return nil
 	})
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if upward.Absent(err) {
 			return Tailwind{}, false, nil
 		}
 

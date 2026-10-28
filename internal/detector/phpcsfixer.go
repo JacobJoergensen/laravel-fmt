@@ -3,13 +3,13 @@ package detector
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/parser/php"
+	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
 )
 
 // The config is executable PHP, so it is parsed and never run: only a literal
@@ -23,7 +23,7 @@ func detectPhpCsFixer(root string) (Pint, bool, error) {
 
 		info, err := os.Stat(candidate)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+			if upward.Absent(err) {
 				continue
 			}
 

@@ -3,7 +3,6 @@ package detector
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -202,7 +201,7 @@ func readEditorConfig(dir string) (*EditorConfig, bool, error) {
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if upward.Absent(err) {
 			return nil, false, nil
 		}
 

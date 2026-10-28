@@ -3,13 +3,13 @@ package detector
 import (
 	"cmp"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
+	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
 )
 
 const (
@@ -125,7 +125,7 @@ func detectPint(root string) (Pint, bool, error) {
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if upward.Absent(err) {
 			return detectComposerPint(root)
 		}
 
@@ -240,7 +240,7 @@ func detectComposerPint(root string) (Pint, bool, error) {
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if upward.Absent(err) {
 			return Pint{}, false, nil
 		}
 

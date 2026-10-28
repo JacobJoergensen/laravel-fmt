@@ -568,7 +568,7 @@ func (e *emitter) emitWrappedCondition(n *parser.DirectiveNode, content []byte, 
 	// Measured flat, never from the built form: the formatter breaks the argument
 	// itself, so reading its current shape would flip the layout between passes.
 	flat := phpfmt.DirectiveArgFlatWidth(content, n.Tokens, n.Args[0], e.cfg)
-	if e.w.CursorColumn()+flat+len(")") <= e.cfg.PrintWidth {
+	if e.w.CursorColumn()+flat+len(")") <= e.w.PrintWidth() {
 		return false
 	}
 
@@ -598,7 +598,7 @@ func (e *emitter) emitWrappedLoop(n *parser.DirectiveNode) bool {
 	}
 
 	flat := phpfmt.LoopClauseFlatWidth(n.LoopSrc, n.LoopTokens, n.Loop, e.cfg)
-	if e.w.CursorColumn()+flat+len(")") <= e.cfg.PrintWidth {
+	if e.w.CursorColumn()+flat+len(")") <= e.w.PrintWidth() {
 		return false
 	}
 

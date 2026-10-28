@@ -22,7 +22,7 @@ const UTF8BOM = "\uFEFF"
 func ReadIgnoreFile(path string) ([]string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		if upward.Absent(err) || errors.Is(err, syscall.ENOTDIR) {
 			return nil, nil
 		}
 
@@ -96,7 +96,7 @@ func hasGitEntry(dir string) (bool, error) {
 		return true, nil
 	}
 
-	if errors.Is(err, os.ErrNotExist) {
+	if upward.Absent(err) {
 		return false, nil
 	}
 
