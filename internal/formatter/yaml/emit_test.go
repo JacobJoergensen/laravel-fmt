@@ -789,3 +789,69 @@ func TestClipAndStripBlockScalarsStillCollapse(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatMovesAFlowsContinuationLinesWithItsKey(t *testing.T) {
+	src := "a:\n    b: [x,\n      # see ] here\n      y]\n"
+	want := "a:\n  b: [x,\n    # see ] here\n    y]\n"
+
+	got := mustFormat(t, []byte(src), config.Default())
+	if string(got) != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent:\n=== once ===\n%q\n=== twice ===\n%q", got, twice)
+	}
+}
+
+func TestFormatReadsScalarsAndFlowsThatSpanLines(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"flow below its key", "a:\n  [[\"x\"]]\nb: 1\n", "a: [[\"x\"]]\nb: 1\n"},
+		{"plain scalar below its key", "a:\n  plain text\nb: 1\n", "a: plain text\nb: 1\n"},
+		{"quoted scalar below its key", "a:\n  \"q\"\nb: 1\n", "a: \"q\"\nb: 1\n"},
+		{"plain scalar running on in a mapping", "z:   1\na: one\n  two\nb: 1\n", "z: 1\na: one\n  two\nb: 1\n"},
+		{"plain scalar running on in a list", "k:\n    - one\n      two\n    - three\n", "k:\n  - one\n    two\n  - three\n"},
+		{"flow document", "{\n  \"a\": 1\n}\n---\nz:   1\n", "{\n  \"a\": 1\n}\n---\nz: 1\n"},
+		{"compact nested list", "- - a\n  - b\n- c\n", "-\n  - a\n  - b\n- c\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent:\n=== once ===\n%q\n=== twice ===\n%q", got, twice)
+			}
+		})
+	}
+}
+
+func TestFormatLeavesAValueThatWouldMoveACommentOrBreakAsWritten(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"comment after a continuation line", "z:   1\na: one\n  two # c\n"},
+		{"comment between a key and its scalar", "z:   1\nrun:\n  # c\n  go build\n"},
+		{"blank line between a key and its scalar", "z:   1\nrun:\n\n  go build\n"},
+		{"comment on the key's line", "z:   1\nrun: # c\n  go build\n"},
+		{"dash on a continuation line", "z:   1\na: one\n  - two\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+
+			if string(got) != tc.src {
+				t.Fatalf("got %q, want the file frozen", got)
+			}
+		})
+	}
+}

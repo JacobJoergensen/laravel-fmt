@@ -162,7 +162,11 @@ func emitDocument(w *formatter.Writer, src []byte, doc *parser.Document) {
 		if leadingHasIgnore(doc.Leading) {
 			// Freeze from the body through the document end so trailing trivia is
 			// covered by the frozen span, not emitted again below as a blank line.
-			emitFrozen(w, src, parser.Span{Start: doc.Body.Span().Start, End: doc.Range.End}, doc.Body)
+			// The span starts at the body's line, or an indented body's first line
+			// alone would lose its indent.
+			bodyStart := doc.Body.Span().Start
+			lineStart := parser.Position{Offset: bodyStart.Offset - (bodyStart.Column - 1), Line: bodyStart.Line, Column: 1}
+			emitFrozen(w, src, parser.Span{Start: lineStart, End: doc.Range.End}, doc.Body)
 
 			return
 		}
@@ -180,13 +184,17 @@ func emitDocument(w *formatter.Writer, src []byte, doc *parser.Document) {
 
 // emitNode emits a node that stands on its own at the current indent: a
 // document body or a block value already positioned on a fresh line. Only a
-// collection gets here; any other body bails, which freezes the file.
+// collection gets here, a flow one only as a whole document; any other body
+// bails, which freezes the file.
 func emitNode(w *formatter.Writer, src []byte, node parser.Node) {
 	switch n := node.(type) {
 	case *parser.Mapping:
 		emitMapping(w, src, n)
 	case *parser.Sequence:
 		emitSequence(w, src, n)
+	case *parser.Flow:
+		formatter.EmitVerbatimStripping(w, src[n.Range.Start.Offset:n.Range.End.Offset], n.Indent)
+		w.Newline()
 	}
 }
 
@@ -301,7 +309,9 @@ func emitLeafValue(w *formatter.Writer, src []byte, value parser.Node, comment *
 		w.Newline()
 	case *parser.Flow:
 		w.Space()
-		formatter.EmitVerbatimAtIndent(w, src, v.Range.Start.Offset, v.Range.End.Offset)
+		// Continuation lines move with the key, as a quoted scalar's do: kept at
+		// their source column they could end up no deeper than the key.
+		formatter.EmitVerbatimStripping(w, src[v.Range.Start.Offset:v.Range.End.Offset], max(v.Indent-baseOffset, 0))
 		emitInlineComment(w, comment)
 		w.Newline()
 	case *parser.BlockScalar:

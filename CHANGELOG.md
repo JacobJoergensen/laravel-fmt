@@ -5,6 +5,7 @@
 * Added detection of `mago.yaml`, `mago.yml`, `mago.json` and `mago.dist.*` configs
 * Added support for Pint's `extend`, so rules and excludes from a shared `pint.json` are used
 * Added support for a Prettier config in `package.yaml`
+* Improved YAML formatting to cover a value on the line below its key, a plain value that runs onto more lines, a `- - a` nested list and a file that is one flow collection, which were left unformatted
 * Fixed a parent folder that can be entered but not listed, like a `0711` home folder, failing the run
 * Fixed a no-break space between XML elements, or as a Livewire component's whole template, being removed
 * Fixed Tailwind class sorting keeping the spaces at the edges of a Blade `class` value, and of a one-class HTML value
@@ -15,6 +16,13 @@
 * Fixed a Blade view opening with `<?php if (...): ?>` or `<?php if (...) { ?>` failing as a broken Livewire component
 * Fixed deeply nested CSS, HTML, XML or Blade crashing the whole run instead of reporting the file
 * Fixed a too-deeply nested JSON or PHP file reporting hundreds of follow-on errors after the depth error
+* Fixed a multi-line YAML flow collection with a comment line holding an apostrophe being rejected as unterminated
+* Fixed YAML block scalar lines starting with `#`, like `### Thanks to all contributors!`, being dropped from the text
+* Fixed a YAML list item holding an apostrophe, like `- it's`, or a flow mapping, like `- { a: 1 }`, being read as a key and reshaped
+* Fixed a multi-line YAML flow collection keeping its old indent when its key moved, which could change its value
+* Fixed a YAML mapping with a duplicate key being formatted instead of reported
+* Fixed a YAML key indented to no open mapping, like a key lined up under a list item's dash, passing as valid instead of being reported
+* Fixed an ignored YAML document with an indented body losing the indent of its first line only
 
 ## Version 0.5.0 (2026-10-26)
 * Added support for `.prettierrc.toml`

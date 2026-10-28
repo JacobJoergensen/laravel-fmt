@@ -123,6 +123,8 @@ func (b *BlockScalar) Span() Span { return b.Range }
 type Flow struct {
 	Range Span
 	Raw   []byte
+	// Indent is the block indent its continuation lines are re-homed by.
+	Indent int
 }
 
 // Span returns the source extent of the flow collection.

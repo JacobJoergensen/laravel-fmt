@@ -2,6 +2,7 @@ package yaml
 
 import (
 	"bytes"
+	"fmt"
 
 	parserpkg "github.com/JacobJoergensen/laravel-fmt/internal/parser"
 )
@@ -12,6 +13,10 @@ type yamlParser struct {
 	errors  []Error
 	pending []Trivia
 	depth   int
+
+	// explicitKey is set once a `? ` key is read: the parser does not model
+	// one, so a line it leaves over may belong to it.
+	explicitKey bool
 }
 
 // maxNestingDepth caps block recursion so a pathological run of indentation
@@ -124,10 +129,43 @@ func (p *yamlParser) parseDocument() *Document {
 		break
 	}
 
+	// A later document without `---` is one the parser split off where a block
+	// ended early, so what is left over after it has no block context to judge.
+	splitOff := start.Offset > 0 && doc.StartMarker.End.Offset == doc.StartMarker.Start.Offset
+
+	if doc.Body != nil && !splitOff && doc.EndMarker.End.Offset == doc.EndMarker.Start.Offset {
+		p.checkStrandedKey()
+	}
+
 	doc.Trailing = p.drainPending()
 	doc.Range = mkspan(start, p.Pos)
 
 	return doc
+}
+
+// checkStrandedKey reports a key line left over once the body ends, indented
+// to no open mapping, like `id: x` under `- type: input`'s dash. A key line is
+// never a scalar's text, so this is never valid. Skipped where the parser
+// cannot judge: column 0, a list item, a `: ` line, after an explicit `? ` key.
+func (p *yamlParser) checkStrandedKey() {
+	if p.Eof() {
+		return
+	}
+
+	ind := p.measureIndent()
+	if ind == 0 || p.explicitKey || p.isSeqDash(ind) || p.isDocStart(ind) || p.isDocEnd(ind) {
+		return
+	}
+
+	sep := p.findSeparatorOnCurrentLine()
+	if sep <= p.Pos.Offset+ind {
+		return
+	}
+
+	saved := p.Pos
+	p.AdvanceN(ind)
+	p.errors = append(p.errors, Error{Pos: p.Pos, Msg: "key is indented to no open mapping"})
+	p.Pos = saved
 }
 
 func (p *yamlParser) parseDocBody() Node {
@@ -138,11 +176,25 @@ func (p *yamlParser) parseDocBody() Node {
 	ind := p.measureIndent()
 
 	if p.isSeqDash(ind) {
-		return p.parseSequence(ind)
+		return p.parseSequence(ind, false)
 	}
 
 	if p.findSeparatorOnCurrentLine() >= 0 {
 		return p.parseMapping(ind, false)
+	}
+
+	// A flow collection is a whole document (`{}`, a JSON file) when nothing
+	// but a line break follows it.
+	if c := p.PeekAt(ind); c == '{' || c == '[' {
+		saved := p.Pos
+		p.AdvanceN(ind)
+		flow := p.parseFlow(0)
+
+		if p.finishLine() == nil {
+			return flow
+		}
+
+		p.Pos = saved
 	}
 
 	return p.bailLine(ind)
@@ -158,11 +210,17 @@ const (
 	sequenceMustIndent     = false
 )
 
-func (p *yamlParser) parseBlockValue(parentIndent int, sameIndentSequence bool) Node {
+// A scalar on the line below its owner is written back inline, so it is read
+// only when nothing sits between the two that would move: a comment on the
+// owner's line, or a blank or comment line before the scalar. leafIndent is
+// the indent the scalar is re-homed by, as if it had been written inline.
+func (p *yamlParser) parseBlockValue(parentIndent int, sameIndentSequence bool, leafIndent int, ownerHasComment bool) Node {
 	p.depth++
 	defer func() { p.depth-- }()
 
+	pendingBefore := len(p.pending)
 	p.collectTrivia()
+	leafOK := !ownerHasComment && len(p.pending) == pendingBefore
 
 	if p.Eof() {
 		return nil
@@ -181,30 +239,46 @@ func (p *yamlParser) parseBlockValue(parentIndent int, sameIndentSequence bool) 
 	ind := p.measureIndent()
 
 	if ind > parentIndent {
-		return p.parseNodeAt(ind)
+		return p.parseNodeAt(ind, parentIndent, leafIndent, leafOK)
 	}
 
 	if sameIndentSequence && ind == parentIndent && p.isSeqDash(ind) {
-		return p.parseSequence(parentIndent)
+		return p.parseSequence(parentIndent, false)
 	}
 
 	return nil
 }
 
-func (p *yamlParser) parseNodeAt(ind int) Node {
+func (p *yamlParser) parseNodeAt(ind, parentIndent, leafIndent int, leafOK bool) Node {
 	if p.isSeqDash(ind) {
-		return p.parseSequence(ind)
+		return p.parseSequence(ind, false)
 	}
 
 	if p.findSeparatorOnCurrentLine() >= 0 {
 		return p.parseMapping(ind, false)
 	}
 
-	return p.bailLine(ind)
+	if !leafOK {
+		return p.bailLine(ind)
+	}
+
+	saved := p.Pos
+	p.AdvanceN(ind)
+
+	node, comment := p.parseInlineValue(leafIndent, parentIndent)
+	if comment != nil {
+		p.Pos = saved
+
+		return p.bailLine(ind)
+	}
+
+	return node
 }
 
 func (p *yamlParser) parseMapping(indent int, inlineFirst bool) *Mapping {
 	m := &Mapping{}
+
+	var seen map[string]bool
 
 	for {
 		var leading []Trivia
@@ -225,6 +299,7 @@ func (p *yamlParser) parseMapping(indent int, inlineFirst bool) *Mapping {
 
 		entry := p.parseMappingEntry(indent)
 		entry.Leading = leading
+		seen = p.checkDuplicateKey(m.Entries, entry.Key, seen)
 		m.Entries = append(m.Entries, entry)
 	}
 
@@ -233,6 +308,97 @@ func (p *yamlParser) parseMapping(indent int, inlineFirst bool) *Mapping {
 	}
 
 	return m
+}
+
+// keySetThreshold is the entry count past which a mapping's keys go into a set:
+// below it a scan is cheaper than the set's allocations, above it the scan
+// turns a 50,000-key translation file quadratic.
+const keySetThreshold = 16
+
+// checkDuplicateKey reports key when an earlier entry has it, which every
+// loader rejects. seen holds the mapping's keys once past keySetThreshold.
+func (p *yamlParser) checkDuplicateKey(earlier []*MappingEntry, key *Scalar, seen map[string]bool) map[string]bool {
+	name, quoted, ok := keyText(key.Raw)
+	if !ok {
+		return seen
+	}
+
+	if len(earlier) < keySetThreshold {
+		for _, e := range earlier {
+			other, otherQuoted, ok := keyText(e.Key.Raw)
+
+			if ok && quoted == otherQuoted && bytes.Equal(name, other) {
+				p.reportDuplicateKey(key, name)
+
+				return seen
+			}
+		}
+
+		return seen
+	}
+
+	if seen == nil {
+		seen = make(map[string]bool, 2*len(earlier))
+
+		for _, e := range earlier {
+			if other, otherQuoted, ok := keyText(e.Key.Raw); ok {
+				seen[keySetEntry(other, otherQuoted)] = true
+			}
+		}
+	}
+
+	entry := keySetEntry(name, quoted)
+
+	if seen[entry] {
+		p.reportDuplicateKey(key, name)
+	}
+
+	seen[entry] = true
+
+	return seen
+}
+
+func (p *yamlParser) reportDuplicateKey(key *Scalar, name []byte) {
+	p.errors = append(p.errors, Error{Pos: key.Range.Start, Msg: fmt.Sprintf("duplicate key %q", name)})
+}
+
+func keySetEntry(name []byte, quoted bool) string {
+	if quoted {
+		return "'" + string(name)
+	}
+
+	return string(name)
+}
+
+// keyText returns the text a key compares by. A plain key is only compared
+// with plain ones, since `1` and `'1'` are different keys. It reports false for
+// a key whose text takes more than removing quotes to read: one with escapes,
+// an anchor, alias, tag, flow collection, or the `<<` merge key.
+func keyText(raw []byte) (text []byte, quoted, ok bool) {
+	raw = bytes.TrimRight(raw, " \t")
+
+	if len(raw) == 0 || bytes.Equal(raw, []byte("<<")) {
+		return nil, false, false
+	}
+
+	switch raw[0] {
+	case '\'':
+		if len(raw) < 2 || raw[len(raw)-1] != '\'' || bytes.Contains(raw[1:len(raw)-1], []byte("'")) {
+			return nil, false, false
+		}
+
+		return raw[1 : len(raw)-1], true, true
+	case '"':
+		if len(raw) < 2 || raw[len(raw)-1] != '"' || bytes.ContainsAny(raw[1:len(raw)-1], `\"`) {
+			return nil, false, false
+		}
+
+		return raw[1 : len(raw)-1], true, true
+	case '&', '*', '!', '[', '{', '?':
+		return nil, false, false
+	}
+
+	return raw, false, true
 }
 
 func (p *yamlParser) parseMappingEntry(indent int) *MappingEntry {
@@ -247,6 +413,10 @@ func (p *yamlParser) parseMappingEntry(indent int) *MappingEntry {
 	}
 
 	key := &Scalar{Range: mkspan(keyStart, p.Pos), Raw: p.slice(keyStart, p.Pos)}
+
+	if len(key.Raw) > 1 && key.Raw[0] == '?' && (key.Raw[1] == ' ' || key.Raw[1] == '\t') {
+		p.explicitKey = true
+	}
 
 	colonStart := p.Pos
 	p.Advance()
@@ -269,24 +439,30 @@ func (p *yamlParser) parseValueAfterColon(indent int) (Node, *Trivia) {
 	if p.Eof() || p.Peek() == '\n' || p.Peek() == '\r' || p.Peek() == '#' {
 		comment := p.finishLine()
 
-		return p.parseBlockValue(indent, sequenceMayShareIndent), comment
+		return p.parseBlockValue(indent, sequenceMayShareIndent, indent, comment != nil), comment
 	}
 
-	return p.parseInlineValue(indent)
+	return p.parseInlineValue(indent, indent)
 }
 
-func (p *yamlParser) parseSequence(indent int) *Sequence {
+func (p *yamlParser) parseSequence(indent int, inlineFirst bool) *Sequence {
 	s := &Sequence{}
 
 	for {
-		p.collectTrivia()
+		var leading []Trivia
 
-		if p.Eof() || p.measureIndent() != indent || !p.isSeqDash(indent) {
-			break
+		if inlineFirst {
+			inlineFirst = false
+		} else {
+			p.collectTrivia()
+
+			if p.Eof() || p.measureIndent() != indent || !p.isSeqDash(indent) {
+				break
+			}
+
+			leading = p.drainPending()
+			p.AdvanceN(indent)
 		}
-
-		leading := p.drainPending()
-		p.AdvanceN(indent)
 
 		item := p.parseSequenceItem(indent)
 		item.Leading = leading
@@ -324,7 +500,7 @@ func (p *yamlParser) parseSequenceItem(indent int) *SequenceItem {
 	if p.Eof() || p.Peek() == '\n' || p.Peek() == '\r' || p.Peek() == '#' {
 		p.Pos = save
 		comment := p.finishLine()
-		value := p.parseBlockValue(indent, sequenceMustIndent)
+		value := p.parseBlockValue(indent, sequenceMustIndent, indent+len("- "), comment != nil)
 
 		return &SequenceItem{Range: mkspan(start, p.contentEnd(pendingBefore)), Dash: dash, Value: value, Comment: comment}
 	}
@@ -332,6 +508,12 @@ func (p *yamlParser) parseSequenceItem(indent int) *SequenceItem {
 	// A compact `- key: value` continues as a mapping whose indent is the
 	// column the value starts at.
 	valueColumn := p.lineColumn()
+
+	if p.isSeqDash(0) {
+		value := p.parseSequence(valueColumn, true)
+
+		return &SequenceItem{Range: mkspan(start, p.contentEnd(pendingBefore)), Dash: dash, Value: value}
+	}
 
 	if p.findSeparatorOnCurrentLine() >= 0 {
 		value := p.parseMapping(valueColumn, true)
@@ -348,30 +530,119 @@ func (p *yamlParser) parseSequenceItem(indent int) *SequenceItem {
 		return &SequenceItem{Range: mkspan(start, p.contentEnd(pendingBefore)), Dash: dash, Value: value}
 	}
 
-	value, comment := p.parseInlineValue(valueColumn)
+	// The value is re-homed from the dash, where the emitter writes `- ` again:
+	// re-homed from its own column, a continuation line under `-  a` would end
+	// up no deeper than the dash.
+	value, comment := p.parseInlineValue(indent+len("- "), indent)
 
 	return &SequenceItem{Range: mkspan(start, p.contentEnd(pendingBefore)), Dash: dash, Value: value, Comment: comment}
 }
 
-func (p *yamlParser) parseInlineValue(indent int) (Node, *Trivia) {
+// indent is what the value is re-homed by; parentIndent is its owner's, which
+// a plain scalar's continuation lines must sit past.
+func (p *yamlParser) parseInlineValue(indent, parentIndent int) (Node, *Trivia) {
 	switch p.Peek() {
 	case '|', '>':
 		return p.parseBlockScalar(indent), nil
 	case '{', '[':
-		node := p.parseFlow()
+		node := p.parseFlow(indent)
 
 		return node, p.finishLine()
 	case '&', '*', '!':
-		return p.parseAnchoredValue(indent), nil
+		return p.parseAnchoredValue(indent, parentIndent), nil
 	case '"', '\'':
 		scalar := p.parseQuotedScalar(indent)
 
 		return scalar, p.finishLine()
 	default:
+		start := p.Pos
 		scalar := p.parsePlainScalar(indent)
+		comment := p.finishLine()
 
-		return scalar, p.finishLine()
+		if comment == nil {
+			if end, ok := p.plainContinuationEnd(parentIndent); ok {
+				return &Verbatim{Range: mkspan(start, end), Raw: p.slice(start, end), Indent: indent}, nil
+			}
+		}
+
+		return scalar, comment
 	}
+}
+
+// plainContinuationEnd consumes the lines YAML folds into a plain scalar,
+// those indented past parentIndent. It consumes nothing and reports false when
+// there are none or one reads as more than text, leaving the input as parsed.
+func (p *yamlParser) plainContinuationEnd(parentIndent int) (Position, bool) {
+	saved := p.Pos
+
+	var end, after Position
+
+	found := false
+
+	for !p.Eof() {
+		if p.atBlankLine() {
+			p.consumeLine()
+
+			continue
+		}
+
+		ind := p.measureIndent()
+		if ind <= parentIndent {
+			break
+		}
+
+		if !isPlainContinuation(p.restOfLine(ind)) {
+			p.Pos = saved
+
+			return Position{}, false
+		}
+
+		end = p.consumeLineKeepEnd()
+		after = p.Pos
+		found = true
+	}
+
+	if !found {
+		p.Pos = saved
+
+		return Position{}, false
+	}
+
+	p.Pos = after
+
+	return end, true
+}
+
+// isPlainContinuation rejects a comment, a dash, or a `: ` that would make
+// the line a key, leaving those to the structure around the scalar.
+func isPlainContinuation(line []byte) bool {
+	line = bytes.TrimRight(line, " \t\r")
+
+	switch {
+	// A tab after the indent is separation in place but would lead the line
+	// once the spaces before it are re-homed away.
+	case line[0] == '#', line[0] == '\t', line[0] == '-' && (len(line) == 1 || line[1] == ' ' || line[1] == '\t'):
+		return false
+	case bytes.HasPrefix(line, []byte("? ")), bytes.HasPrefix(line, []byte(": ")):
+		return false
+	case bytes.HasSuffix(line, []byte(":")), bytes.Contains(line, []byte(": ")), bytes.Contains(line, []byte(":\t")):
+		return false
+	case bytes.Contains(line, []byte(" #")), bytes.Contains(line, []byte("\t#")):
+		return false
+	}
+
+	return true
+}
+
+func (p *yamlParser) restOfLine(from int) []byte {
+	start := p.Pos.Offset + from
+	end := start
+
+	for end < len(p.Src) && p.Src[end] != '\n' && p.Src[end] != '\r' {
+		end++
+	}
+
+	return p.Src[start:end]
 }
 
 func (p *yamlParser) parsePlainScalar(indent int) *Scalar {
@@ -423,7 +694,7 @@ func (p *yamlParser) parseQuotedScalar(indent int) *Scalar {
 
 func (p *yamlParser) parseBlockScalar(indent int) *BlockScalar {
 	start := p.Pos
-	end := p.consumeValueBlock(indent)
+	end := p.consumeValueBlock(indent, blockIsScalarBody)
 	raw := p.slice(start, end)
 
 	return &BlockScalar{Range: mkspan(start, end), Raw: raw, Indent: indent, ContentIndent: contentIndent(raw)}
@@ -487,13 +758,16 @@ func (p *yamlParser) consumeTrailingBlanks(end Position) Position {
 
 // A value whose header goes on to `|` or `>` is a block scalar: its trailing
 // whitespace and kept breaks are value, which only a BlockScalar preserves.
-func (p *yamlParser) parseAnchoredValue(indent int) Node {
+// The value owns every line indented past its owner, parentIndent, so `- &a`
+// takes the mapping that starts below it at the column after the dash.
+func (p *yamlParser) parseAnchoredValue(indent, parentIndent int) Node {
 	start := p.Pos
-	end := p.consumeValueBlock(indent)
+	isBlockScalar := blockIndicator(p.Src[p.Pos.Offset:]) != nil
+	end := p.consumeValueBlock(parentIndent, isBlockScalar)
 	raw := p.slice(start, end)
 
-	if blockIndicator(raw) != nil {
-		return &BlockScalar{Range: mkspan(start, end), Raw: raw, Indent: indent, ContentIndent: contentIndent(raw)}
+	if isBlockScalar {
+		return &BlockScalar{Range: mkspan(start, end), Raw: raw, Indent: parentIndent, ContentIndent: contentIndent(raw)}
 	}
 
 	return &Verbatim{Range: mkspan(start, end), Raw: raw, Indent: indent}
@@ -501,40 +775,83 @@ func (p *yamlParser) parseAnchoredValue(indent int) Node {
 
 func (p *yamlParser) bailLine(indent int) *Verbatim {
 	start := p.Pos
-	end := p.consumeValueBlock(indent)
+	end := p.consumeValueBlock(indent, blockIsValue)
 
 	return &Verbatim{Range: mkspan(start, end), Raw: p.slice(start, end), Bail: true, Indent: indent}
 }
 
-func (p *yamlParser) parseFlow() Node {
+func (p *yamlParser) parseFlow(indent int) *Flow {
 	start := p.Pos
-	depth := 0
 
-	for !p.Eof() {
-		switch p.Peek() {
-		case '\'':
-			p.skipSingleQuoted()
-		case '"':
-			p.skipDoubleQuoted()
-		case '{', '[':
-			depth++
-			p.Advance()
-		case '}', ']':
-			depth--
-			p.Advance()
-
-			if depth <= 0 {
-				return &Flow{Range: mkspan(start, p.Pos), Raw: p.slice(start, p.Pos)}
-			}
-		default:
-			p.Advance()
-		}
+	if !p.skipFlowCollection() {
+		p.errors = append(p.errors, Error{Pos: start, Msg: "unterminated flow collection"})
 	}
 
-	p.errors = append(p.errors, Error{Pos: start, Msg: "unterminated flow collection"})
-
-	return &Flow{Range: mkspan(start, p.Pos), Raw: p.slice(start, p.Pos)}
+	return &Flow{Range: mkspan(start, p.Pos), Raw: p.slice(start, p.Pos), Indent: indent}
 }
+
+// skipFlowCollection reports whether the collection closed. A quote opens a
+// scalar only where a node starts; inside a plain scalar (`[it's]`) it is text.
+func (p *yamlParser) skipFlowCollection() bool {
+	depth := 0
+	prev := byte(0)
+
+	for !p.Eof() {
+		c := p.Peek()
+
+		switch {
+		case c == '\'' && startsFlowNode(prev):
+			p.skipSingleQuoted()
+			prev = c
+
+			continue
+		case c == '"' && startsFlowNode(prev):
+			p.skipDoubleQuoted()
+			prev = c
+
+			continue
+		case c == '{' || c == '[':
+			depth++
+		case c == '}' || c == ']':
+			depth--
+
+			if depth <= 0 {
+				p.Advance()
+
+				return true
+			}
+		case c == '#':
+			// A comment line inside a multi-line collection can hold a bracket
+			// (`# see ]`) that is not structure.
+			if b := p.Src[p.Pos.Offset-1]; b == ' ' || b == '\t' || b == '\n' || b == '\r' {
+				for !p.Eof() && !p.atLineEnd() {
+					p.Advance()
+				}
+
+				continue
+			}
+		}
+
+		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+			prev = c
+		}
+
+		p.Advance()
+	}
+
+	return false
+}
+
+func startsFlowNode(prev byte) bool {
+	return prev == '[' || prev == '{' || prev == ',' || prev == ':'
+}
+
+// Whether a consumed block is a block scalar's body, where a `#` line is text
+// and not a comment, or any other value.
+const (
+	blockIsScalarBody = true
+	blockIsValue      = false
+)
 
 // Trailing blank lines are left for the caller to collect as trivia, so they
 // survive as blank-line layout instead of being absorbed into the verbatim
@@ -542,9 +859,9 @@ func (p *yamlParser) parseFlow() Node {
 // `+` keep chomping makes the trailing line breaks part of the value, so they
 // stay in the span, out of reach of the blank-line rules that would collapse or
 // trim them.
-func (p *yamlParser) consumeValueBlock(indent int) Position {
+func (p *yamlParser) consumeValueBlock(indent int, scalarBody bool) Position {
 	start := p.Pos
-	end := p.consumeIndentedBlock(indent)
+	end := p.consumeIndentedBlock(indent, scalarBody)
 
 	if keepChomped(p.slice(start, end)) {
 		end = p.consumeTrailingBlanks(end)
@@ -553,12 +870,20 @@ func (p *yamlParser) consumeValueBlock(indent int) Position {
 	return end
 }
 
-func (p *yamlParser) consumeIndentedBlock(indent int) Position {
+func (p *yamlParser) consumeIndentedBlock(indent int, scalarBody bool) Position {
 	contentEnd := p.consumeLineKeepEnd()
+	bodyIndent := -1
 
 	for !p.Eof() {
 		if p.atBlankLine() {
-			if !p.triviaPrecedesDeeperLine(indent) {
+			// A line of spaces deeper than a scalar body's own indent is text.
+			if scalarBody && bodyIndent >= 0 && p.measureIndent() > bodyIndent {
+				contentEnd = p.consumeLineKeepEnd()
+
+				continue
+			}
+
+			if !p.triviaPrecedesDeeperLine(indent, scalarBody) {
 				break
 			}
 
@@ -567,13 +892,17 @@ func (p *yamlParser) consumeIndentedBlock(indent int) Position {
 			continue
 		}
 
-		if p.measureIndent() > indent {
+		if ind := p.measureIndent(); ind > indent {
 			// A trailing more-indented comment (nothing deeper after it) is not
 			// part of the block: absorbing it would tie the block extent to the
 			// source indent, which shifts under normalization. Interior
 			// comments (deeper content follows) are still absorbed.
-			if p.atCommentLine() && !p.triviaPrecedesDeeperLine(indent) {
+			if !scalarBody && p.atCommentLine() && !p.triviaPrecedesDeeperLine(indent, scalarBody) {
 				break
+			}
+
+			if bodyIndent < 0 {
+				bodyIndent = ind
 			}
 
 			contentEnd = p.consumeLineKeepEnd()
@@ -598,11 +927,11 @@ func (p *yamlParser) consumeLineKeepEnd() Position {
 	return end
 }
 
-func (p *yamlParser) triviaPrecedesDeeperLine(indent int) bool {
+func (p *yamlParser) triviaPrecedesDeeperLine(indent int, scalarBody bool) bool {
 	saved := p.Pos
 
 	for !p.Eof() {
-		if p.atBlankLine() || p.atCommentLine() {
+		if p.atBlankLine() || !scalarBody && p.atCommentLine() {
 			p.consumeLine()
 
 			continue
@@ -772,16 +1101,45 @@ func (p *yamlParser) findSeparatorOnCurrentLine() int {
 	startOffset := p.Pos.Offset
 	result := -1
 
+	// Only a node's first character opens a quoted or flow key. Past it a quote
+	// is text (`it's: x`), and a key never runs onto the next line.
+	atNodeStart := true
+
 	for !p.Eof() && !p.atLineEnd() {
 		c := p.Peek()
 
 		switch {
-		case c == '\'':
-			p.skipSingleQuoted()
+		case atNodeStart && (c == ' ' || c == '\t'):
+			p.Advance()
 
 			continue
-		case c == '"':
-			p.skipDoubleQuoted()
+		case atNodeStart && (c == '&' || c == '!'):
+			for !p.Eof() && !p.atLineEnd() && p.Peek() != ' ' && p.Peek() != '\t' {
+				p.Advance()
+			}
+
+			continue
+		case atNodeStart && (c == '\'' || c == '"' || c == '[' || c == '{'):
+			line := p.Pos.Line
+
+			var closed bool
+
+			switch c {
+			case '\'':
+				closed = p.skipSingleQuoted()
+			case '"':
+				closed = p.skipDoubleQuoted()
+			default:
+				closed = p.skipFlowCollection()
+			}
+
+			if !closed || p.Pos.Line != line {
+				p.Pos = saved
+
+				return -1
+			}
+
+			atNodeStart = false
 
 			continue
 		case c == '#' && p.Pos.Offset > startOffset:
@@ -803,6 +1161,7 @@ func (p *yamlParser) findSeparatorOnCurrentLine() int {
 			}
 		}
 
+		atNodeStart = false
 		p.Advance()
 	}
 
