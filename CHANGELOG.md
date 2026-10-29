@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+* Fixed `laravel-fmt lsp` converting the line endings of a file it could not format
 
 ## Version 0.7.0 (2026-10-29)
 * Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON

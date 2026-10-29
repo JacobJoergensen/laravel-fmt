@@ -903,16 +903,25 @@ func TestEndOfLineReportsTheProjectsLineEnding(t *testing.T) {
 	cases := []struct {
 		name string
 		file string
+		text *string
 		want string
 	}{
 		{name: "editorconfig section", file: "app/a.php", want: "crlf"},
 		{name: "ignored file", file: "generated/a.php", want: "auto"},
+		{name: "held document that parses", file: "app/a.php", text: new("<?php\n\n$a = 1;\n"), want: "crlf"},
+		{name: "held document that does not parse", file: "app/a.php", text: new("<?php\n\n$a = ;\n"), want: "auto"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			uri := pathToURI(filepath.Join(workspace, filepath.FromSlash(tc.file)))
-			s, out := newRecordingServer(map[string]string{})
+			docs := map[string]string{}
+
+			if tc.text != nil {
+				docs[uri] = *tc.text
+			}
+
+			s, out := newRecordingServer(docs)
 
 			params, err := json.Marshal(endOfLineParams{TextDocument: textDocumentIdentifier{URI: uri}})
 			if err != nil {

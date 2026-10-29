@@ -226,6 +226,10 @@ func (s *server) handleRangeFormatting(req *request) error {
 
 // The answer is the configured value. auto, also sent for a file the
 // formatter leaves alone, means the client keeps the line ending it has.
+//
+// A held document that does not parse is auto too: formatting refused it, and
+// an empty edit list cannot tell the client that from a document that was
+// already formatted.
 func (s *server) handleEndOfLine(req *request) error {
 	var p endOfLineParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -238,6 +242,10 @@ func (s *server) handleEndOfLine(req *request) error {
 			s.logf("endOfLine %s: %v", p.TextDocument.URI, err)
 		}
 
+		return s.conn.reply(req.ID, config.EndOfLineAuto)
+	}
+
+	if _, err := s.format(p.TextDocument.URI, scopeDocument); errors.Is(err, errUnparseable) {
 		return s.conn.reply(req.ID, config.EndOfLineAuto)
 	}
 
