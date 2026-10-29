@@ -52,7 +52,7 @@ func NewWriter(cfg *config.File) *Writer {
 	return &Writer{
 		tabWidth:   cfg.TabWidth,
 		useTabs:    cfg.UseTabs(),
-		eol:        eolBytes(cfg.EndOfLine),
+		eol:        cfg.EOL(),
 		printWidth: cfg.PrintWidth,
 	}
 }
@@ -429,18 +429,6 @@ func (w *Writer) flushIndent() {
 	spaces := w.IndentColumn()
 	w.buf.WriteString(strings.Repeat(" ", spaces))
 	w.column += spaces
-}
-
-// eolBytes maps config.EndOfLine to the bytes emitted per Newline. Auto falls
-// through to `\n`: run and the LSP settle it with config.ResolveEndOfLine
-// before building a Writer, so this only covers direct callers.
-func eolBytes(setting string) string {
-	switch setting {
-	case config.EndOfLineCRLF:
-		return "\r\n"
-	default:
-		return "\n"
-	}
 }
 
 func visualWidth(s string, tabWidth int) int {

@@ -171,20 +171,10 @@ func BuildFile(file *parser.File, cfg *config.File) []byte {
 		PrintWidth: cfg.PrintWidth,
 		TabWidth:   cfg.TabWidth,
 		UseTabs:    cfg.UseTabs(),
-		EOL:        docEOL(cfg),
+		EOL:        cfg.EOL(),
 	})
 
 	return out
-}
-
-// docEOL returns the line break for cfg. EndOfLineAuto is resolved from the
-// source before formatting, so anything but CRLF is LF.
-func docEOL(cfg *config.File) string {
-	if cfg.EndOfLine == config.EndOfLineCRLF {
-		return "\r\n"
-	}
-
-	return "\n"
 }
 
 func isMixedMode(stmts []parser.Stmt) bool {
@@ -289,10 +279,10 @@ func (b *builder) buildMixed(file *parser.File) []byte {
 		PrintWidth: inlineWidth,
 		TabWidth:   b.cfg.TabWidth,
 		UseTabs:    b.cfg.UseTabs(),
-		EOL:        docEOL(b.cfg),
+		EOL:        b.cfg.EOL(),
 	})
 
-	return ensureTrailingNewline(out, docEOL(b.cfg))
+	return ensureTrailingNewline(out, b.cfg.EOL())
 }
 
 // mixedSeparator reproduces the source spacing between two mixed-file statements.
@@ -430,7 +420,7 @@ func (b *builder) inlineHTML(span parser.Span) *document.Doc {
 		return document.Text("")
 	}
 
-	return document.Text(normalizeEOL(string(b.src[start:end]), docEOL(b.cfg)))
+	return document.Text(normalizeEOL(string(b.src[start:end]), b.cfg.EOL()))
 }
 
 // normalizeEOL rewrites every CRLF and lone CR in s to eol, returning s
@@ -455,7 +445,7 @@ func normalizeEOL(s, eol string) string {
 // as they are: those CRs are the literal's value, while a CR between tokens is
 // a line break like any other.
 func (b *builder) normalizeLayoutEOL(raw string, start int) string {
-	eol := docEOL(b.cfg)
+	eol := b.cfg.EOL()
 	end := start + len(raw)
 
 	var out strings.Builder

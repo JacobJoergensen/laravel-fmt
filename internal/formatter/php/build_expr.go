@@ -2076,7 +2076,7 @@ func (b *builder) arrowParams(ps []*parser.Param, rparen parser.Token) (params, 
 		PrintWidth: inlineWidth,
 		TabWidth:   b.cfg.TabWidth,
 		UseTabs:    b.cfg.UseTabs(),
-		EOL:        docEOL(b.cfg),
+		EOL:        b.cfg.EOL(),
 	})
 
 	if len(ps) < 2 {
@@ -2330,7 +2330,7 @@ func (b *builder) flatDoc(doc *document.Doc) *document.Doc {
 		PrintWidth: inlineWidth,
 		TabWidth:   b.cfg.TabWidth,
 		UseTabs:    b.cfg.UseTabs(),
-		EOL:        docEOL(b.cfg),
+		EOL:        b.cfg.EOL(),
 	})))
 }
 

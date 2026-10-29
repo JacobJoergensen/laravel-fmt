@@ -14,3 +14,13 @@ func ResolveEndOfLine(src []byte, cfg *File) {
 		cfg.EndOfLine = EndOfLineLF
 	}
 }
+
+// EOL returns the bytes a line ends with. EndOfLineAuto reads as LF, since
+// ResolveEndOfLine settles it before formatting.
+func (f *File) EOL() string {
+	if f.EndOfLine == EndOfLineCRLF {
+		return "\r\n"
+	}
+
+	return "\n"
+}

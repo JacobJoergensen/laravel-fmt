@@ -30,3 +30,22 @@ func TestResolveEndOfLine(t *testing.T) {
 		})
 	}
 }
+
+func TestEOLWritesCRLFOnlyWhenSetAndLFOtherwise(t *testing.T) {
+	cases := []struct {
+		endOfLine, want string
+	}{
+		{EndOfLineLF, "\n"},
+		{EndOfLineCRLF, "\r\n"},
+		{EndOfLineAuto, "\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.endOfLine, func(t *testing.T) {
+			f := &File{EndOfLine: tc.endOfLine}
+			if got := f.EOL(); got != tc.want {
+				t.Fatalf("EOL() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

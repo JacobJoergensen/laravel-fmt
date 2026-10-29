@@ -66,7 +66,7 @@ func Format(src []byte, cfg *config.File) ([]byte, error) {
 		// One blank line separates the frontmatter's `?>` from the template; the
 		// frontmatter already ended with a single terminator, so add one more.
 		if hasPHP {
-			out = append(out, eol(cfg)...)
+			out = append(out, cfg.EOL()...)
 		}
 
 		out = append(out, w.Bytes()...)
@@ -96,16 +96,6 @@ func holdsComponent(file *phpparser.File) bool {
 	}
 
 	return false
-}
-
-// eol returns the line-terminator bytes for cfg. EndOfLineAuto is resolved to a
-// concrete setting before formatting, so anything but CRLF is LF.
-func eol(cfg *config.File) string {
-	if cfg.EndOfLine == config.EndOfLineCRLF {
-		return "\r\n"
-	}
-
-	return "\n"
 }
 
 // hasContent reports whether nodes has any non-whitespace node. A

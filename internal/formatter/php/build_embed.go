@@ -277,7 +277,7 @@ func BuildDirectiveArgWrapped(src []byte, tokens []parser.Token, expr parser.Exp
 			PrintWidth: max(cfg.PrintWidth-indentCols, 1),
 			TabWidth:   cfg.TabWidth,
 			UseTabs:    cfg.UseTabs(),
-			EOL:        docEOL(cfg),
+			EOL:        cfg.EOL(),
 		}))
 	}
 
@@ -289,7 +289,7 @@ func BuildDirectiveArgWrapped(src []byte, tokens []parser.Token, expr parser.Exp
 		PrintWidth: max(cfg.PrintWidth-indentCols, 1),
 		TabWidth:   cfg.TabWidth,
 		UseTabs:    cfg.UseTabs(),
-		EOL:        docEOL(cfg),
+		EOL:        cfg.EOL(),
 	})
 
 	return stripLineCR(out)
@@ -572,7 +572,7 @@ func buildWidth(src []byte, tokens []parser.Token, cfg *config.File, indentCols,
 		StartColumn: startCol,
 		TabWidth:    cfg.TabWidth,
 		UseTabs:     cfg.UseTabs(),
-		EOL:         docEOL(cfg),
+		EOL:         cfg.EOL(),
 	})
 
 	// A string literal spanning lines can carry source CRLF line endings; the
@@ -625,7 +625,7 @@ func BuildStmts(src []byte, tokens []parser.Token, stmts []parser.Stmt, cfg *con
 		PrintWidth: width,
 		TabWidth:   cfg.TabWidth,
 		UseTabs:    cfg.UseTabs(),
-		EOL:        docEOL(cfg),
+		EOL:        cfg.EOL(),
 	})
 }
 
