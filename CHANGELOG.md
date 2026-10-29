@@ -5,6 +5,7 @@
 * Improved an unclosed string, comment, block or Blade echo in CSS, JSON, XML, HTML or Blade to be reported where it opens instead of at the end of the file
 * Improved `init` to write only the schema reference, so the new `laravel-fmt.json` no longer overrides `.editorconfig`, Prettier, Pint or Mago
 * Improved `laravel-fmt lsp` to log why it exits when an editor ends it without a shutdown request
+* Improved a Markdown code block tagged with a full extension like `blade.php` to be formatted as that file
 * Optimized Markdown with nested lists and blockquotes, which formats about a third faster
 * Fixed an empty or whitespace-only PHP file being given a lone line break
 * Fixed a package nested in a Laravel app ignoring the app's `.prettierignore` and Pint excludes when formatted on save

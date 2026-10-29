@@ -8,29 +8,12 @@ import (
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
-	bladefmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/blade"
-	cssfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/css"
-	htmlfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/html"
-	jsonfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/json"
-	livewirefmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/livewire"
+	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/language"
 	phpfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/php"
-	xmlfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/xml"
-	yamlfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/yaml"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/markdown"
 )
 
-// Markdown is left out: a nested document's fences would format it recursively.
-var codeFormatters = map[string]func(src []byte, cfg *config.File) ([]byte, error){
-	"php":   formatPHPSnippet,
-	"blade": formatBlade,
-	"html":  htmlfmt.Format,
-	"css":   cssfmt.Format,
-	"json":  formatJSON("code.json"),
-	"jsonc": formatJSON("code.jsonc"),
-	"yaml":  yamlfmt.Format,
-	"yml":   yamlfmt.Format,
-	"xml":   xmlfmt.Format,
-}
+var tagExtensions = map[string]string{"blade": "blade.php"}
 
 var phpSnippetShapes = []func(src []byte, cfg *config.File) ([]byte, error){
 	formatPHPStatements,
@@ -54,8 +37,11 @@ var (
 )
 
 func formatCode(b *parser.FencedCodeBlock, cfg *config.File) ([]byte, bool) {
-	format, ok := codeFormatters[codeLanguage(b.Info)]
-	if !ok || len(bytes.TrimSpace(b.Content)) == 0 {
+	path := codePath(b.Info)
+	lang := formatter.DetectLanguage(path)
+
+	// Markdown is skipped, or a block's own fences would format recursively.
+	if lang == formatter.LangUnknown || lang == formatter.LangMarkdown || len(bytes.TrimSpace(b.Content)) == 0 {
 		return nil, false
 	}
 
@@ -66,7 +52,19 @@ func formatCode(b *parser.FencedCodeBlock, cfg *config.File) ([]byte, bool) {
 
 	// A lone CR ends a line in Markdown, which the fence emitter writes as one,
 	// so the code has to be formatted with that line break, not as a CR byte.
-	out, err := format(formatter.NormalizeLoneCR(b.Content), &codeCfg)
+	src := formatter.NormalizeLoneCR(b.Content)
+
+	var (
+		out []byte
+		err error
+	)
+
+	if lang == formatter.LangPHP {
+		out, err = formatPHPSnippet(src, &codeCfg)
+	} else {
+		out, err = language.Format(lang, path, src, &codeCfg)
+	}
+
 	// Documentation is full of fragments that do not parse; those stay as written.
 	if err != nil {
 		return nil, false
@@ -75,12 +73,17 @@ func formatCode(b *parser.FencedCodeBlock, cfg *config.File) ([]byte, bool) {
 	return bytes.TrimSuffix(out, []byte("\n")), true
 }
 
-func codeLanguage(info []byte) string {
+func codePath(info []byte) string {
 	if end := bytes.IndexAny(info, " \t"); end >= 0 {
 		info = info[:end]
 	}
 
-	return strings.ToLower(string(info))
+	tag := strings.ToLower(string(info))
+	if ext, ok := tagExtensions[tag]; ok {
+		tag = ext
+	}
+
+	return "code." + tag
 }
 
 func formatPHPSnippet(src []byte, cfg *config.File) ([]byte, error) {
@@ -173,18 +176,4 @@ func formatPHPExpression(src []byte, cfg *config.File) ([]byte, error) {
 	}
 
 	return append(expr, '\n'), nil
-}
-
-func formatBlade(src []byte, cfg *config.File) ([]byte, error) {
-	if livewirefmt.LooksLikeSFC(src) {
-		return livewirefmt.Format(src, cfg)
-	}
-
-	return bladefmt.Format(src, cfg)
-}
-
-func formatJSON(filename string) func(src []byte, cfg *config.File) ([]byte, error) {
-	return func(src []byte, cfg *config.File) ([]byte, error) {
-		return jsonfmt.Format(filename, src, cfg)
-	}
 }

@@ -46,6 +46,12 @@ func TestFormatCodeBlocks(t *testing.T) {
 			"```php\r\nif ($ready) {\r\n    start();\r\n}\r\n```\r\n",
 		},
 		{
+			"a tag spelling a file's extension formats as that file",
+			config.Default(),
+			"```blade.php\n<div>{{$a}}</div>\n```\n",
+			"```blade.php\n<div>{{ $a }}</div>\n```\n",
+		},
+		{
 			"a lone CR in code is laid out as the line break the fence writes",
 			config.Default(),
 			"```php\n0('0000000\r" + strings.Repeat("0", 100) + "')%([])",

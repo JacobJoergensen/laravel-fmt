@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
+	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
 )
 
 func TestStripBOMBeforeDispatch(t *testing.T) {
@@ -158,15 +159,15 @@ func TestFileRefusesPathologicalNesting(t *testing.T) {
 }
 
 func TestFilePanicBecomesAFileError(t *testing.T) {
-	realFormatPHP := formatPHP
+	realFormatLanguage := formatLanguage
 
-	formatPHP = func([]byte, *config.File) ([]byte, error) {
+	formatLanguage = func(formatter.Language, string, []byte, *config.File) ([]byte, error) {
 		panic("emitter bug")
 	}
 
 	out, err := File("bad.php", []byte("<?php\n"), config.Default())
 
-	formatPHP = realFormatPHP
+	formatLanguage = realFormatLanguage
 
 	if err == nil || !strings.Contains(err.Error(), "bad.php") || !strings.Contains(err.Error(), "emitter bug") {
 		t.Fatalf("got error %v, want one naming bad.php and the panic", err)
