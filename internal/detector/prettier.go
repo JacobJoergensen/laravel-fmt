@@ -157,8 +157,8 @@ func (r *PrettierResolver) ForFile(absPath string) (*Prettier, error) {
 // Prettier is the part of a Prettier config laravel-fmt applies.
 type Prettier struct {
 	Path      string
-	Options   prettierOptions
-	Overrides []prettierOverride
+	options   prettierOptions
+	overrides []prettierOverride
 	Plugins   []string
 	Unread    bool
 }
@@ -445,19 +445,19 @@ func parsePrettierConfig(path string, raw []byte) (Prettier, error) {
 
 	return Prettier{
 		Path:      path,
-		Options:   options,
-		Overrides: wrapper.Overrides,
+		options:   options,
+		overrides: wrapper.Overrides,
 		Plugins:   wrapper.Plugins,
 	}, nil
 }
 
-// ResolveForFile merges every override matching rel over the top-level
+// resolveForFile merges every override matching rel over the top-level
 // options, last match winning. Globs use the EditorConfig matcher.
-func (p *Prettier) ResolveForFile(rel string) prettierOptions {
+func (p *Prettier) resolveForFile(rel string) prettierOptions {
 	rel = filepath.ToSlash(rel)
-	merged := p.Options
+	merged := p.options
 
-	for _, override := range p.Overrides {
+	for _, override := range p.overrides {
 		if prettierFilesMatch(override.Files, rel) && !prettierFilesMatch(override.ExcludeFiles, rel) {
 			mergePrettierOptions(&merged, override.Options)
 		}
@@ -486,7 +486,7 @@ func mergePrettierOptions(base *prettierOptions, overlay prettierOptions) {
 }
 
 func applyPrettier(cfg *config.File, p *Prettier) {
-	applyPrettierOptions(cfg, p.Options, nil)
+	applyPrettierOptions(cfg, p.options, nil)
 }
 
 func applyPrettierOptions(cfg *config.File, o prettierOptions, userKeys map[string]bool) {

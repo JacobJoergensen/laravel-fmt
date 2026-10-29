@@ -292,7 +292,7 @@ func numberLiteral(text []byte) (json.RawMessage, bool) {
 		return nil, false
 	}
 
-	return json.RawMessage(text), true
+	return text, true
 }
 
 func identName(expr php.Expr) string {

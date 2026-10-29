@@ -111,7 +111,7 @@ func fileLayout(absPath string, ctx Context, prettier *Prettier, sources map[str
 	lang := formatter.DetectLanguage(absPath)
 
 	if prettier != nil && prettier.formats(lang) {
-		options := prettier.ResolveForFile(relativeToConfig(prettier.Path, absPath))
+		options := prettier.resolveForFile(relativeToConfig(prettier.Path, absPath))
 
 		applyLayout(layout, sources, prettier.Path, func(cfg *config.File) {
 			applyPrettierOptions(cfg, options, nil)

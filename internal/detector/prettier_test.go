@@ -31,12 +31,12 @@ func TestDetectPrettierParsesJSON(t *testing.T) {
 		t.Fatal("detectPrettier reported not found, want found")
 	}
 
-	wantIntPtr(t, prettier.Options.PrintWidth, 100, "PrintWidth")
-	wantIntPtr(t, prettier.Options.TabWidth, 2, "TabWidth")
-	wantBoolPtr(t, prettier.Options.UseTabs, true, "UseTabs")
-	wantStringPtr(t, prettier.Options.EndOfLine, "crlf", "EndOfLine")
-	wantBoolPtr(t, prettier.Options.SingleQuote, true, "SingleQuote")
-	wantStringPtr(t, prettier.Options.ProseWrap, "always", "ProseWrap")
+	wantIntPtr(t, prettier.options.PrintWidth, 100, "PrintWidth")
+	wantIntPtr(t, prettier.options.TabWidth, 2, "TabWidth")
+	wantBoolPtr(t, prettier.options.UseTabs, true, "UseTabs")
+	wantStringPtr(t, prettier.options.EndOfLine, "crlf", "EndOfLine")
+	wantBoolPtr(t, prettier.options.SingleQuote, true, "SingleQuote")
+	wantStringPtr(t, prettier.options.ProseWrap, "always", "ProseWrap")
 }
 
 func TestDetectPrettierUnwrittenKeyStaysNil(t *testing.T) {
@@ -52,8 +52,8 @@ func TestDetectPrettierUnwrittenKeyStaysNil(t *testing.T) {
 		t.Fatal("detectPrettier reported not found, want found")
 	}
 
-	if prettier.Options.SingleQuote != nil {
-		t.Errorf("SingleQuote = %v, want nil for an unwritten key", *prettier.Options.SingleQuote)
+	if prettier.options.SingleQuote != nil {
+		t.Errorf("SingleQuote = %v, want nil for an unwritten key", *prettier.options.SingleQuote)
 	}
 }
 
@@ -70,7 +70,7 @@ func TestDetectPrettierExtensionlessJSON(t *testing.T) {
 		t.Fatal("detectPrettier reported not found, want found")
 	}
 
-	wantIntPtr(t, prettier.Options.PrintWidth, 90, "PrintWidth")
+	wantIntPtr(t, prettier.options.PrintWidth, 90, "PrintWidth")
 }
 
 func TestDetectPrettierYAML(t *testing.T) {
@@ -92,13 +92,13 @@ overrides:
 		t.Fatal("detectPrettier reported not found, want found")
 	}
 
-	wantIntPtr(t, prettier.Options.PrintWidth, 70, "PrintWidth")
+	wantIntPtr(t, prettier.options.PrintWidth, 70, "PrintWidth")
 
-	if len(prettier.Overrides) != 1 {
-		t.Fatalf("Overrides len = %d, want 1", len(prettier.Overrides))
+	if len(prettier.overrides) != 1 {
+		t.Fatalf("Overrides len = %d, want 1", len(prettier.overrides))
 	}
 
-	resolved := prettier.ResolveForFile("README.md")
+	resolved := prettier.resolveForFile("README.md")
 	wantStringPtr(t, resolved.ProseWrap, "always", "override ProseWrap")
 }
 
@@ -123,13 +123,13 @@ proseWrap = "always"
 		t.Fatal("detectPrettier reported not found, want found")
 	}
 
-	wantIntPtr(t, prettier.Options.PrintWidth, 70, "PrintWidth")
+	wantIntPtr(t, prettier.options.PrintWidth, 70, "PrintWidth")
 
 	if !prettier.formats(formatter.LangPHP) {
 		t.Fatalf("Plugins = %q, want the PHP plugin read", prettier.Plugins)
 	}
 
-	resolved := prettier.ResolveForFile("README.md")
+	resolved := prettier.resolveForFile("README.md")
 	wantStringPtr(t, resolved.ProseWrap, "always", "override ProseWrap")
 }
 
@@ -150,7 +150,7 @@ func TestDetectPrettierYAMLFilesArray(t *testing.T) {
 		t.Fatal("detectPrettier reported not found, want found")
 	}
 
-	resolved := prettier.ResolveForFile("docs/guide.mdx")
+	resolved := prettier.resolveForFile("docs/guide.mdx")
 	wantStringPtr(t, resolved.ProseWrap, "always", "override ProseWrap for array files")
 }
 
@@ -170,8 +170,8 @@ func TestDetectPrettierPackageJSON(t *testing.T) {
 		t.Fatal("detectPrettier reported not found, want found")
 	}
 
-	wantIntPtr(t, prettier.Options.PrintWidth, 100, "PrintWidth")
-	wantBoolPtr(t, prettier.Options.SingleQuote, true, "SingleQuote")
+	wantIntPtr(t, prettier.options.PrintWidth, 100, "PrintWidth")
+	wantBoolPtr(t, prettier.options.SingleQuote, true, "SingleQuote")
 }
 
 func TestDetectPrettierPackageJSONWithoutKeyNotDetected(t *testing.T) {
@@ -187,7 +187,7 @@ func TestDetectPrettierPackageJSONWithoutKeyNotDetected(t *testing.T) {
 		t.Fatal("detectPrettier reported found, want not found")
 	}
 
-	if prettier.Path != "" || prettier.Overrides != nil {
+	if prettier.Path != "" || prettier.overrides != nil {
 		t.Errorf("Prettier = %+v, want zero value", prettier)
 	}
 }
@@ -201,7 +201,7 @@ func TestDetectPrettierUnsupportedFormIsUnreadAndAdoptsNothing(t *testing.T) {
 		t.Fatalf("detectPrettier: %v", err)
 	}
 
-	if !found || !prettier.Unread || prettier.Options != (prettierOptions{}) || prettier.Overrides != nil {
+	if !found || !prettier.Unread || prettier.options != (prettierOptions{}) || prettier.overrides != nil {
 		t.Fatalf("detectPrettier = %+v, found %v; want found, unread, with no options", prettier, found)
 	}
 }
@@ -216,7 +216,7 @@ func TestDetectPrettierMissingFile(t *testing.T) {
 		t.Fatal("detectPrettier reported found, want not found")
 	}
 
-	if prettier.Path != "" || prettier.Overrides != nil {
+	if prettier.Path != "" || prettier.overrides != nil {
 		t.Errorf("Prettier = %+v, want zero value", prettier)
 	}
 }
@@ -248,7 +248,7 @@ func TestDetectPrettierPackageJSONWinsOverPrettierrc(t *testing.T) {
 		t.Fatal("detectPrettier reported not found, want found")
 	}
 
-	wantIntPtr(t, prettier.Options.PrintWidth, 100, "PrintWidth")
+	wantIntPtr(t, prettier.options.PrintWidth, 100, "PrintWidth")
 }
 
 func TestPrettierResolveForFileExcludeFiles(t *testing.T) {
@@ -256,7 +256,7 @@ func TestPrettierResolveForFileExcludeFiles(t *testing.T) {
 	dir := t.TempDir()
 	prettier := Prettier{
 		Path: filepath.Join(dir, ".prettierrc.json"),
-		Overrides: []prettierOverride{
+		overrides: []prettierOverride{
 			{
 				Files:        stringOrSlice{"*.md"},
 				ExcludeFiles: stringOrSlice{"CHANGELOG.md"},
@@ -265,10 +265,10 @@ func TestPrettierResolveForFileExcludeFiles(t *testing.T) {
 		},
 	}
 
-	matched := prettier.ResolveForFile("README.md")
+	matched := prettier.resolveForFile("README.md")
 	wantStringPtr(t, matched.ProseWrap, "always", "matched ProseWrap")
 
-	excluded := prettier.ResolveForFile("CHANGELOG.md")
+	excluded := prettier.resolveForFile("CHANGELOG.md")
 	if excluded.ProseWrap != nil {
 		t.Errorf("excluded ProseWrap = %q, want nil", *excluded.ProseWrap)
 	}
@@ -286,7 +286,7 @@ func TestApplyPrettierMapsEndOfLine(t *testing.T) {
 		cfg := config.Default()
 		cfg.EndOfLine = ""
 
-		applyPrettier(cfg, &Prettier{Options: prettierOptions{EndOfLine: &value}})
+		applyPrettier(cfg, &Prettier{options: prettierOptions{EndOfLine: &value}})
 
 		if cfg.EndOfLine != want {
 			t.Errorf("endOfLine %q: EndOfLine = %q, want %q", value, cfg.EndOfLine, want)
@@ -303,7 +303,7 @@ func TestApplyPrettierMapsOptions(t *testing.T) {
 	single := true
 	prose := config.ProseWrapAlways
 	prettier := &Prettier{
-		Options: prettierOptions{
+		options: prettierOptions{
 			PrintWidth:  &width,
 			TabWidth:    &tab,
 			UseTabs:     &useTabs,
@@ -352,7 +352,7 @@ func TestDetectPrettierFindsACaseVariantWhereTheFilesystemFoldsCase(t *testing.T
 		t.Fatalf("detectPrettier: %v", err)
 	}
 
-	if !found || prettier.Options.TabWidth == nil || *prettier.Options.TabWidth != 3 {
+	if !found || prettier.options.TabWidth == nil || *prettier.options.TabWidth != 3 {
 		t.Fatalf("detectPrettier = %+v, found %v; want the .PrettierRC config", prettier, found)
 	}
 }
@@ -589,7 +589,7 @@ func TestDetectPrettierFollowsPrettiersSearchOrder(t *testing.T) {
 			}
 
 			if tc.wantWidth != 0 {
-				wantIntPtr(t, got.Options.PrintWidth, tc.wantWidth, "PrintWidth")
+				wantIntPtr(t, got.options.PrintWidth, tc.wantWidth, "PrintWidth")
 			}
 		})
 	}

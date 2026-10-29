@@ -136,9 +136,9 @@ func resolveTailwind(cfg *config.File, ctx Context, configDir string) error {
 }
 
 func prettierStylesheet(ctx Context) string {
-	if ctx.Prettier == nil || ctx.Prettier.Options.TailwindStylesheet == nil {
+	if ctx.Prettier == nil || ctx.Prettier.options.TailwindStylesheet == nil {
 		return ""
 	}
 
-	return *ctx.Prettier.Options.TailwindStylesheet
+	return *ctx.Prettier.options.TailwindStylesheet
 }

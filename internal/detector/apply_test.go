@@ -19,7 +19,7 @@ func TestApplyPrettierOverridesEditorConfig(t *testing.T) {
 	cfg := config.Default()
 	Apply(cfg, Context{
 		EditorConfig: resolver,
-		Prettier:     &Prettier{Options: prettierOptions{TabWidth: new(4)}},
+		Prettier:     &Prettier{options: prettierOptions{TabWidth: new(4)}},
 	})
 
 	if cfg.IndentWidth != 4 {
@@ -72,7 +72,7 @@ func TestResolveFileConfigAppliesPrettierOverrideToARelativePath(t *testing.T) {
 
 	prettier := &Prettier{
 		Path: filepath.Join(root, ".prettierrc.json"),
-		Overrides: []prettierOverride{{
+		overrides: []prettierOverride{{
 			Files:   stringOrSlice{"resources/css/*.css"},
 			Options: prettierOptions{TabWidth: new(8)},
 		}},
@@ -160,7 +160,7 @@ func TestApplyPrettierLosesToMago(t *testing.T) {
 	width := 120
 	magoWidth := 100
 	ctx := Context{
-		Prettier: &Prettier{Options: prettierOptions{PrintWidth: &width}},
+		Prettier: &Prettier{options: prettierOptions{PrintWidth: &width}},
 		Mago:     &Mago{PrintWidth: &magoWidth},
 	}
 
@@ -181,7 +181,7 @@ func TestApplyPrettierWinsOverEditorConfig(t *testing.T) {
 	}
 	ctx := Context{
 		EditorConfig: editorConfig,
-		Prettier:     &Prettier{Options: prettierOptions{PrintWidth: &width}},
+		Prettier:     &Prettier{options: prettierOptions{PrintWidth: &width}},
 	}
 
 	Apply(cfg, ctx)
@@ -198,8 +198,8 @@ func TestResolveFileConfigAppliesPrettierOverride(t *testing.T) {
 	ctx := Context{
 		Prettier: &Prettier{
 			Path:    filepath.Join(dir, ".prettierrc.json"),
-			Options: prettierOptions{ProseWrap: &always},
-			Overrides: []prettierOverride{
+			options: prettierOptions{ProseWrap: &always},
+			overrides: []prettierOverride{
 				{Files: stringOrSlice{"*.md"}, Options: prettierOptions{ProseWrap: &never}},
 			},
 		},
@@ -232,7 +232,7 @@ func TestResolveFileConfigUserProseWrapWins(t *testing.T) {
 	ctx := Context{
 		Prettier: &Prettier{
 			Path: filepath.Join(dir, ".prettierrc.json"),
-			Overrides: []prettierOverride{
+			overrides: []prettierOverride{
 				{Files: stringOrSlice{"*.md"}, Options: prettierOptions{ProseWrap: &never}},
 			},
 		},
