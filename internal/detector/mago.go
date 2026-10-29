@@ -21,9 +21,9 @@ const (
 )
 
 const (
-	magoEOLAuto = "auto"
-	magoEOLLf   = "lf"
-	magoEOLCrlf = "crlf"
+	magoEndOfLineAuto = "auto"
+	magoEndOfLineLF   = "lf"
+	magoEndOfLineCRLF = "crlf"
 )
 
 const (
@@ -280,16 +280,16 @@ func presetMago(name string) Mago {
 
 	switch name {
 	case magoPresetPsr12:
-		m.EndOfLine = new(magoEOLLf)
+		m.EndOfLine = new(magoEndOfLineLF)
 		m.SortUses = new(false)
 		m.ExpandUseGroups = new(false)
 	case magoPresetLaravel:
-		m.EndOfLine = new(magoEOLLf)
+		m.EndOfLine = new(magoEndOfLineLF)
 		m.ConcatSpace = new(false)
 		m.ClosureFnSpace = new(true)
 		m.BlankLineBeforeReturn = new(true)
 	case magoPresetDrupal:
-		m.EndOfLine = new(magoEOLLf)
+		m.EndOfLine = new(magoEndOfLineLF)
 		m.TabWidth = new(2)
 		m.FunctionBraceStyle = new(magoBraceSameLine)
 		m.MethodBraceStyle = new(magoBraceSameLine)
@@ -306,7 +306,7 @@ func magoDefaultPreset() Mago {
 		PrintWidth:             new(120),
 		TabWidth:               new(4),
 		UseTabs:                new(false),
-		EndOfLine:              new(magoEOLAuto),
+		EndOfLine:              new(magoEndOfLineAuto),
 		RemoveTrailingCloseTag: new(true),
 		FunctionBraceStyle:     new(magoBraceNextLine),
 		MethodBraceStyle:       new(magoBraceNextLine),
@@ -399,11 +399,11 @@ func applyMagoEndOfLine(cfg *config.File, value *string) {
 	}
 
 	switch *value {
-	case magoEOLLf:
+	case magoEndOfLineLF:
 		cfg.EndOfLine = config.EndOfLineLF
-	case magoEOLCrlf:
+	case magoEndOfLineCRLF:
 		cfg.EndOfLine = config.EndOfLineCRLF
-	case magoEOLAuto:
+	case magoEndOfLineAuto:
 		cfg.EndOfLine = config.EndOfLineAuto
 	}
 }

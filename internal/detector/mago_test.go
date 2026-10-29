@@ -290,7 +290,7 @@ func TestDetectMagoMalformedTOMLErrors(t *testing.T) {
 func TestPresetMagoLaravelDefaults(t *testing.T) {
 	preset := presetMago(magoPresetLaravel)
 
-	wantStringPtr(t, preset.EndOfLine, magoEOLLf, "EndOfLine")
+	wantStringPtr(t, preset.EndOfLine, magoEndOfLineLF, "EndOfLine")
 	wantBoolPtr(t, preset.ConcatSpace, false, "ConcatSpace")
 	wantBoolPtr(t, preset.ClosureFnSpace, true, "ClosureFnSpace")
 	wantBoolPtr(t, preset.BlankLineBeforeReturn, true, "BlankLineBeforeReturn")
@@ -303,7 +303,7 @@ func TestPresetMagoUnknownReturnsDefault(t *testing.T) {
 	for _, name := range []string{"", "not-a-real-preset"} {
 		preset := presetMago(name)
 
-		wantStringPtr(t, preset.EndOfLine, magoEOLAuto, "EndOfLine")
+		wantStringPtr(t, preset.EndOfLine, magoEndOfLineAuto, "EndOfLine")
 		wantBoolPtr(t, preset.ConcatSpace, true, "ConcatSpace")
 		wantBoolPtr(t, preset.SortUses, true, "SortUses")
 		wantStringPtr(t, preset.ClasslikeBraceStyle, magoBraceAlwaysNextLine, "ClasslikeBraceStyle")
@@ -384,14 +384,27 @@ func TestApplyMagoOverrideBeatsPreset(t *testing.T) {
 	}
 }
 
-func TestApplyMagoEndOfLineCrLeavesBaseline(t *testing.T) {
-	cfg := config.Default()
-	baseline := cfg.EndOfLine
+func TestApplyMagoEndOfLineMapsEachValue(t *testing.T) {
+	cases := []struct {
+		value, from, want string
+	}{
+		{magoEndOfLineLF, config.EndOfLineCRLF, config.EndOfLineLF},
+		{magoEndOfLineCRLF, config.EndOfLineLF, config.EndOfLineCRLF},
+		{magoEndOfLineAuto, config.EndOfLineLF, config.EndOfLineAuto},
+		{"cr", config.EndOfLineCRLF, config.EndOfLineCRLF},
+	}
 
-	Apply(cfg, Context{Mago: &Mago{Preset: magoPresetLaravel, EndOfLine: new("cr")}})
+	for _, tc := range cases {
+		t.Run(tc.value, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.EndOfLine = tc.from
 
-	if cfg.EndOfLine != baseline {
-		t.Errorf("EndOfLine = %q, want baseline %q for unsupported `cr`", cfg.EndOfLine, baseline)
+			Apply(cfg, Context{Mago: &Mago{Preset: magoPresetLaravel, EndOfLine: new(tc.value)}})
+
+			if cfg.EndOfLine != tc.want {
+				t.Errorf("EndOfLine = %q, want %q", cfg.EndOfLine, tc.want)
+			}
+		})
 	}
 }
 
