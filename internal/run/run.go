@@ -390,19 +390,19 @@ func (r *runner) changedFiles(cfg *config.File, projects *detector.Resolver) ([]
 // matches the pre-format staged content. Exits non-zero only on a
 // per-file failure, so a pre-commit hook can still proceed.
 func (r *runner) staged(cfg *config.File, projects *detector.Resolver) error {
-	repo, err := git.Open(r.workDir)
-	if err != nil {
-		return fmt.Errorf("--staged requires a git repository: %w", err)
-	}
-
 	runAnchor, err := r.runIgnoreAnchor(r.workDir, projects)
 	if err != nil {
 		return err
 	}
 
+	repo, err := git.Open(r.workDir)
+	if err != nil {
+		return fmt.Errorf("--staged requires a git repository: %w", err)
+	}
+
 	skip, err := walk.IgnoreFilter(repo.Root(), runAnchor, cfg, r.projectIgnore(projects))
 	if err != nil {
-		return err
+		return errors.Join(err, repo.Close())
 	}
 
 	format := func(relPath string, src []byte) ([]byte, error) {
