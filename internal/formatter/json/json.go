@@ -31,7 +31,7 @@ func Format(filename string, src []byte, cfg *config.File) ([]byte, error) {
 		parse = parser.ParseJSONC
 	}
 
-	file, errs := parse(src)
+	file, errs := parse(formatter.NormalizeLoneCR(src))
 
 	if err := formatter.JoinErrors(errs); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)

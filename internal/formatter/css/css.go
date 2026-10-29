@@ -6,6 +6,7 @@
 package css
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
@@ -15,7 +16,7 @@ import (
 
 // Format formats src as CSS, failing on any parse diagnostic.
 func Format(src []byte, cfg *config.File) ([]byte, error) {
-	file, errs := parser.Parse(src)
+	file, errs := parser.Parse(normalizeNewlines(src))
 
 	if err := formatter.JoinErrors(errs); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
@@ -51,4 +52,14 @@ func EmitStyleBody(w *formatter.Writer, src []byte, cfg *config.File) bool {
 	w.Dedent()
 
 	return true
+}
+
+// normalizeNewlines reads CRLF and a lone CR as LF before parsing, as CSS
+// Syntax 3 section 3.3 does, so a `\` before a CRLF cannot split the pair.
+func normalizeNewlines(src []byte) []byte {
+	if bytes.IndexByte(src, '\r') < 0 {
+		return src
+	}
+
+	return bytes.ReplaceAll(formatter.NormalizeLoneCR(src), []byte("\r\n"), []byte("\n"))
 }

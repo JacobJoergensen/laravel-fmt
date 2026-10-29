@@ -220,3 +220,14 @@ func TestFormatKeepsAnAuthoredBlankLineBetweenItems(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatReadsALoneCRAsItsLFTwin(t *testing.T) {
+	src := "{\r/* one\r   two */\r\"a\": 1\r}\r"
+
+	got := mustFormat(t, "x.jsonc", []byte(src), config.Default())
+	lf := strings.ReplaceAll(src, "\r", "\n")
+
+	if want := mustFormat(t, "x.jsonc", []byte(lf), config.Default()); !bytes.Equal(got, want) {
+		t.Fatalf("a lone CR formats unlike its LF twin.\n=== CR ===\n%q\n=== LF ===\n%q", got, want)
+	}
+}

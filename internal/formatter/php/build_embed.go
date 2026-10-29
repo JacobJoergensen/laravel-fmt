@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
+	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/document"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/php"
 )
@@ -477,21 +478,11 @@ func RawDirectiveArgRehomable(raw []byte, tokens []parser.Token, lexed bool) boo
 	// A lone CR is a line terminator to PHP but not to the re-home, which drops
 	// it and can leave a `)` inside a line comment; a CRLF is rewritten whole
 	// and is safe.
-	if hasLoneCR(raw) {
+	if formatter.HasLoneCR(raw) {
 		return false
 	}
 
 	return lexed && !HasMultilineStringLiteral(tokens)
-}
-
-func hasLoneCR(src []byte) bool {
-	for i, c := range src {
-		if c == '\r' && (i+1 >= len(src) || src[i+1] != '\n') {
-			return true
-		}
-	}
-
-	return false
 }
 
 func buildExprWidth(src []byte, tokens []parser.Token, expr parser.Expr, cfg *config.File, indentCols, width, startCol, srcCol int) []byte {

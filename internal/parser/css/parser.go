@@ -436,20 +436,10 @@ func (p *cssParser) readIdent() []byte {
 }
 
 func (p *cssParser) positionAt(from Position, targetOffset int) Position {
-	pos := from
+	c := parserpkg.Cursor{Src: p.Src, Pos: from}
+	c.AdvanceN(targetOffset - from.Offset)
 
-	for pos.Offset < targetOffset && pos.Offset < len(p.Src) {
-		if p.Src[pos.Offset] == '\n' {
-			pos.Line++
-			pos.Column = 1
-		} else {
-			pos.Column++
-		}
-
-		pos.Offset++
-	}
-
-	return pos
+	return c.Pos
 }
 
 func scanStringEnd(src []byte, off int, quote byte) (end int, closed bool) {

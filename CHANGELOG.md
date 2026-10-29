@@ -14,6 +14,7 @@
 * Fixed Markdown with nested blockquotes and lines that continue a quote without `>` hanging for minutes
 * Fixed a PHP code block in Markdown with a lone CR in a string changing layout on a second run
 * Fixed a form feed in a CSS value, selector or at-rule leaving the spacing around it uneven
+* Fixed a file with CR-only line endings reporting parse errors on the wrong line, and CSS and JSON in one losing their blank lines, line breaks and comment indentation
 
 ## Version 0.6.0 (2026-10-28)
 * Added support for Mago's `extends`, so formatter settings from a shared Mago config are used

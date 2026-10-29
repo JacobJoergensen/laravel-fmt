@@ -288,13 +288,13 @@ func skipIndent(line []byte, limit int) int {
 }
 
 // NormalizeLoneCR rewrites a `\r` not followed by `\n` to `\n`, returning raw
-// untouched when there is none. YAML 1.2.2 section 5.4 and XML 1.0 section
-// 2.11 read a lone CR as a line break, while the verbatim writer breaks only
-// on `\n`.
+// untouched when there is none. YAML 1.2.2 section 5.4, XML 1.0 section 2.11
+// and CSS Syntax 3 section 3.3 read a lone CR as a line break, and JSON allows
+// one only as whitespace, while the verbatim writer breaks only on `\n`.
 //
 // Other languages must not use this: a lone CR in a PHP string is data.
 func NormalizeLoneCR(raw []byte) []byte {
-	if !hasLoneCR(raw) {
+	if !HasLoneCR(raw) {
 		return raw
 	}
 
@@ -310,12 +310,18 @@ func NormalizeLoneCR(raw []byte) []byte {
 	return out
 }
 
-func hasLoneCR(raw []byte) bool {
-	for i, c := range raw {
-		if c == '\r' && (i+1 >= len(raw) || raw[i+1] != '\n') {
+// HasLoneCR reports whether b holds a `\r` not followed by `\n`.
+func HasLoneCR(b []byte) bool {
+	for {
+		at := bytes.IndexByte(b, '\r')
+		if at < 0 {
+			return false
+		}
+
+		if at+1 == len(b) || b[at+1] != '\n' {
 			return true
 		}
-	}
 
-	return false
+		b = b[at+2:]
+	}
 }

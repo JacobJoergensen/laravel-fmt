@@ -49,21 +49,22 @@ func (c *Cursor) PeekAt(n int) byte {
 	return c.Src[c.Pos.Offset+n]
 }
 
-// Advance consumes one byte; only LF starts a new line, so a lone CR advances
-// the column.
+// Advance consumes one byte. LF, CRLF and a lone CR each end a line, as in
+// every language parsed here and in LSP.
 func (c *Cursor) Advance() {
 	if c.Eof() {
 		return
 	}
 
-	if c.Src[c.Pos.Offset] == '\n' {
+	b := c.Src[c.Pos.Offset]
+	c.Pos.Offset++
+
+	if b == '\n' || b == '\r' && c.Peek() != '\n' {
 		c.Pos.Line++
 		c.Pos.Column = 1
 	} else {
 		c.Pos.Column++
 	}
-
-	c.Pos.Offset++
 }
 
 // AdvanceN consumes up to n bytes, stopping at end-of-source.

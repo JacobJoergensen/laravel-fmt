@@ -3,6 +3,8 @@ package markdown
 import (
 	"bytes"
 	"hash/maphash"
+
+	parserpkg "github.com/JacobJoergensen/laravel-fmt/internal/parser"
 )
 
 type parser struct {
@@ -68,26 +70,22 @@ func lineAt(src []byte, off int) (line []byte, nextOff int) {
 }
 
 func (p *parser) advancePastLine() {
-	_, nextOff := p.peekLine()
+	line, nextOff := p.peekLine()
 
-	for p.pos.Offset < nextOff {
-		p.advanceByte()
-	}
-}
+	if p.pos.Offset+len(line) == nextOff {
+		p.pos.Column += len(line)
+		p.pos.Offset = nextOff
 
-func (p *parser) advanceByte() {
-	if p.eof() {
 		return
 	}
 
-	if p.src[p.pos.Offset] == '\n' {
-		p.pos.Line++
-		p.pos.Column = 1
-	} else {
-		p.pos.Column++
-	}
+	p.pos = Position{Offset: nextOff, Line: p.pos.Line + 1, Column: 1}
+}
 
-	p.pos.Offset++
+func (p *parser) advanceTo(off int) {
+	c := parserpkg.Cursor{Src: p.src, Pos: p.pos}
+	c.AdvanceN(off - p.pos.Offset)
+	p.pos = c.Pos
 }
 
 func (p *parser) skipBlankLines() {
@@ -216,9 +214,7 @@ func (p *parser) parseFrontmatter() Node {
 
 	contentStart := p.pos.Offset
 
-	for p.pos.Offset < closeOff {
-		p.advanceByte()
-	}
+	p.advanceTo(closeOff)
 
 	content := p.src[contentStart:closeOff]
 

@@ -51,3 +51,14 @@ func TestSnippetReturnsEmptyForUnavailableLine(t *testing.T) {
 		t.Fatalf("nil src: want empty, got %q", got)
 	}
 }
+
+func TestSnippetCountsLinesAsTheParsersDo(t *testing.T) {
+	got := Snippet([]byte("one\rtwo\r\nthree\n"), 3, 1)
+
+	want := "3 │ three\n" +
+		"  │ ^\n"
+
+	if got != want {
+		t.Fatalf("snippet differs.\n=== got ===\n%q\n=== want ===\n%q", got, want)
+	}
+}

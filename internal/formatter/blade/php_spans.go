@@ -3,6 +3,7 @@ package blade
 import (
 	"bytes"
 
+	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
 	htmlfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/html"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/blade"
 	htmlparser "github.com/JacobJoergensen/laravel-fmt/internal/parser/html"
@@ -28,26 +29,11 @@ func phpSpans(nodes []htmlparser.Node) []htmlparser.Span {
 // walk would cost every body an allocation for nothing. A CRLF file has CRs
 // throughout and no lone one.
 func phpSpansFor(raw []byte, nodes []htmlparser.Node) []htmlparser.Span {
-	if !hasLoneCR(raw) {
+	if !formatter.HasLoneCR(raw) {
 		return nil
 	}
 
 	return phpSpans(nodes)
-}
-
-func hasLoneCR(b []byte) bool {
-	for {
-		at := bytes.IndexByte(b, '\r')
-		if at < 0 {
-			return false
-		}
-
-		if at+1 == len(b) || b[at+1] != '\n' {
-			return true
-		}
-
-		b = b[at+2:]
-	}
 }
 
 func appendPHPSpans(spans []htmlparser.Span, n any) []htmlparser.Span {
