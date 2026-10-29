@@ -15,9 +15,13 @@ type memFile struct {
 	failAfter int
 	failed    bool
 	truncErr  error
+	closeErr  error
 }
 
-var errDiskFull = errors.New("no space left on device")
+var (
+	errDiskFull = errors.New("no space left on device")
+	errIO       = errors.New("input/output error")
+)
 
 func (m *memFile) WriteAt(b []byte, off int64) (int, error) {
 	n := len(b)
@@ -53,7 +57,7 @@ func (m *memFile) Truncate(size int64) error {
 	return nil
 }
 
-func (m *memFile) Close() error { return nil }
+func (m *memFile) Close() error { return m.closeErr }
 
 func TestRewriteReplacesTheContent(t *testing.T) {
 	for name, tc := range map[string]struct{ orig, formatted string }{
@@ -97,6 +101,18 @@ func TestRewriteRestoresTheOriginalWhenTheWriteFails(t *testing.T) {
 				t.Fatalf("file holds %q after the failure, want the original %q", f.data, orig)
 			}
 		})
+	}
+}
+
+// The restored original may not have reached the disk, so a failed close is
+// reported alongside the failed write.
+func TestRewriteReportsACloseFailureAfterAFailedWrite(t *testing.T) {
+	orig := []byte("<?php $a=1;")
+	f := &memFile{data: bytes.Clone(orig), failAfter: 3, closeErr: errIO}
+
+	err := rewrite(f, orig, []byte("<?php $a = 1;\n"))
+	if !errors.Is(err, errDiskFull) || !errors.Is(err, errIO) {
+		t.Fatalf("err = %v, want both the write and the close failure", err)
 	}
 }
 

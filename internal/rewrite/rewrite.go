@@ -38,7 +38,9 @@ func rewrite(f file, orig, formatted []byte) error {
 			err = errors.Join(err, fmt.Errorf("restore original: %w", restoreErr))
 		}
 
-		_ = f.Close()
+		if closeErr := f.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close: %w", closeErr))
+		}
 
 		return err
 	}
