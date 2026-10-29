@@ -102,6 +102,7 @@ func TestSelectorSpacing(t *testing.T) {
 		{"descendant collapses to one space", "a    b{color:red}", "a b"},
 		{"attribute string spaces preserved", `[title="a  b"]{color:red}`, `[title="a  b"]`},
 		{"nth-child plus untouched", "a:nth-child(2n+1){color:red}", "a:nth-child(2n+1)"},
+		{"form feed is whitespace", "a\f>\fb{color:red}", "a > b"},
 	}
 
 	for _, tc := range cases {
@@ -129,6 +130,7 @@ func TestValueSpacing(t *testing.T) {
 		{"function arg commas spaced", "a{color:rgba(0,0,0,.5)}", "rgba(0, 0, 0, .5)", ""},
 		{"calc division spaced", "a{width:calc(100%/3)}", "calc(100% / 3)", ""},
 		{"calc multiplication spaced", "a{width:calc(1px*2)}", "calc(1px * 2)", ""},
+		{"form feed is whitespace", "a{width:calc(1px\f*\f2)}", "calc(1px * 2)", ""},
 		{"calc minus left as written", "a{width:calc(100% - 10px)}", "calc(100% - 10px)", ""},
 		{"font shorthand slash preserved", "a{font:16px/1.5 sans-serif}", "16px/1.5", "16px / 1.5"},
 		{"aspect-ratio slash preserved", "a{aspect-ratio:16/9}", "aspect-ratio: 16/9", "16 / 9"},
@@ -183,6 +185,7 @@ func TestAtRulePreludeSpacing(t *testing.T) {
 		{"page pseudo not spaced", "@page :first{margin:0}", "@page :first", "@page : first"},
 		{"selector function pseudo preserved", "@supports selector(a:hover){a{x:1}}", "selector(a:hover)", "selector(a: hover)"},
 		{"layer list comma spaced", "@layer a,b;", "@layer a, b", ""},
+		{"form feed is whitespace", "@media screen\fand\f(min-width:100px){a{x:1}}", "screen and (min-width: 100px)", ""},
 		{"import url comma not spaced", "@import url(a,b.css);", "url(a,b.css)", "a, b"},
 	}
 

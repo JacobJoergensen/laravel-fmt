@@ -317,6 +317,7 @@ func TestUnterminatedConstructIsReportedAtItsOpener(t *testing.T) {
 		wantLine, wantCol  int
 	}{
 		{"comment", "a {}\n/* c\n\n", "unterminated comment", 2, 1},
+		{"comment in a value", "a { b: 1 /* c\n", "unterminated comment", 1, 10},
 		{"string", "a { b: \"x;\n}\n", "unterminated string", 1, 8},
 		{"rule block", "a {\n  b: c;\n\n", "unclosed rule block", 1, 3},
 		{"at-rule block", "@media x {\n  a {}\n\n", "unclosed at-rule block", 1, 10},

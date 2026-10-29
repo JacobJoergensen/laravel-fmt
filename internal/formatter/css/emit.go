@@ -29,7 +29,7 @@ func collapseCSSSpace(b []byte) []byte {
 	space := false
 
 	for _, c := range trimmed {
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' {
+		if isCSSSpace(c) {
 			space = true
 
 			continue
@@ -637,7 +637,7 @@ func normalizeValue(b []byte) []byte {
 			continue
 		}
 
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+		if isCSSSpace(c) {
 			if out.Len() > 0 {
 				pendingSpace = true
 			}
@@ -767,7 +767,7 @@ func normalizePrelude(b []byte, featureColons bool) []byte {
 			continue
 		}
 
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+		if isCSSSpace(c) {
 			if out.Len() > 0 {
 				pendingSpace = true
 			}
@@ -865,7 +865,7 @@ func normalizeSelectorSpacing(sel []byte) []byte {
 			continue
 		}
 
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+		if isCSSSpace(c) {
 			if out.Len() > 0 {
 				pendingSpace = true
 			}

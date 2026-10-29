@@ -101,22 +101,21 @@ func (p *cssParser) parseComment() Node {
 	p.Advance()
 	open := Span{Start: openStart, End: p.Pos}
 
-	contentOffset := p.Pos.Offset
+	end, closed := scanBlockCommentEnd(p.Src, openStart.Offset)
+	closeLen := 0
 
-	for !p.Eof() && (p.Peek() != '*' || p.PeekAt(1) != '/') {
-		p.Advance()
-	}
-
-	text := p.Src[contentOffset:p.Pos.Offset]
-
-	closeStart := p.Pos
-
-	if !p.Eof() {
-		p.Advance()
-		p.Advance()
+	if closed {
+		closeLen = len("*/")
 	} else {
 		p.addError(openStart, "unterminated comment")
 	}
+
+	textEnd := end - closeLen
+	text := p.Src[p.Pos.Offset:textEnd]
+
+	p.AdvanceN(textEnd - p.Pos.Offset)
+	closeStart := p.Pos
+	p.AdvanceN(closeLen)
 
 	return &Comment{
 		Open:  open,
@@ -359,9 +358,9 @@ func (p *cssParser) peekTerminator() byte {
 			// does not end the lookahead.
 			off += 2
 		case c == '"' || c == '\'':
-			off = scanStringEnd(p.Src, off, c)
+			off, _ = scanStringEnd(p.Src, off, c)
 		case c == '/' && off+1 < len(p.Src) && p.Src[off+1] == '*':
-			off = scanBlockCommentEnd(p.Src, off)
+			off, _ = scanBlockCommentEnd(p.Src, off)
 		case c == '(':
 			paren++
 			off++
@@ -400,50 +399,22 @@ func (p *cssParser) skipWhitespace() {
 
 func (p *cssParser) skipString(quote byte) {
 	start := p.Pos
-	p.Advance()
+	end, closed := scanStringEnd(p.Src, start.Offset, quote)
+	p.AdvanceN(end - start.Offset)
 
-	for !p.Eof() {
-		c := p.Peek()
-
-		if c == '\\' {
-			p.Advance()
-
-			if !p.Eof() {
-				p.Advance()
-			}
-
-			continue
-		}
-
-		if c == quote {
-			p.Advance()
-
-			return
-		}
-
-		p.Advance()
+	if !closed {
+		p.addError(start, "unterminated string")
 	}
-
-	p.addError(start, "unterminated string")
 }
 
 func (p *cssParser) skipBlockComment() {
 	start := p.Pos
-	p.Advance()
-	p.Advance()
+	end, closed := scanBlockCommentEnd(p.Src, start.Offset)
+	p.AdvanceN(end - start.Offset)
 
-	for !p.Eof() {
-		if p.Peek() == '*' && p.PeekAt(1) == '/' {
-			p.Advance()
-			p.Advance()
-
-			return
-		}
-
-		p.Advance()
+	if !closed {
+		p.addError(start, "unterminated comment")
 	}
-
-	p.addError(start, "unterminated comment")
 }
 
 func (p *cssParser) readIdent() []byte {
@@ -481,7 +452,7 @@ func (p *cssParser) positionAt(from Position, targetOffset int) Position {
 	return pos
 }
 
-func scanStringEnd(src []byte, off int, quote byte) int {
+func scanStringEnd(src []byte, off int, quote byte) (end int, closed bool) {
 	off++
 
 	for off < len(src) {
@@ -494,27 +465,27 @@ func scanStringEnd(src []byte, off int, quote byte) int {
 		}
 
 		if c == quote {
-			return off + 1
+			return off + 1, true
 		}
 
 		off++
 	}
 
-	return off
+	return len(src), false
 }
 
-func scanBlockCommentEnd(src []byte, off int) int {
-	off += 2
+func scanBlockCommentEnd(src []byte, off int) (end int, closed bool) {
+	off += len("/*")
 
 	for off+1 < len(src) {
 		if src[off] == '*' && src[off+1] == '/' {
-			return off + 2
+			return off + len("*/"), true
 		}
 
 		off++
 	}
 
-	return len(src)
+	return len(src), false
 }
 
 func findImportantOffset(val []byte) int {
