@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.7.0 (2026-10-29)
 * Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON
 * Improved an unclosed string, comment, block or Blade echo in CSS, JSON, XML, HTML or Blade to be reported where it opens instead of at the end of the file
 * Improved `init` to write only the schema reference, so the new `laravel-fmt.json` no longer overrides `.editorconfig`, Prettier, Pint or Mago
@@ -13,7 +15,7 @@
 * Fixed `--stdin-filepath` holding `*` or `?` failing inside a project on Windows instead of formatting as it does outside one
 * Fixed Markdown with nested blockquotes and lines that continue a quote without `>` hanging for minutes
 * Fixed a PHP code block in Markdown with a lone CR in a string changing layout on a second run
-* Fixed a form feed in a CSS value, selector or at-rule leaving the spacing around it uneven
+* Fixed a form feed in a CSS value, selector or at-rule leaving the surrounding spacing uneven
 * Fixed a file with CR-only line endings reporting parse errors on the wrong line, and CSS and JSON in one losing their blank lines, line breaks and comment indentation
 
 ## Version 0.6.0 (2026-10-28)
