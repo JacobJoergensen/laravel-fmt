@@ -41,16 +41,18 @@ var fmtOpts fmtFlags
 
 var rootCmd = &cobra.Command{
 	Use:   "laravel-fmt [paths...]",
-	Short: "Format PHP, Blade, and Livewire 4 files",
+	Short: "Format PHP, Blade and Livewire 4, plus HTML, CSS, Markdown, JSON, YAML and XML",
 	Long: `laravel-fmt formats source files in place. With no path arguments it walks
-the project root discovered by the detector, skipping what .gitignore and the
-ignore list in laravel-fmt.json exclude. With path arguments each path is
-formatted directly when it is a file, even an ignored one, or walked the same
-way when it is a directory. With --stdin-filepath set, source is read from
-stdin and formatted output is written to stdout, with the value used as the
-filename for language dispatch. The file itself is never opened. Adding
---range-start or --range-end narrows that output to the changes overlapping
-those byte offsets, for editors that format a selection by shelling out.`,
+the Laravel project root, or the working directory outside one, skipping what
+.gitignore, laravel-fmt.json and the project's Prettier, Pint and oxfmt
+settings leave out. With path arguments each path is formatted directly when
+it is a file, even an ignored one, or walked the same way when it is a
+directory. With --stdin-filepath set, source is read from stdin and formatted
+output is written to stdout; the path picks the language, config and ignore
+rules, and an ignored path comes back unchanged. The file itself is never
+opened. Adding --range-start or --range-end narrows that output to the changes
+overlapping those byte offsets, for editors that format a selection by
+shelling out.`,
 	Example:           "  laravel-fmt\n  app/Models/User.php\n  laravel-fmt --diff\n  laravel-fmt --check\n  laravel-fmt --staged\n  laravel-fmt --check --since origin/main\n  laravel-fmt --config path/to/laravel-fmt.json\n  laravel-fmt --stdin-filepath foo.blade.php < input.php\n  laravel-fmt --stdin-filepath foo.php --range-start 40 --range-end 120 < input.php",
 	Version:           versionString(),
 	Args:              cobra.ArbitraryArgs,
@@ -176,7 +178,7 @@ func init() {
 	rootCmd.Flags().StringVar(&fmtOpts.since, flagSince, "", "format only files changed since the given git ref branched off, including uncommitted and untracked ones")
 	rootCmd.Flags().StringVar(&fmtOpts.config, "config", "", "path to a laravel-fmt.json; overrides auto-discovery")
 	rootCmd.Flags().BoolVar(&fmtOpts.noConfig, "no-config", false, "skip laravel-fmt.json and use defaults plus detector tweaks")
-	rootCmd.Flags().StringVar(&fmtOpts.stdinFilepath, "stdin-filepath", "", "read source from stdin and write formatted output to stdout; the value is the filename used for language dispatch")
+	rootCmd.Flags().StringVar(&fmtOpts.stdinFilepath, "stdin-filepath", "", "format stdin to stdout; the path picks the language, config and ignore rules and is never opened")
 	rootCmd.Flags().StringVar(&fmtOpts.showConfig, "show-config", "", "print the config resolved for this file as JSON and exit, without formatting anything")
 	rootCmd.Flags().IntVar(&fmtOpts.rangeStart, flagRangeStart, 0, "with --stdin-filepath, apply only the changes at or after this byte offset of the input")
 	rootCmd.Flags().IntVar(&fmtOpts.rangeEnd, flagRangeEnd, 0, "with --stdin-filepath, apply only the changes before this byte offset of the input, exclusive; defaults to the end of the input")

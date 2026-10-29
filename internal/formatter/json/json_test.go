@@ -28,16 +28,27 @@ func TestExplicitIndentWins(t *testing.T) {
 func TestConventionWithoutExplicitIndent(t *testing.T) {
 	src := []byte("{\n\"a\": 1,\n\"b\": 2\n}\n")
 
-	cfg := config.Default()
-	cfg.IndentWidth = 4
-
-	out, err := Format("settings.json", src, cfg)
-	if err != nil {
-		t.Fatalf("Format: %v", err)
+	cases := []struct {
+		filename, wantLine string
+	}{
+		{"settings.json", "\n  \"a\": 1"},
+		{"composer.json", "\n    \"a\": 1"},
 	}
 
-	if !bytes.Contains(out, []byte("\n  \"a\": 1")) {
-		t.Fatalf("convention 2-space ignored; got:\n%s", out)
+	for _, tc := range cases {
+		t.Run(tc.filename, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.IndentWidth = 3
+
+			out, err := Format(tc.filename, src, cfg)
+			if err != nil {
+				t.Fatalf("Format: %v", err)
+			}
+
+			if !bytes.Contains(out, []byte(tc.wantLine)) {
+				t.Fatalf("convention indent ignored; got:\n%s", out)
+			}
+		})
 	}
 }
 

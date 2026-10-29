@@ -121,8 +121,9 @@ type File struct {
 	Tailwind      bool            `json:"-"`
 	TailwindTheme *tailwind.Theme `json:"-"`
 
-	// IndentExplicit is set when EditorConfig or laravel-fmt.json sets the
-	// indent; JSON and YAML then use IndentWidth instead of their own default.
+	// IndentExplicit is set when EditorConfig, Prettier or laravel-fmt.json
+	// sets the indent; JSON and YAML then use IndentWidth instead of their own
+	// default.
 	IndentExplicit bool `json:"-"`
 }
 

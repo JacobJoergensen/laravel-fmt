@@ -84,13 +84,18 @@ func isJSONCFilename(filename string) bool {
 	return strings.HasPrefix(base, "tsconfig.") || strings.HasPrefix(base, "jsconfig.")
 }
 
-// indentWidth follows the tool that owns the file, Composer's 4 for
-// composer.json and npm's 2 otherwise, since that tool rewrites the file with
-// its own indent and the two would ping-pong.
+// Composer and npm rewrite the JSON they own with their own indent, so
+// matching it keeps a run of either tool from undoing ours: Composer's for
+// composer.json, npm's for every other file.
+const (
+	composerIndentWidth = 4
+	npmIndentWidth      = 2
+)
+
 func indentWidth(filename string) int {
 	if strings.EqualFold(filepath.Base(filename), "composer.json") {
-		return 4
+		return composerIndentWidth
 	}
 
-	return 2
+	return npmIndentWidth
 }

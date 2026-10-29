@@ -81,7 +81,7 @@ func Format(opts *Options, streams Streams) error {
 
 	ctx, err := detector.Detect(anchor)
 	if err != nil {
-		return fmt.Errorf("detect context: %w", err)
+		return fmt.Errorf("detect project context: %w", err)
 	}
 
 	loaded, err := r.loadConfig(anchor, ctx)

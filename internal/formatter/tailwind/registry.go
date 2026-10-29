@@ -65,9 +65,6 @@ var (
 
 // ensureRegistry builds the tables on the first call and is a no-op after.
 // Every function that reads them calls it first.
-//
-// The variantMask-width check runs here because the tables are not built at
-// init; any sort trips it, and newTheme checks each project's additions.
 func ensureRegistry() {
 	registryOnce.Do(func() {
 		utilityRegistry = buildUtilityRegistry()
@@ -83,38 +80,26 @@ func ensureRegistry() {
 		arbitraryVariantSlot = highest + 1
 
 		breakpointBlockStart, breakpointBlockEnd = computeBreakpointBlock()
-
-		if arbitraryVariantSlot >= variantMaskSlots {
-			panic("tailwind: variant priority slot exceeds variantMask width; increase variantMaskWords")
-		}
 	})
 }
 
-// computeBreakpointBlock returns the lowest and highest variant priority the default
-// breakpoints occupy. The block must be contiguous: variantPriority renumbers it in
-// place for custom `--breakpoint-*` sizes, shifting higher variants up to make room,
-// and that stays order-preserving only if no non-breakpoint variant sits inside the
-// block. A regenerated registry that breaks contiguity panics here rather than
-// misordering breakpoints at sort time.
+// computeBreakpointBlock returns the lowest and highest variant priority the
+// default breakpoints occupy. variantPriority renumbers that block in place for
+// custom `--breakpoint-*` sizes, which keeps the order only while no other
+// variant sits inside it; TestRegistryInvariants holds the generated tables to
+// that.
 func computeBreakpointBlock() (int, int) {
 	lowest := -1
 	highest := -1
 
 	for name := range defaultBreakpointWidths {
-		entry, ok := variantRegistry[name]
-		if !ok {
-			panic("tailwind: default breakpoint missing from variantRegistry: " + name)
+		priority := variantRegistry[name].Priority
+
+		if lowest == -1 || priority < lowest {
+			lowest = priority
 		}
 
-		if lowest == -1 || entry.Priority < lowest {
-			lowest = entry.Priority
-		}
-
-		highest = max(highest, entry.Priority)
-	}
-
-	if highest-lowest != len(defaultBreakpointWidths)-1 {
-		panic("tailwind: default breakpoint priorities are not contiguous; the breakpoint renumbering would misorder them")
+		highest = max(highest, priority)
 	}
 
 	return lowest, highest
@@ -279,10 +264,11 @@ func unwrapBracket(v string) string {
 	return v
 }
 
-// variantMaskWords is the number of 64-bit words in a variantMask; two span priority
-// slots 0..127. Bump it if a future Tailwind release pushes arbitraryVariantSlot past
-// 127; ensureRegistry asserts the bound, so the overflow fails loudly instead of a
-// single uint64 silently aliasing high slots.
+// variantMaskWords is the number of 64-bit words in a variantMask; two span
+// priority slots 0..127. Bump it if a future Tailwind release pushes
+// arbitraryVariantSlot past 127; TestRegistryInvariants asserts the bound, so
+// the overflow fails loudly instead of a single uint64 silently aliasing high
+// slots.
 const variantMaskWords = 2
 
 const variantMaskSlots = variantMaskWords * 64
