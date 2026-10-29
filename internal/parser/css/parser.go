@@ -243,7 +243,7 @@ func (p *cssParser) parseDeclaration() Node {
 	if impOffset := findImportantOffset(val); impOffset >= 0 {
 		trimmedLen := impOffset
 
-		for trimmedLen > 0 && isSpaceByte(val[trimmedLen-1]) {
+		for trimmedLen > 0 && IsSpaceByte(val[trimmedLen-1]) {
 			trimmedLen--
 		}
 
@@ -329,7 +329,7 @@ func (p *cssParser) readRangeUntil(stops string) (Position, Position, []byte) {
 
 			p.Advance()
 			lastNonWS = p.Pos
-		case isSpaceByte(c):
+		case IsSpaceByte(c):
 			p.Advance()
 		default:
 			p.Advance()
@@ -392,7 +392,7 @@ func (p *cssParser) peekTerminator() byte {
 }
 
 func (p *cssParser) skipWhitespace() {
-	for !p.Eof() && isSpaceByte(p.Peek()) {
+	for !p.Eof() && IsSpaceByte(p.Peek()) {
 		p.Advance()
 	}
 }
@@ -423,7 +423,7 @@ func (p *cssParser) readIdent() []byte {
 	for !p.Eof() {
 		c := p.Peek()
 
-		if isIdentByte(c) {
+		if IsIdentByte(c) {
 			p.Advance()
 
 			continue
@@ -483,7 +483,7 @@ func findImportantOffset(val []byte) int {
 
 	end := len(val)
 
-	for end > 0 && isSpaceByte(val[end-1]) {
+	for end > 0 && IsSpaceByte(val[end-1]) {
 		end--
 	}
 
@@ -497,7 +497,7 @@ func findImportantOffset(val []byte) int {
 
 	before := end - len(tag)
 
-	for before > 0 && isSpaceByte(val[before-1]) {
+	for before > 0 && IsSpaceByte(val[before-1]) {
 		before--
 	}
 
@@ -508,13 +508,15 @@ func findImportantOffset(val []byte) int {
 	return before - 1
 }
 
-func isIdentByte(c byte) bool {
+// IsIdentByte reports whether c can continue an ASCII CSS identifier.
+func IsIdentByte(c byte) bool {
 	return (c >= 'a' && c <= 'z') ||
 		(c >= 'A' && c <= 'Z') ||
 		(c >= '0' && c <= '9') ||
 		c == '-' || c == '_'
 }
 
-func isSpaceByte(c byte) bool {
+// IsSpaceByte reports whether c is CSS whitespace.
+func IsSpaceByte(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
 }

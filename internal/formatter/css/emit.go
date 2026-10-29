@@ -29,7 +29,7 @@ func collapseCSSSpace(b []byte) []byte {
 	space := false
 
 	for _, c := range trimmed {
-		if isCSSSpace(c) {
+		if parser.IsSpaceByte(c) {
 			space = true
 
 			continue
@@ -136,7 +136,7 @@ func escapeEnd(b []byte, i int) int {
 		return j + 2
 	}
 
-	if j < len(b) && isCSSSpace(b[j]) {
+	if j < len(b) && parser.IsSpaceByte(b[j]) {
 		return j + 1
 	}
 
@@ -323,7 +323,7 @@ func allAtomic(parts [][]byte) bool {
 				depth++
 			case c == ')':
 				depth--
-			case depth == 0 && isCSSSpace(c):
+			case depth == 0 && parser.IsSpaceByte(c):
 				return false
 			}
 		}
@@ -584,7 +584,7 @@ func urlTokenEnd(b []byte, i int) int {
 func trailingIdent(bs []byte) []byte {
 	start := len(bs)
 
-	for start > 0 && isIdentByte(bs[start-1]) {
+	for start > 0 && parser.IsIdentByte(bs[start-1]) {
 		start--
 	}
 
@@ -637,7 +637,7 @@ func normalizeValue(b []byte) []byte {
 			continue
 		}
 
-		if isCSSSpace(c) {
+		if parser.IsSpaceByte(c) {
 			if out.Len() > 0 {
 				pendingSpace = true
 			}
@@ -712,10 +712,6 @@ func normalizeValue(b []byte) []byte {
 	return out.Bytes()
 }
 
-func isIdentByte(c byte) bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_'
-}
-
 // preludeHasFeatureColons is true for the conditional-group rules whose prelude
 // has `feature: value`; selector preludes (`@custom-variant`'s `&:where`) must not
 // be spaced.
@@ -767,7 +763,7 @@ func normalizePrelude(b []byte, featureColons bool) []byte {
 			continue
 		}
 
-		if isCSSSpace(c) {
+		if parser.IsSpaceByte(c) {
 			if out.Len() > 0 {
 				pendingSpace = true
 			}
@@ -788,7 +784,7 @@ func normalizePrelude(b []byte, featureColons bool) []byte {
 			out.WriteByte(c)
 		case c == '(':
 			bs := out.Bytes()
-			fn := !pendingSpace && len(bs) > 0 && isIdentByte(bs[len(bs)-1])
+			fn := !pendingSpace && len(bs) > 0 && parser.IsIdentByte(bs[len(bs)-1])
 
 			if fn && isUnquotedURL(trailingIdent(bs), b, i+1) {
 				flush()
@@ -865,7 +861,7 @@ func normalizeSelectorSpacing(sel []byte) []byte {
 			continue
 		}
 
-		if isCSSSpace(c) {
+		if parser.IsSpaceByte(c) {
 			if out.Len() > 0 {
 				pendingSpace = true
 			}
@@ -915,7 +911,7 @@ func normalizeSelectorSpacing(sel []byte) []byte {
 // whitespace that ends a hex escape.
 func spaceBeforeOperator(out *bytes.Buffer) {
 	b := out.Bytes()
-	if len(b) == 0 || isCSSSpace(b[len(b)-1]) {
+	if len(b) == 0 || parser.IsSpaceByte(b[len(b)-1]) {
 		return
 	}
 

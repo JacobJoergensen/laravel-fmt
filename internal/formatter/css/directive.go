@@ -21,17 +21,13 @@ func emitNodeVerbatim(w *formatter.Writer, src []byte, node parser.Node) {
 
 	// The block body owns the newline and indent around a node, so whitespace
 	// left in the slice would add a blank line on every pass.
-	for start < end && isCSSSpace(src[start]) {
+	for start < end && parser.IsSpaceByte(src[start]) {
 		start++
 	}
 
-	for end > start && isCSSSpace(src[end-1]) {
+	for end > start && parser.IsSpaceByte(src[end-1]) {
 		end--
 	}
 
 	formatter.EmitVerbatim(w, src, start, end)
-}
-
-func isCSSSpace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
 }

@@ -753,14 +753,14 @@ func scanImports(src []byte) []importRef {
 func parseImport(src []byte, i int) (importRef, int, bool) {
 	j := i + len("@import")
 
-	for j < len(src) && isCSSSpace(src[j]) {
+	for j < len(src) && css.IsSpaceByte(src[j]) {
 		j++
 	}
 
 	if bytes.HasPrefix(src[j:], []byte("url(")) {
 		j += len("url(")
 
-		for j < len(src) && isCSSSpace(src[j]) {
+		for j < len(src) && css.IsSpaceByte(src[j]) {
 			j++
 		}
 	}
@@ -793,10 +793,6 @@ func parseImport(src []byte, i int) (importRef, int, bool) {
 	}
 
 	return importRef{target: target, start: i, end: j + 1}, j + 1, true
-}
-
-func isCSSSpace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f'
 }
 
 // hasPrefixFold matches an at-rule name, which CSS compares case-insensitively.
