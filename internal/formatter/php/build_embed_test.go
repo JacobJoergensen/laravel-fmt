@@ -25,7 +25,9 @@ func TestRawDirectiveArgRehomable(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := RawDirectiveArgRehomable([]byte(tc.raw)); got != tc.want {
+			tokens, errs := parser.LexBare([]byte(tc.raw))
+
+			if got := RawDirectiveArgRehomable([]byte(tc.raw), tokens, len(errs) == 0); got != tc.want {
 				t.Fatalf("RawDirectiveArgRehomable(%q) = %v, want %v", tc.raw, got, tc.want)
 			}
 		})
@@ -34,24 +36,27 @@ func TestRawDirectiveArgRehomable(t *testing.T) {
 
 func TestEndsInLineComment(t *testing.T) {
 	cases := map[string]struct {
-		src  string
-		want bool
+		src, past string
+		want      bool
 	}{
-		"a hash in a double-quoted string": {`"#" `, false},
-		"a hash in a single-quoted string": {`'#'`, false},
-		"an attribute opener":              {`#[ `, false},
-		"a slash comment":                  {`$i++ // c`, true},
-		"a hash comment":                   {`$a as $b # c`, true},
-		"a hash inside a block comment":    {`$a as $b /* # */`, false},
-		"a comment the line then closes":   {"$a // c\n$b", false},
-		"a comment ended by a lone CR":     {"$a // c\r", false},
-		"trivia only":                      {"// c", true},
+		"a hash in a double-quoted string":       {`"#" `, "", false},
+		"a hash in a single-quoted string":       {`'#'`, "", false},
+		"an attribute opener":                    {`#[ `, "", false},
+		"a slash comment":                        {`$i++ // c`, "", true},
+		"a hash comment":                         {`$a as $b # c`, "", true},
+		"a hash inside a block comment":          {`$a as $b /* # */`, "", false},
+		"a comment the line then closes":         {"$a // c\n$b", "", false},
+		"a comment ended by a lone CR":           {"$a // c\r", "", false},
+		"trivia only":                            {"// c", "", true},
+		"a comment whose line break is past end": {"$a // c", "\n", true},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := EndsInLineComment([]byte(tc.src)); got != tc.want {
-				t.Fatalf("EndsInLineComment(%q) = %v, want %v", tc.src, got, tc.want)
+			tokens, _ := parser.LexBare([]byte(tc.src + tc.past))
+
+			if got := EndsInLineComment(tokens, len(tc.src)); got != tc.want {
+				t.Fatalf("EndsInLineComment(%q, then %q) = %v, want %v", tc.src, tc.past, got, tc.want)
 			}
 		})
 	}

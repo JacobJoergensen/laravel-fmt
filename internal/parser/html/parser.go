@@ -74,7 +74,7 @@ func (p *htmlParser) atContainerBoundary(stack [][]byte) bool {
 		return true
 	}
 
-	if p.isTagClose() {
+	if IsTagClose(&p.Cursor) {
 		if slices.ContainsFunc(stack[:len(stack)-1], p.matchesCloseTag) {
 			return true
 		}
@@ -94,7 +94,7 @@ func (p *htmlParser) peekTagName() []byte {
 	for off < len(p.Src) {
 		c := p.Src[off]
 
-		if isNameStart(c) || isDigit(c) || c == '-' || c == '_' || c == '.' || c == ':' {
+		if IsNameStart(c) || IsDigit(c) || c == '-' || c == '_' || c == '.' || c == ':' {
 			off++
 			continue
 		}
@@ -113,7 +113,7 @@ func (p *htmlParser) parseNext(stack [][]byte) Node {
 		return p.parseDoctype()
 	case p.isTagOpen():
 		return p.parseElement(stack)
-	case p.isTagClose():
+	case IsTagClose(&p.Cursor):
 		return p.parseStrayClose()
 	default:
 		return p.parseText()
@@ -121,11 +121,7 @@ func (p *htmlParser) parseNext(stack [][]byte) Node {
 }
 
 func (p *htmlParser) isTagOpen() bool {
-	return p.Peek() == '<' && isNameStart(p.PeekAt(1))
-}
-
-func (p *htmlParser) isTagClose() bool {
-	return p.Peek() == '<' && p.PeekAt(1) == '/' && isNameStart(p.PeekAt(2))
+	return p.Peek() == '<' && IsNameStart(p.PeekAt(1))
 }
 
 // atTagBoundary reports whether the cursor sits at a real markup start: a tag,
@@ -133,7 +129,7 @@ func (p *htmlParser) isTagClose() bool {
 // literal text per the HTML spec, so parseText consumes it rather than splitting
 // there, which would drop the `<` and strand the preceding whitespace.
 func (p *htmlParser) atTagBoundary() bool {
-	return p.isTagOpen() || p.isTagClose() ||
+	return p.isTagOpen() || IsTagClose(&p.Cursor) ||
 		p.StartsWith("<!--") || p.StartsWithFold("<!doctype")
 }
 
@@ -217,7 +213,7 @@ func (p *htmlParser) parseElement(stack [][]byte) Node {
 	p.Advance()
 	open := Span{Start: openStart, End: p.Pos}
 
-	name := p.readTagName()
+	name := ReadTagName(&p.Cursor)
 	if !p.Eof() && GluedToTagName(p.Peek()) {
 		p.addError(p.Pos, "unexpected character after tag name")
 	}
@@ -269,8 +265,8 @@ func (p *htmlParser) parseElement(stack [][]byte) Node {
 		closeOpenStart := p.Pos
 		p.AdvanceN(2)
 		el.CloseOpen = Span{Start: closeOpenStart, End: p.Pos}
-		el.CloseName = p.readTagName()
-		p.skipTagWhitespace()
+		el.CloseName = ReadTagName(&p.Cursor)
+		SkipTagWhitespace(&p.Cursor)
 
 		closeFinalStart := p.Pos
 
@@ -346,7 +342,7 @@ func (p *htmlParser) matchesCloseTagAt(offset int, name []byte) bool {
 		return false
 	}
 
-	for end < len(p.Src) && isSpaceByte(p.Src[end]) {
+	for end < len(p.Src) && IsSpaceByte(p.Src[end]) {
 		end++
 	}
 
@@ -396,13 +392,13 @@ func CloseTagIndex(src []byte) map[string][]int {
 		nameStart := i + 2
 		end := nameStart
 
-		for end < len(src) && !isSpaceByte(src[end]) && src[end] != '>' {
+		for end < len(src) && !IsSpaceByte(src[end]) && src[end] != '>' {
 			end++
 		}
 
 		nameEnd := end
 
-		for end < len(src) && isSpaceByte(src[end]) {
+		for end < len(src) && IsSpaceByte(src[end]) {
 			end++
 		}
 
@@ -428,28 +424,11 @@ func FirstCloseAtOrAfter(offs []int, pos int) (int, bool) {
 	return 0, false
 }
 
-func (p *htmlParser) readTagName() []byte {
-	startOff := p.Pos.Offset
-
-	for !p.Eof() {
-		c := p.Peek()
-
-		if isNameStart(c) || isDigit(c) || c == '-' || c == '_' || c == '.' || c == ':' {
-			p.Advance()
-			continue
-		}
-
-		break
-	}
-
-	return p.Src[startOff:p.Pos.Offset]
-}
-
 func (p *htmlParser) readAttrs() []*Attr {
 	var attrs []*Attr
 
 	for !p.Eof() {
-		p.skipTagWhitespace()
+		SkipTagWhitespace(&p.Cursor)
 
 		c := p.Peek()
 
@@ -478,22 +457,6 @@ func (p *htmlParser) readAttrs() []*Attr {
 // per HTML5's after-attribute-name state, and reports whether one follows.
 // Nothing is consumed when it does not, so `<a href class=y>` still reads as two
 // attributes rather than swallowing the second as the first one's value.
-func (p *htmlParser) skipToAttrEquals() bool {
-	save := p.Pos
-
-	for !p.Eof() && isSpaceByte(p.Peek()) {
-		p.Advance()
-	}
-
-	if p.Peek() == '=' {
-		return true
-	}
-
-	p.Pos = save
-
-	return false
-}
-
 // skipToAttrValue consumes whitespace between an `=` and its value, per HTML5's
 // before-attribute-value state, so `href = "x"` is one attribute rather than a
 // valueless `href` plus a second attribute made from the value.
@@ -501,36 +464,6 @@ func (p *htmlParser) skipToAttrEquals() bool {
 // It stops short when the run that follows carries a quote character, because
 // that run is the head of the next attribute's quoted value (`@if= data-x="a
 // b"`): consuming it would swallow that attribute and orphan its closing quote.
-func (p *htmlParser) skipToAttrValue() {
-	save := p.Pos
-
-	for !p.Eof() && isSpaceByte(p.Peek()) {
-		p.Advance()
-	}
-
-	if p.Pos.Offset == save.Offset {
-		return
-	}
-
-	if c := p.Peek(); c == '"' || c == '\'' {
-		return
-	}
-
-	for i := p.Pos.Offset; i < len(p.Src); i++ {
-		if EndsUnquotedValue(p.Src, i) {
-			return
-		}
-
-		b := p.Src[i]
-
-		if b == '"' || b == '\'' {
-			p.Pos = save
-
-			return
-		}
-	}
-}
-
 func (p *htmlParser) readAttr() *Attr {
 	start := p.Pos
 	bound := false
@@ -540,13 +473,13 @@ func (p *htmlParser) readAttr() *Attr {
 	// Alpine @event binding (@click, @keydown.enter.prevent). The @, name, and
 	// .modifier chain form the attribute name; the value is JS, kept verbatim
 	// (Bound stays false, so it never routes through the PHP grammar).
-	if p.Peek() == '@' && isNameStart(p.PeekAt(1)) {
+	if p.Peek() == '@' && IsNameStart(p.PeekAt(1)) {
 		p.Advance()
 		p.readAttrName()
 
 		attr := &Attr{Start: start, Name: p.Src[start.Offset:p.Pos.Offset]}
 
-		if p.skipToAttrEquals() {
+		if SkipToAttrEquals(&p.Cursor) {
 			eqStart := p.Pos
 			p.Advance()
 			attr.Eq = Span{Start: eqStart, End: p.Pos}
@@ -586,7 +519,7 @@ func (p *htmlParser) readAttr() *Attr {
 		return attr
 	}
 
-	if p.skipToAttrEquals() {
+	if SkipToAttrEquals(&p.Cursor) {
 		eqStart := p.Pos
 		p.Advance()
 		attr.Eq = Span{Start: eqStart, End: p.Pos}
@@ -649,11 +582,11 @@ func EndsUnquotedValue(src []byte, i int) bool {
 		return i+1 < len(src) && src[i+1] == '>'
 	}
 
-	return isSpaceByte(src[i])
+	return IsSpaceByte(src[i])
 }
 
 func (p *htmlParser) readAttrValue(attr *Attr) {
-	p.skipToAttrValue()
+	SkipToAttrValue(&p.Cursor)
 
 	c := p.Peek()
 
@@ -686,18 +619,95 @@ func (p *htmlParser) readAttrValue(attr *Attr) {
 	}
 }
 
-func (p *htmlParser) skipTagWhitespace() {
-	for !p.Eof() && isSpaceByte(p.Peek()) {
-		p.Advance()
+// IsTagClose reports whether c is at a close tag, `</` followed by a name.
+func IsTagClose(c *parserpkg.Cursor) bool {
+	return c.Peek() == '<' && c.PeekAt(1) == '/' && IsNameStart(c.PeekAt(2))
+}
+
+// ReadTagName consumes and returns the tag name at c.
+func ReadTagName(c *parserpkg.Cursor) []byte {
+	startOff := c.Pos.Offset
+
+	for !c.Eof() {
+		b := c.Peek()
+
+		if IsNameStart(b) || IsDigit(b) || b == '-' || b == '_' || b == '.' || b == ':' {
+			c.Advance()
+			continue
+		}
+
+		break
+	}
+
+	return c.Src[startOff:c.Pos.Offset]
+}
+
+// SkipTagWhitespace consumes the whitespace at c.
+func SkipTagWhitespace(c *parserpkg.Cursor) {
+	for !c.Eof() && IsSpaceByte(c.Peek()) {
+		c.Advance()
 	}
 }
 
-func isNameStart(c byte) bool {
+// SkipToAttrEquals consumes whitespace up to an attribute's `=` and reports
+// whether one follows, leaving c where it was when none does.
+func SkipToAttrEquals(c *parserpkg.Cursor) bool {
+	save := c.Pos
+
+	for !c.Eof() && IsSpaceByte(c.Peek()) {
+		c.Advance()
+	}
+
+	if c.Peek() == '=' {
+		return true
+	}
+
+	c.Pos = save
+
+	return false
+}
+
+// SkipToAttrValue consumes whitespace after an attribute's `=`, unless a quote
+// later in an unquoted value means the whitespace ended the attribute.
+func SkipToAttrValue(c *parserpkg.Cursor) {
+	save := c.Pos
+
+	for !c.Eof() && IsSpaceByte(c.Peek()) {
+		c.Advance()
+	}
+
+	if c.Pos.Offset == save.Offset {
+		return
+	}
+
+	if b := c.Peek(); b == '"' || b == '\'' {
+		return
+	}
+
+	for i := c.Pos.Offset; i < len(c.Src); i++ {
+		if EndsUnquotedValue(c.Src, i) {
+			return
+		}
+
+		b := c.Src[i]
+
+		if b == '"' || b == '\'' {
+			c.Pos = save
+
+			return
+		}
+	}
+}
+
+// IsNameStart reports whether c can start a tag or attribute name.
+func IsNameStart(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
 }
 
-func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+// IsDigit reports whether c is an ASCII digit.
+func IsDigit(c byte) bool { return c >= '0' && c <= '9' }
 
-func isSpaceByte(c byte) bool {
+// IsSpaceByte reports whether c is HTML whitespace.
+func IsSpaceByte(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
 }

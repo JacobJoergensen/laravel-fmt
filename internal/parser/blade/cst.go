@@ -66,6 +66,10 @@ type DirectiveNode struct {
 	Args    []php.Expr
 	Tokens  []php.Token
 	Raw     []byte
+	// RawTokens is a loop's Raw lexed as bare PHP when it does not parse into
+	// Loop, and RawLexed whether it lexed cleanly.
+	RawTokens []php.Token
+	RawLexed  bool
 	// Opaque marks a Raw that is a package directive's argument and not PHP;
 	// its handler reads it as a string, so it goes out byte for byte.
 	Opaque bool

@@ -110,7 +110,7 @@ func BuildStmtDirectiveArg(src []byte, tokens []parser.Token, expr parser.Expr, 
 // Everything past the last argument is trivia, since the parser consumed the
 // expression. The range is returned rather than the bytes so a host can
 // re-home a multi-line region against its own indent.
-func TrailingArgComment(src []byte, lastEnd int) (start, end int, breaks bool) {
+func TrailingArgComment(src []byte, tokens []parser.Token, lastEnd int) (start, end int, breaks bool) {
 	if lastEnd < 0 || lastEnd >= len(src) {
 		return 0, 0, false
 	}
@@ -124,7 +124,10 @@ func TrailingArgComment(src []byte, lastEnd int) (start, end int, breaks bool) {
 		return 0, 0, false
 	}
 
-	return lastEnd + lead, lastEnd + lead + len(trimmed), EndsInLineComment(trimmed)
+	start = lastEnd + lead
+	end = start + len(trimmed)
+
+	return start, end, EndsInLineComment(tokens, end)
 }
 
 // SeparatorComment reports whether a comment sits on a comma after one of args
@@ -150,29 +153,38 @@ func SeparatorComment(tokens []parser.Token, args []parser.Expr) bool {
 	return false
 }
 
-// EndsInLineComment reports whether src ends inside a line comment, which runs
-// to the end of its line and so cannot be followed by anything on it.
-//
-// It reads the lexer's trivia, not bytes, because src can be a whole argument,
-// where a `#` may sit in a string or open a `#[` attribute.
-func EndsInLineComment(src []byte) bool {
-	// Every line comment starts with `//` or `#`, and a directive argument almost
-	// never holds either, so most calls need no lexer.
-	if bytes.IndexByte(src, '#') < 0 && !bytes.Contains(src, []byte("//")) {
+// EndsInLineComment reports whether a line comment is still open at offset end
+// of the source tokens were lexed from.
+func EndsInLineComment(tokens []parser.Token, end int) bool {
+	if len(tokens) == 0 {
 		return false
 	}
 
-	var trailing []parser.Trivia
+	return lineCommentOpen(tokens[len(tokens)-1].Leading, end)
+}
 
-	parser.LexBareFunc(src, func(t parser.Token) bool {
-		trailing = t.Leading
+// LoopClauseEndsInLineComment reports whether the clause BuildLoopClause lays
+// out for stmt ends in a line comment, which it keeps last, so the `)` has to
+// start the next line.
+func LoopClauseEndsInLineComment(src []byte, stmt parser.Stmt) bool {
+	build, lparen, rparen := loopClause(stmt)
+	if build == nil {
+		return false
+	}
 
-		return true
-	})
+	span := loopClauseSpan(src, lparen, rparen)
 
+	return lineCommentOpen(rparen.Leading, span.End.Offset)
+}
+
+func lineCommentOpen(trivia []parser.Trivia, end int) bool {
 	inLine := false
 
-	for _, t := range trailing {
+	for _, t := range trivia {
+		if t.Span.Start.Offset >= end {
+			break
+		}
+
 		switch t.Kind {
 		case parser.TriviaLineComment:
 			inLine = true
@@ -459,9 +471,9 @@ func plainStringBody(text []byte) (body string, quote byte, ok bool) {
 // so it is captured raw and emitted verbatim) is safe to re-home line by line under
 // its directive. It is unsafe when a string literal (including heredoc/nowdoc) spans
 // a newline: the interior whitespace is content, so re-indenting the line would
-// change the value. A fragment that fails to lex cleanly stays verbatim too, since a
+// change the value. A fragment that did not lex cleanly stays verbatim too, since a
 // mis-lex could hide such a string.
-func RawDirectiveArgRehomable(raw []byte) bool {
+func RawDirectiveArgRehomable(raw []byte, tokens []parser.Token, lexed bool) bool {
 	// A lone CR is a line terminator to PHP but not to the re-home, which drops
 	// it and can leave a `)` inside a line comment; a CRLF is rewritten whole
 	// and is safe.
@@ -469,9 +481,7 @@ func RawDirectiveArgRehomable(raw []byte) bool {
 		return false
 	}
 
-	tokens, errs := parser.LexBare(raw)
-
-	return len(errs) == 0 && !HasMultilineStringLiteral(tokens)
+	return lexed && !HasMultilineStringLiteral(tokens)
 }
 
 func hasLoneCR(src []byte) bool {
@@ -507,6 +517,12 @@ func BuildLoopClause(src []byte, tokens []parser.Token, stmt parser.Stmt, cfg *c
 		return nil
 	}
 
+	span := loopClauseSpan(src, lparen, rparen)
+
+	return buildWidth(src, tokens, cfg, indentCols, cfg.PrintWidth, startCol, span, build)
+}
+
+func loopClauseSpan(src []byte, lparen, rparen parser.Token) parser.Span {
 	lo, hi := lparen.Span.End.Offset, rparen.Span.Start.Offset
 	for lo < hi && parser.IsWhitespace(src[lo]) {
 		lo++
@@ -516,9 +532,7 @@ func BuildLoopClause(src []byte, tokens []parser.Token, stmt parser.Stmt, cfg *c
 		hi--
 	}
 
-	span := parser.Span{Start: parser.Position{Offset: lo}, End: parser.Position{Offset: hi}}
-
-	return buildWidth(src, tokens, cfg, indentCols, cfg.PrintWidth, startCol, span, build)
+	return parser.Span{Start: parser.Position{Offset: lo}, End: parser.Position{Offset: hi}}
 }
 
 // LoopClauseFlatWidth is a loop clause's one-line width, ignoring author breaks,

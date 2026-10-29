@@ -225,7 +225,7 @@ func (p *bladeParser) parseNext(stack [][]byte) Node {
 		return p.parseDoctype()
 	case p.isTagOpen():
 		return p.parseElement(stack)
-	case p.isTagClose():
+	case html.IsTagClose(&p.Cursor):
 		return p.parseStrayClose(stack)
 	case p.atDynamicTagClose():
 		return p.parseUnclaimedDynamicClose()
@@ -235,7 +235,7 @@ func (p *bladeParser) parseNext(stack [][]byte) Node {
 }
 
 func (p *bladeParser) isTagOpen() bool {
-	return p.Peek() == '<' && (isNameStart(p.PeekAt(1)) || p.atDynamicTagOpen())
+	return p.Peek() == '<' && (html.IsNameStart(p.PeekAt(1)) || p.atDynamicTagOpen())
 }
 
 func (p *bladeParser) atDynamicTagOpen() bool {
@@ -252,10 +252,6 @@ func (p *bladeParser) parseUnclaimedDynamicClose() Node {
 	p.AdvanceN(len("</"))
 
 	return &html.Text{Start: start, End: p.Pos, Text: p.Src[start.Offset:p.Pos.Offset]}
-}
-
-func (p *bladeParser) isTagClose() bool {
-	return p.Peek() == '<' && p.PeekAt(1) == '/' && isNameStart(p.PeekAt(2))
 }
 
 func (p *bladeParser) parseText() Node {
@@ -473,7 +469,7 @@ func (p *bladeParser) atBladeAt() bool {
 		return false
 	}
 
-	return p.PeekAt(1) == '@' || p.StartsWith("@{{") || p.StartsWith("@{!!") || isNameStart(p.PeekAt(1))
+	return p.PeekAt(1) == '@' || p.StartsWith("@{{") || p.StartsWith("@{!!") || html.IsNameStart(p.PeekAt(1))
 }
 
 func (p *bladeParser) isBladeMarker() bool {
@@ -483,7 +479,7 @@ func (p *bladeParser) isBladeMarker() bool {
 	case '{':
 		return p.PeekAt(1) == '{' || (p.PeekAt(1) == '!' && p.PeekAt(2) == '!')
 	case '<':
-		return p.isTagOpen() || p.isTagClose() || p.atDynamicTagClose() || p.StartsWith("<?") ||
+		return p.isTagOpen() || html.IsTagClose(&p.Cursor) || p.atDynamicTagClose() || p.StartsWith("<?") ||
 			p.StartsWith("<!--") || p.StartsWithFold("<!doctype")
 	}
 
@@ -766,7 +762,7 @@ func (p *bladeParser) namesDirective(name string) bool {
 
 	next := p.PeekAt(len(full))
 
-	return !isNameStart(next) && !isDigit(next)
+	return !html.IsNameStart(next) && !html.IsDigit(next)
 }
 
 func (p *bladeParser) atOneOfDirectives(names []string) bool {
@@ -824,7 +820,7 @@ func (p *bladeParser) readDirectiveName() []byte {
 	for !p.Eof() {
 		c := p.Peek()
 
-		if isNameStart(c) || (isDigit(c) && p.Pos.Offset > startOff) {
+		if html.IsNameStart(c) || (html.IsDigit(c) && p.Pos.Offset > startOff) {
 			p.Advance()
 			continue
 		}
@@ -833,16 +829,6 @@ func (p *bladeParser) readDirectiveName() []byte {
 	}
 
 	return p.Src[startOff:p.Pos.Offset]
-}
-
-func isNameStart(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
-}
-
-func isDigit(c byte) bool { return c >= '0' && c <= '9' }
-
-func isSpaceByte(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
 }
 
 const phpDirective = "php"
@@ -917,6 +903,11 @@ func (p *bladeParser) parseDirective(at Position, name []byte) *DirectiveNode {
 			d.LParen, d.Raw, d.RParen = p.parseDirectiveRaw()
 			if d.RParen.End.Offset > d.RParen.Start.Offset {
 				d.Loop, d.LoopTokens, d.LoopSrc = p.parseLoopArg(string(name), d.Raw, d.LParen.End)
+			}
+
+			if d.Loop == nil {
+				tokens, errs := php.LexBare(d.Raw)
+				d.RawTokens, d.RawLexed = tokens, len(errs) == 0
 			}
 		case string(name) == phpDirective:
 			d.LParen, d.Args, d.Tokens, d.RParen = p.parseDirectivePhp()
@@ -1175,7 +1166,7 @@ func (p *bladeParser) parseElement(stack [][]byte) Node {
 	p.Advance()
 	open := Span{Start: openStart, End: p.Pos}
 
-	name := p.readTagName()
+	name := html.ReadTagName(&p.Cursor)
 
 	// Laravel's component compiler wants whitespace before every attribute, so
 	// a glued echo leaves a component tag uncompiled.
@@ -1245,13 +1236,13 @@ func (p *bladeParser) parseElement(stack [][]byte) Node {
 		closeOpenStart := p.Pos
 		p.AdvanceN(2)
 		el.CloseOpen = Span{Start: closeOpenStart, End: p.Pos}
-		el.CloseName = p.readTagName()
+		el.CloseName = html.ReadTagName(&p.Cursor)
 
 		if p.StartsWith("{{") || p.StartsWith("{!!") {
 			el.CloseNameEcho = p.parseAttrEcho()
 		}
 
-		p.skipTagWhitespace()
+		html.SkipTagWhitespace(&p.Cursor)
 
 		closeFinalStart := p.Pos
 
@@ -1364,7 +1355,7 @@ func (p *bladeParser) atContainerBoundary(stack [][]byte) bool {
 		return true
 	}
 
-	if p.isTagClose() || p.atDynamicTagClose() {
+	if html.IsTagClose(&p.Cursor) || p.atDynamicTagClose() {
 		if slices.ContainsFunc(stack[:len(stack)-1], p.closesElement) {
 			return true
 		}
@@ -1401,7 +1392,7 @@ func (p *bladeParser) tagNameAt(start int) []byte {
 	for off < len(p.Src) {
 		c := p.Src[off]
 
-		if isNameStart(c) || isDigit(c) || c == '-' || c == '_' || c == '.' || c == ':' {
+		if html.IsNameStart(c) || html.IsDigit(c) || c == '-' || c == '_' || c == '.' || c == ':' {
 			off++
 			continue
 		}
@@ -1524,7 +1515,7 @@ func (p *bladeParser) skipRawBladeConstruct() (Span, bool) {
 		p.AdvanceN(2)
 
 		return Span{Start: start, End: start}, true
-	case p.Peek() == '@' && p.atAtMarker() && isNameStart(p.PeekAt(1)):
+	case p.Peek() == '@' && p.atAtMarker() && html.IsNameStart(p.PeekAt(1)):
 		if !p.skipRawDirective() {
 			return Span{Start: start, End: start}, true
 		}
@@ -1601,7 +1592,7 @@ func (p *bladeParser) closesElement(entry []byte) bool {
 	}
 
 	family := componentFamily(name)
-	if family == "" || !p.isTagClose() {
+	if family == "" || !html.IsTagClose(&p.Cursor) {
 		return false
 	}
 
@@ -1681,14 +1672,14 @@ func (p *bladeParser) closesDynamicName(name, entry []byte) bool {
 	}()
 
 	p.AdvanceN(len("</"))
-	closeName := p.readTagName()
+	closeName := html.ReadTagName(&p.Cursor)
 
 	if !p.StartsWith("{{") && !p.StartsWith("{!!") {
 		return false
 	}
 
 	closeEntry := p.stackEntry(closeName, p.parseAttrEcho())
-	p.skipTagWhitespace()
+	html.SkipTagWhitespace(&p.Cursor)
 
 	return p.Peek() == '>' && bytes.Equal(closeEntry, entry)
 }
@@ -1721,7 +1712,7 @@ func (p *bladeParser) matchesCloseTagName(offset int, name []byte) bool {
 		return false
 	}
 
-	for end < len(p.Src) && isSpaceByte(p.Src[end]) {
+	for end < len(p.Src) && html.IsSpaceByte(p.Src[end]) {
 		end++
 	}
 
@@ -1769,28 +1760,11 @@ func (p *bladeParser) firstCloseInScope(name []byte, off int) (int, bool) {
 	return best, ok
 }
 
-func (p *bladeParser) readTagName() []byte {
-	startOff := p.Pos.Offset
-
-	for !p.Eof() {
-		c := p.Peek()
-
-		if isNameStart(c) || isDigit(c) || c == '-' || c == '_' || c == '.' || c == ':' {
-			p.Advance()
-			continue
-		}
-
-		break
-	}
-
-	return p.Src[startOff:p.Pos.Offset]
-}
-
 func (p *bladeParser) parseAttrs(component bool) []*html.Attr {
 	var attrs []*html.Attr
 
 	for !p.Eof() {
-		p.skipTagWhitespace()
+		html.SkipTagWhitespace(&p.Cursor)
 
 		c := p.Peek()
 
@@ -1842,7 +1816,7 @@ func (p *bladeParser) parseAttr(component bool) *html.Attr {
 		return &html.Attr{Start: start, End: p.Pos, RawPhp: p.Src[start.Offset:p.Pos.Offset]}
 	}
 
-	if p.Peek() == '@' && isNameStart(p.PeekAt(1)) {
+	if p.Peek() == '@' && html.IsNameStart(p.PeekAt(1)) {
 		if p.atAlpineEventAttr() {
 			return p.parseAlpineEventAttr(start)
 		}
@@ -1881,7 +1855,7 @@ func (p *bladeParser) parseAttr(component bool) *html.Attr {
 		return attr
 	}
 
-	if p.skipToAttrEquals() {
+	if html.SkipToAttrEquals(&p.Cursor) {
 		eqStart := p.Pos
 		p.Advance()
 		attr.Eq = Span{Start: eqStart, End: p.Pos}
@@ -1900,56 +1874,10 @@ func (p *bladeParser) parseAttr(component bool) *html.Attr {
 // It stops short when the run that follows carries a quote character, because
 // that run is the head of the next attribute's quoted value (`@if= data-x="a
 // b"`): consuming it would swallow that attribute and orphan its closing quote.
-func (p *bladeParser) skipToAttrValue() {
-	save := p.Pos
-
-	for !p.Eof() && isSpaceByte(p.Peek()) {
-		p.Advance()
-	}
-
-	if p.Pos.Offset == save.Offset {
-		return
-	}
-
-	if c := p.Peek(); c == '"' || c == '\'' {
-		return
-	}
-
-	for i := p.Pos.Offset; i < len(p.Src); i++ {
-		if html.EndsUnquotedValue(p.Src, i) {
-			return
-		}
-
-		b := p.Src[i]
-
-		if b == '"' || b == '\'' {
-			p.Pos = save
-
-			return
-		}
-	}
-}
-
 // skipToAttrEquals consumes whitespace between an attribute name and an `=`,
 // per HTML5's after-attribute-name state, and reports whether one follows.
 // Nothing is consumed when it does not, so `<a href class=y>` still reads as two
 // attributes rather than swallowing the second as the first one's value.
-func (p *bladeParser) skipToAttrEquals() bool {
-	save := p.Pos
-
-	for !p.Eof() && isSpaceByte(p.Peek()) {
-		p.Advance()
-	}
-
-	if p.Peek() == '=' {
-		return true
-	}
-
-	p.Pos = save
-
-	return false
-}
-
 func (p *bladeParser) parseDirectiveAttr(start Position) *html.Attr {
 	p.Advance()
 	name := p.readDirectiveName()
@@ -1973,7 +1901,7 @@ func (p *bladeParser) atAlpineEventAttr() bool {
 	for off < len(p.Src) {
 		c := p.Src[off]
 
-		if isNameStart(c) || isDigit(c) || c == '-' || c == '_' {
+		if html.IsNameStart(c) || html.IsDigit(c) || c == '-' || c == '_' {
 			dashed = dashed || c == '-'
 			off++
 
@@ -2017,7 +1945,7 @@ func (p *bladeParser) parseAlpineEventAttr(start Position) *html.Attr {
 		Name:  p.Src[start.Offset:p.Pos.Offset],
 	}
 
-	if p.skipToAttrEquals() {
+	if html.SkipToAttrEquals(&p.Cursor) {
 		eqStart := p.Pos
 		p.Advance()
 		attr.Eq = Span{Start: eqStart, End: p.Pos}
@@ -2084,7 +2012,7 @@ func (p *bladeParser) echoOpensAttrName() bool {
 
 	p.readAttrName()
 
-	return p.skipToAttrEquals()
+	return html.SkipToAttrEquals(&p.Cursor)
 }
 
 // skipBladeRegion consumes a Blade echo, raw echo, comment or escaped echo when
@@ -2117,7 +2045,7 @@ func (p *bladeParser) skipBladeRegion() bool {
 }
 
 func (p *bladeParser) parseAttrValue(attr *html.Attr, component bool) {
-	p.skipToAttrValue()
+	html.SkipToAttrValue(&p.Cursor)
 
 	c := p.Peek()
 
@@ -2384,13 +2312,13 @@ func (p *bladeParser) atQuotedValueOutput() bool {
 		return true
 	}
 
-	if p.Peek() != '@' || !isNameStart(p.PeekAt(1)) {
+	if p.Peek() != '@' || !html.IsNameStart(p.PeekAt(1)) {
 		return false
 	}
 
 	off := p.Pos.Offset
 
-	return off == 0 || !isNameStart(p.Src[off-1]) && !isDigit(p.Src[off-1])
+	return off == 0 || !html.IsNameStart(p.Src[off-1]) && !html.IsDigit(p.Src[off-1])
 }
 
 // atPHPOpenTag reports whether the cursor is at a tag PHP opens: `<?=`, or
@@ -2400,7 +2328,7 @@ func (p *bladeParser) atPHPOpenTag() bool {
 		return true
 	}
 
-	return p.StartsWith("<?php") && (p.Pos.Offset+5 >= len(p.Src) || isSpaceByte(p.Src[p.Pos.Offset+5]))
+	return p.StartsWith("<?php") && (p.Pos.Offset+5 >= len(p.Src) || html.IsSpaceByte(p.Src[p.Pos.Offset+5]))
 }
 
 func (p *bladeParser) atQuotedDirectiveArgs() bool {
@@ -2417,12 +2345,12 @@ func (p *bladeParser) atUnquotedDirectiveArgs() bool {
 // spaced allows the blanks Blade's pattern takes before the `(`, which an
 // unquoted value cannot hold; -1 means no `(`.
 func (p *bladeParser) directiveParenAt(spaced bool) int {
-	if p.Peek() != '@' || !isNameStart(p.PeekAt(1)) {
+	if p.Peek() != '@' || !html.IsNameStart(p.PeekAt(1)) {
 		return -1
 	}
 
 	off := p.Pos.Offset + 1
-	for off < len(p.Src) && (isNameStart(p.Src[off]) || isDigit(p.Src[off])) {
+	for off < len(p.Src) && (html.IsNameStart(p.Src[off]) || html.IsDigit(p.Src[off])) {
 		off++
 	}
 
@@ -2493,12 +2421,6 @@ func (p *bladeParser) skipDirectiveArgs() {
 	_, rpEnd := p.findDirectiveClose(p.Pos.Offset)
 
 	for p.Pos.Offset < rpEnd && !p.Eof() {
-		p.Advance()
-	}
-}
-
-func (p *bladeParser) skipTagWhitespace() {
-	for !p.Eof() && isSpaceByte(p.Peek()) {
 		p.Advance()
 	}
 }

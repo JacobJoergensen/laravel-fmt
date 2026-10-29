@@ -237,7 +237,7 @@ func (e *emitter) emitEchoArgs(open, closeTag parser.Span, tokens []php.Token, a
 		lead := len(content) - len(bytes.TrimLeft(content, " \t\r\n"))
 		trimmed := bytes.TrimRight(content, " \t\r\n")
 
-		if e.emitArgsAsWritten(open.End.Offset+lead, open.End.Offset+len(trimmed), open.Start.Offset) {
+		if e.emitArgsAsWritten(tokens, true, open.End.Offset, open.End.Offset+lead, open.End.Offset+len(trimmed), open.Start.Offset) {
 			e.w.Write(closer)
 		} else {
 			e.w.Write(" " + closer)
@@ -282,7 +282,7 @@ func (e *emitter) emitEchoArgs(open, closeTag parser.Span, tokens []php.Token, a
 		e.w.Write(opener)
 		e.w.Space()
 		e.writeEchoArgs(built)
-		e.emitTrailingArgComment(content, open.End.Offset, lastEnd, true, " ", closer)
+		e.emitTrailingArgComment(content, tokens, open.End.Offset, lastEnd, true, " ", closer)
 
 		return
 	}
@@ -292,7 +292,7 @@ func (e *emitter) emitEchoArgs(open, closeTag parser.Span, tokens []php.Token, a
 	e.w.Newline()
 	e.writeEchoArgs(built)
 
-	if start, end, _ := phpfmt.TrailingArgComment(content, lastEnd); start != end {
+	if start, end, _ := phpfmt.TrailingArgComment(content, tokens, lastEnd); start != end {
 		e.w.Write(" ")
 		formatter.EmitVerbatimAtIndent(e.w, e.src, open.End.Offset+start, open.End.Offset+end)
 	}
@@ -394,11 +394,14 @@ func (e *emitter) emitDirective(n *parser.DirectiveNode) {
 
 		// A clause kept as written because of a comment can end in a line comment,
 		// which takes the rest of the line; the `)` has to start the next one.
-		if phpfmt.EndsInLineComment(clause) {
+		if phpfmt.LoopClauseEndsInLineComment(n.LoopSrc, n.Loop) {
 			e.w.Newline()
 		}
 	case n.Raw != nil:
-		e.emitArgsAsWritten(n.LParen.End.Offset, n.RParen.Start.Offset, n.At.Offset)
+		// A parsed Loop lands here only for a multi-line string, which blocks
+		// re-homing, and its parse rules out a trailing line comment, so it
+		// needs no RawTokens.
+		e.emitArgsAsWritten(n.RawTokens, n.RawLexed, n.LParen.End.Offset, n.LParen.End.Offset, n.RParen.Start.Offset, n.At.Offset)
 	default:
 		content := e.src[n.LParen.End.Offset:n.RParen.Start.Offset]
 		indentCols := e.w.IndentColumn()
@@ -416,7 +419,7 @@ func (e *emitter) emitDirective(n *parser.DirectiveNode) {
 		}
 
 		if phpfmt.SeparatorComment(n.Tokens, n.Args) {
-			e.emitArgsAsWritten(n.LParen.End.Offset, n.RParen.Start.Offset, n.At.Offset)
+			e.emitArgsAsWritten(n.Tokens, true, n.LParen.End.Offset, n.LParen.End.Offset, n.RParen.Start.Offset, n.At.Offset)
 			e.w.Write(")")
 
 			return
@@ -482,7 +485,7 @@ func (e *emitter) emitDirective(n *parser.DirectiveNode) {
 			lastEnd = n.Tokens[len(n.Tokens)-2].Span.End.Offset
 		}
 
-		e.emitTrailingArgComment(content, n.LParen.End.Offset, lastEnd, len(n.Args) > 0, "", ")")
+		e.emitTrailingArgComment(content, n.Tokens, n.LParen.End.Offset, lastEnd, len(n.Args) > 0, "", ")")
 
 		return
 	}
@@ -494,17 +497,18 @@ func (e *emitter) emitDirective(n *parser.DirectiveNode) {
 // multi-line region re-homes its continuation lines under indentAt's line,
 // unless a string literal spans a line (re-indenting it would corrupt the
 // value). A region ending inside a line comment takes the rest of its line, so
-// the closer has to move to the next one; it reports that break.
-func (e *emitter) emitArgsAsWritten(start, end, indentAt int) bool {
+// the closer has to move to the next one; it reports that break. tokens are
+// lexed from the source at offset base.
+func (e *emitter) emitArgsAsWritten(tokens []php.Token, lexed bool, base, start, end, indentAt int) bool {
 	raw := e.src[start:end]
 
-	if bytes.IndexByte(raw, '\n') >= 0 && phpfmt.RawDirectiveArgRehomable(raw) {
+	if bytes.IndexByte(raw, '\n') >= 0 && phpfmt.RawDirectiveArgRehomable(raw, tokens, lexed) {
 		formatter.EmitVerbatimRebased(e.w, e.src, start, end, indentAt)
 	} else {
 		e.w.WriteBytes(raw)
 	}
 
-	if phpfmt.EndsInLineComment(raw) {
+	if phpfmt.EndsInLineComment(tokens, end-base) {
 		e.w.Newline()
 
 		return true
@@ -517,8 +521,8 @@ func (e *emitter) emitArgsAsWritten(start, end, indentAt int) bool {
 // closer (a directive's `)`, an echo's `}}`), then the closer, which pad
 // separates from what precedes it on its line. A line comment runs to the end
 // of its line, so the closer moves to the next one.
-func (e *emitter) emitTrailingArgComment(content []byte, base, lastEnd int, spaced bool, pad, closer string) {
-	start, end, breaks := phpfmt.TrailingArgComment(content, lastEnd)
+func (e *emitter) emitTrailingArgComment(content []byte, tokens []php.Token, base, lastEnd int, spaced bool, pad, closer string) {
+	start, end, breaks := phpfmt.TrailingArgComment(content, tokens, lastEnd)
 
 	switch {
 	case start == end:
@@ -2407,6 +2411,10 @@ func sortAroundDirectives(theme *tailwind.Theme, inner []byte, pinFirst, pinLast
 // directiveEnd reports whether a Blade directive starts at token position i
 // and returns the offset just past it, including a balanced argument list
 // (`@if ($tab !== 'trash')`). Unbalanced arguments disqualify the token.
+//
+// This scan of a class value belongs here, not in the parser: whether `@md` or
+// `@container` is a directive or a Tailwind class takes the Tailwind registry,
+// which only the formatter holds.
 func directiveEnd(b []byte, i int) (int, bool) {
 	if b[i] != '@' {
 		return 0, false
