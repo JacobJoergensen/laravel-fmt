@@ -5,10 +5,13 @@
 * Improved an unclosed string, comment, block or Blade echo in CSS, JSON, XML, HTML or Blade to be reported where it opens instead of at the end of the file
 * Improved `init` to write only the schema reference, so the new `laravel-fmt.json` no longer overrides `.editorconfig`, Prettier, Pint or Mago
 * Improved `laravel-fmt lsp` to log why it exits when an editor ends it without a shutdown request
+* Optimized Markdown with nested lists and blockquotes, which formats about a third faster
 * Fixed an empty or whitespace-only PHP file being given a lone line break
 * Fixed a package nested in a Laravel app ignoring the app's `.prettierignore` and Pint excludes when formatted on save
 * Fixed `--stdin-filepath` relative to a subfolder applying HTML layout to a Laravel Boost guideline
 * Fixed `--stdin-filepath` holding `*` or `?` failing inside a project on Windows instead of formatting as it does outside one
+* Fixed Markdown with nested blockquotes and lines that continue a quote without `>` hanging for minutes
+* Fixed a PHP code block in Markdown with a lone CR in a string changing layout on a second run
 
 ## Version 0.6.0 (2026-10-28)
 * Added support for Mago's `extends`, so formatter settings from a shared Mago config are used

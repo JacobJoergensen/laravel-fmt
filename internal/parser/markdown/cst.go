@@ -143,12 +143,13 @@ func (d *LinkRefDef) Span() Span {
 	return Span{Start: d.Start, End: d.End}
 }
 
-// Blockquote is a `>` block; Content is the body with its markers stripped,
-// which ParseBody parses on its own.
+// Blockquote is a `>` block; Content is the body with its markers stripped and
+// Body is Content parsed, with offsets into Content.
 type Blockquote struct {
 	Start   Position
 	End     Position
 	Content []byte
+	Body    *File
 }
 
 // Span returns the source extent of the blockquote.
@@ -204,13 +205,15 @@ func (t *Table) Span() Span {
 	return Span{Start: t.Start, End: t.End}
 }
 
-// ListItem is one List entry; Loose is set only by a blank line directly
-// between two of Content's own blocks (mdast `spread`).
+// ListItem is one List entry; Body is Content parsed like a Blockquote's.
+// Loose is set only by a blank line directly between two of Body's own blocks
+// (mdast `spread`).
 type ListItem struct {
 	Start       Position
 	End         Position
 	MarkerBytes []byte
 	Content     []byte
+	Body        *File
 	Loose       bool
 }
 

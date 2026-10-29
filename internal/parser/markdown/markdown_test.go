@@ -13,9 +13,9 @@ func TestOnlyADocumentOpensWithFrontmatter(t *testing.T) {
 		t.Fatalf("Parse: block 0 is %T, want *Frontmatter", document.Blocks[0])
 	}
 
-	body, _ := ParseBody(src)
+	body := parse(src, false)
 	if _, ok := body.Blocks[0].(*ThematicBreak); !ok {
-		t.Fatalf("ParseBody: block 0 is %T, want *ThematicBreak", body.Blocks[0])
+		t.Fatalf("body: block 0 is %T, want *ThematicBreak", body.Blocks[0])
 	}
 }
 

@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
@@ -43,6 +44,12 @@ func TestFormatCodeBlocks(t *testing.T) {
 			crlf,
 			"```php\r\nif($ready){start();}\r\n```\r\n",
 			"```php\r\nif ($ready) {\r\n    start();\r\n}\r\n```\r\n",
+		},
+		{
+			"a lone CR in code is laid out as the line break the fence writes",
+			config.Default(),
+			"```php\n0('0000000\r" + strings.Repeat("0", 100) + "')%([])",
+			"```php\n0('0000000\n" + strings.Repeat("0", 100) + "')\n    % ([])\n```\n",
 		},
 	}
 

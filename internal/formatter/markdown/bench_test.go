@@ -41,6 +41,23 @@ func genTables(tables, rows int) []byte {
 	return []byte(sb.String())
 }
 
+// genNested nests lists and blockquotes, so the container bodies dominate.
+func genNested(sections int) []byte {
+	var sb strings.Builder
+
+	for i := range sections {
+		fmt.Fprintf(&sb, "- step %d covers the setup\n", i)
+		sb.WriteString("  - install the package and publish the config\n")
+		sb.WriteString("    - set the width\n")
+		sb.WriteString("      - run the formatter on a file\n\n")
+		sb.WriteString("      > a quoted note with a [link](https://example.com)\n")
+		sb.WriteString("      > > and a nested reply\n\n")
+		sb.WriteString("1. first ordered step\n2. second ordered step\n\n")
+	}
+
+	return []byte(sb.String())
+}
+
 // canonicalMarkdown returns src already formatted, so the benchmark measures
 // the steady-state re-format an editor runs on every save.
 func canonicalMarkdown(b *testing.B, src []byte) []byte {
@@ -64,6 +81,7 @@ func BenchmarkFormat(b *testing.B) {
 		{"typical", genMarkdown(8)},
 		{"large", genMarkdown(400)},
 		{"tables", genTables(40, 30)},
+		{"nested", genNested(100)},
 	}
 
 	for _, tc := range sizes {

@@ -2267,7 +2267,7 @@ func TestFormatKeepsCommentBeforeDirectiveCloser(t *testing.T) {
 	for name, body := range bodies {
 		for kind, comment := range comments {
 			t.Run(name+" "+kind, func(t *testing.T) {
-				src := []byte(fmt.Sprintf(body, comment))
+				src := fmt.Appendf(nil, body, comment)
 
 				got := mustFormat(t, src, config.Default())
 

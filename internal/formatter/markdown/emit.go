@@ -144,7 +144,7 @@ func listIndent(blocks []parser.Node, cfg *config.File, i, depth int, blankBetwe
 
 	if inMarkerRun {
 		lastItem := list.Items[len(list.Items)-1]
-		formatted := formatBody(lastItem.Content, cfg, lastItem.Loose, true, false)
+		formatted := formatBody(lastItem.Body, cfg, lastItem.Loose, true, false)
 		lastBody = bytes.TrimRight(formatted, "\n")
 	}
 
@@ -303,17 +303,10 @@ func holdsDashLine(content []byte) bool {
 }
 
 // formatBody re-emits a list item or blockquote body. It does not go through
-// Format because a body keeps its list's tightness and never holds frontmatter;
-// it returns content unchanged on parse error.
-func formatBody(content []byte, cfg *config.File, blankBetween, onMarkerLine, closeQuote bool) []byte {
-	file, errs := parser.ParseBody(content)
-
-	if formatter.JoinErrors(errs) != nil {
-		return content
-	}
-
+// Format because a body keeps its list's tightness and never holds frontmatter.
+func formatBody(body *parser.File, cfg *config.File, blankBetween, onMarkerLine, closeQuote bool) []byte {
 	w := formatter.NewWriter(cfg)
-	emitBlocks(w, file, cfg, blankBetween, false, onMarkerLine, closeQuote)
+	emitBlocks(w, body, cfg, blankBetween, false, onMarkerLine, closeQuote)
 
 	return w.Bytes()
 }
@@ -1030,7 +1023,7 @@ func linkDestNeedsAngles(dest []byte) bool {
 // constructs get the same canonical layout (`>    # H` becomes `> # H`). A blank
 // line emits as a lone `>` to avoid trailing whitespace.
 func emitBlockquote(w *formatter.Writer, b *parser.Blockquote, cfg *config.File, closeQuote bool) {
-	formatted := bytes.TrimRight(formatBody(b.Content, nestedConfig(cfg, len("> ")), true, false, false), "\n")
+	formatted := bytes.TrimRight(formatBody(b.Body, nestedConfig(cfg, len("> ")), true, false, false), "\n")
 
 	for i, line := range bytes.Split(formatted, []byte("\n")) {
 		if i > 0 {
@@ -1085,7 +1078,7 @@ func emitList(w *formatter.Writer, l *parser.List, cfg *config.File, clearAt int
 
 	for i, item := range l.Items {
 		last := i == len(l.Items)-1
-		bodies[i] = bytes.TrimRight(formatBody(item.Content, bodyCfg, item.Loose, true, closeQuote && last), "\n")
+		bodies[i] = bytes.TrimRight(formatBody(item.Body, bodyCfg, item.Loose, true, closeQuote && last), "\n")
 	}
 
 	pad := ""

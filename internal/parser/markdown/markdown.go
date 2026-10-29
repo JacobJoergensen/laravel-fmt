@@ -16,20 +16,19 @@ func Parse(src []byte) (*File, []Error) {
 		return &File{Src: src}, []Error{{Pos: pos, Msg: "maximum nesting depth exceeded"}}
 	}
 
-	return parse(src, true)
+	return parse(src, true), nil
 }
 
-// ParseBody parses the body of a list item or blockquote, which unlike a
+// parseBody parses the body of a list item or blockquote, which unlike a
 // document cannot open with frontmatter.
-func ParseBody(src []byte) (*File, []Error) {
-	return parse(src, false)
+func (p *parser) parseBody(src []byte) *File {
+	return &File{Src: src, Blocks: p.child(src, false).parseFile(false)}
 }
 
-func parse(src []byte, document bool) (*File, []Error) {
-	p := &parser{src: src, pos: Position{Line: 1, Column: 1}}
-	blocks := p.parseFile(document)
+func parse(src []byte, document bool) *File {
+	p := &parser{src: src, pos: Position{Line: 1, Column: 1}, lazy: map[[2]uint64]bool{}}
 
-	return &File{Src: src, Blocks: blocks}, nil
+	return &File{Src: src, Blocks: p.parseFile(document)}
 }
 
 func tooDeep(src []byte) (Position, bool) {

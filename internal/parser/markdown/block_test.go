@@ -1,6 +1,7 @@
 package markdown
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -468,6 +469,29 @@ func TestNestedListContentStaysInsideParentItem(t *testing.T) {
 	}
 }
 
+func TestContainerBodyIsParsedFromItsContent(t *testing.T) {
+	file, _ := Parse([]byte("- outer\n  > quoted\n"))
+
+	list, ok := file.Blocks[0].(*List)
+	if !ok {
+		t.Fatalf("block 0 is %T, want *List", file.Blocks[0])
+	}
+
+	item := list.Items[0]
+	if item.Body == nil || !bytes.Equal(item.Body.Src, item.Content) || len(item.Body.Blocks) != 2 {
+		t.Fatalf("item Body = %+v, want its Content %q parsed into two blocks", item.Body, item.Content)
+	}
+
+	quote, ok := item.Body.Blocks[1].(*Blockquote)
+	if !ok {
+		t.Fatalf("item Body block 1 is %T, want *Blockquote", item.Body.Blocks[1])
+	}
+
+	if quote.Body == nil || !bytes.Equal(quote.Body.Src, quote.Content) || len(quote.Body.Blocks) != 1 {
+		t.Fatalf("quote Body = %+v, want its Content %q parsed into one block", quote.Body, quote.Content)
+	}
+}
+
 func TestTablePromotion(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -709,6 +733,27 @@ func TestBlockquoteLazyContinuation(t *testing.T) {
 				t.Fatalf("block 1 is %s, want %s", gotType, wantType)
 			}
 		})
+	}
+}
+
+// Quotes that deepen and then drop back leave a lazy line at every level. Each
+// lazy check is answered once per document, so doubling the lines stays near
+// quadratic; asking again inside every check made the work exponential.
+func TestNestedLazyQuotesScaleNearQuadratically(t *testing.T) {
+	allocs := func(lines int) float64 {
+		var sb strings.Builder
+
+		for i := range lines {
+			sb.WriteString(strings.Repeat("> ", i%6) + "line\n")
+		}
+
+		src := []byte(sb.String())
+
+		return testing.AllocsPerRun(3, func() { Parse(src) })
+	}
+
+	if ratio := allocs(96) / allocs(48); ratio > 5 {
+		t.Fatalf("doubling the lines multiplied allocations by %.1f, want at most 5", ratio)
 	}
 }
 

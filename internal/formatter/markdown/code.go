@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
+	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
 	bladefmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/blade"
 	cssfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/css"
 	htmlfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/html"
@@ -63,7 +64,9 @@ func formatCode(b *parser.FencedCodeBlock, cfg *config.File) ([]byte, bool) {
 	codeCfg := *cfg
 	codeCfg.EndOfLine = config.EndOfLineLF
 
-	out, err := format(b.Content, &codeCfg)
+	// A lone CR ends a line in Markdown, which the fence emitter writes as one,
+	// so the code has to be formatted with that line break, not as a CR byte.
+	out, err := format(formatter.NormalizeLoneCR(b.Content), &codeCfg)
 	// Documentation is full of fragments that do not parse; those stay as written.
 	if err != nil {
 		return nil, false

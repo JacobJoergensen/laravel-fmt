@@ -1,6 +1,9 @@
 package markdown
 
-import "bytes"
+import (
+	"bytes"
+	"hash/maphash"
+)
 
 type parser struct {
 	src []byte
@@ -11,6 +14,21 @@ type parser struct {
 	// quadratic in the line's length.
 	peekOff, peekEnd, peekNext int
 	peeked                     bool
+
+	// probe skips container bodies and looseness: paragraphOpenAtEnd parses a
+	// body for every lazy line and reads only its last block's Content.
+	probe bool
+
+	// lazy memoizes paragraphOpenAtEnd by a 128-bit hash of its content and is
+	// shared by every parser of one document. Keying by the bytes themselves
+	// would hold as much memory as a hostile document costs in time.
+	lazy map[[2]uint64]bool
+}
+
+var lazySeeds = [2]maphash.Seed{maphash.MakeSeed(), maphash.MakeSeed()}
+
+func (p *parser) child(src []byte, probe bool) *parser {
+	return &parser{src: src, pos: Position{Line: 1, Column: 1}, probe: probe, lazy: p.lazy}
 }
 
 func (p *parser) eof() bool { return p.pos.Offset >= len(p.src) }
@@ -581,7 +599,7 @@ func (p *parser) parseBlockquote() Node {
 		if !lazyOpen {
 			body := bytes.Join(contentLines, []byte{'\n'})
 
-			if !paragraphOpenAtEnd(append(body, '\n')) {
+			if !p.paragraphOpenAtEnd(append(body, '\n')) {
 				break
 			}
 		}
@@ -594,11 +612,12 @@ func (p *parser) parseBlockquote() Node {
 
 	content := bytes.Join(contentLines, []byte{'\n'})
 
-	return &Blockquote{
-		Start:   startPos,
-		End:     endPos,
-		Content: content,
+	quote := &Blockquote{Start: startPos, End: endPos, Content: content}
+	if !p.probe {
+		quote.Body = p.parseBody(content)
 	}
+
+	return quote
 }
 
 func (p *parser) parseList(firstMarker []byte, ordered bool, startNum, firstContentColumn int) Node {
@@ -863,18 +882,32 @@ func stripIndentColumns(line []byte, n int) []byte {
 // a heading or a nested container, and laziness reaches a paragraph open inside
 // one of those. content must end with a newline, so that a trailing blank line
 // stays distinguishable from the last line's own terminator.
-func paragraphOpenAtEnd(content []byte) bool {
-	file, _ := ParseBody(content)
+//
+// The answer is memoized: a probe parses nested containers whose own lazy
+// lines probe again, which without it is exponential in the line count.
+func (p *parser) paragraphOpenAtEnd(content []byte) bool {
+	key := [2]uint64{maphash.Bytes(lazySeeds[0], content), maphash.Bytes(lazySeeds[1], content)}
+	if open, ok := p.lazy[key]; ok {
+		return open
+	}
 
-	if len(file.Blocks) == 0 {
+	probe := p.child(content, true)
+	open := probe.lastParagraphOpen(probe.parseFile(false), len(content))
+	p.lazy[key] = open
+
+	return open
+}
+
+func (p *parser) lastParagraphOpen(blocks []Node, end int) bool {
+	if len(blocks) == 0 {
 		return false
 	}
 
-	last := file.Blocks[len(file.Blocks)-1]
+	last := blocks[len(blocks)-1]
 
 	// A block that stops short of the end was closed by what follows it: a
 	// blockquote emptied by `>` on its own line ends there, whatever its content.
-	if last.Span().End.Offset < len(content) {
+	if last.Span().End.Offset < end {
 		return false
 	}
 
@@ -886,7 +919,7 @@ func paragraphOpenAtEnd(content []byte) bool {
 		// paragraph is still open under one and the next line joins it lazily.
 		return true
 	case *Blockquote:
-		return paragraphOpenAtEnd(append(last.Content, '\n'))
+		return p.paragraphOpenAtEnd(append(last.Content, '\n'))
 	case *List:
 		if len(last.Items) == 0 {
 			return false
@@ -894,7 +927,7 @@ func paragraphOpenAtEnd(content []byte) bool {
 
 		tail := last.Items[len(last.Items)-1]
 
-		return paragraphOpenAtEnd(append(tail.Content, '\n'))
+		return p.paragraphOpenAtEnd(append(tail.Content, '\n'))
 	}
 
 	return false
@@ -986,7 +1019,7 @@ func (p *parser) parseListItem(marker []byte, contentColumn int) (*ListItem, boo
 				// was what made it a paragraph.
 				body := bytes.Join(contentLines, []byte{'\n'})
 
-				if !paragraphOpenAtEnd(append(body, '\n')) {
+				if !p.paragraphOpenAtEnd(append(body, '\n')) {
 					break
 				}
 			}
@@ -1008,27 +1041,23 @@ func (p *parser) parseListItem(marker []byte, contentColumn int) (*ListItem, boo
 	}
 
 	content := bytes.Join(contentLines, []byte{'\n'})
-	loose := hadInternalBlank && blankSeparatesBlocks(content)
+	item := &ListItem{Start: startPos, End: endPos, MarkerBytes: marker, Content: content}
+	if !p.probe {
+		item.Body = p.parseBody(content)
+		item.Loose = hadInternalBlank && blankSeparatesBlocks(item.Body)
+	}
 
-	return &ListItem{
-		Start:       startPos,
-		End:         endPos,
-		MarkerBytes: marker,
-		Content:     content,
-		Loose:       loose,
-	}, loose
+	return item, item.Loose
 }
 
-// blankSeparatesBlocks reports whether content holds a blank line directly
+// blankSeparatesBlocks reports whether body holds a blank line directly
 // between two of its own blocks, which is what makes a list item loose
 // (CommonMark). A blank line that belongs to a child, one between the items of a
 // nested list or one held inside a fence, leaves the item tight. Consecutive
 // blocks are adjacent, so a gap between two spans is exactly a blank run.
-func blankSeparatesBlocks(content []byte) bool {
-	file, _ := ParseBody(content)
-
-	for i := 1; i < len(file.Blocks); i++ {
-		if file.Blocks[i].Span().Start.Offset > file.Blocks[i-1].Span().End.Offset {
+func blankSeparatesBlocks(body *File) bool {
+	for i := 1; i < len(body.Blocks); i++ {
+		if body.Blocks[i].Span().Start.Offset > body.Blocks[i-1].Span().End.Offset {
 			return true
 		}
 	}
