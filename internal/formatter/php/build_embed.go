@@ -247,7 +247,7 @@ func DirectiveArgFlatWidth(src []byte, tokens []parser.Token, expr parser.Expr, 
 
 	b := &builder{src: src, cfg: cfg, tokens: tokens, comments: commentOffsets(tokens), crLiterals: crLiteralOffsets(tokens), embed: true, noAuthorBreaks: true}
 
-	return document.FlatWidth(b.expr(expr), cfg.TabWidth)
+	return document.FlatWidth(b.expr(expr), cfg.IndentWidth)
 }
 
 // BuildDirectiveArgWrapped lays an over-wide argument out against the width left at
@@ -266,7 +266,7 @@ func BuildDirectiveArgWrapped(src []byte, tokens []parser.Token, expr parser.Exp
 		crLiterals:   crLiteralOffsets(tokens),
 		rehomeSlices: true, embed: true, noAuthorBreaks: true,
 	}
-	b.depth = indentCols / max(cfg.TabWidth, 1)
+	b.depth = indentCols / max(cfg.IndentWidth, 1)
 
 	// A condition holding comments goes out as written, in one piece: a piece
 	// kept verbatim inside a rebuilt one would be re-homed from its own first
@@ -275,7 +275,7 @@ func BuildDirectiveArgWrapped(src []byte, tokens []parser.Token, expr parser.Exp
 	if b.spanHasComment(span) || span.Start.Offset < expr.Span().Start.Offset {
 		return stripLineCR(document.Print(b.verbatim(span), document.Options{
 			PrintWidth: max(cfg.PrintWidth-indentCols, 1),
-			TabWidth:   cfg.TabWidth,
+			TabWidth:   cfg.IndentWidth,
 			UseTabs:    cfg.UseTabs(),
 			EOL:        cfg.EOL(),
 		}))
@@ -287,7 +287,7 @@ func BuildDirectiveArgWrapped(src []byte, tokens []parser.Token, expr parser.Exp
 
 	out := document.Print(doc, document.Options{
 		PrintWidth: max(cfg.PrintWidth-indentCols, 1),
-		TabWidth:   cfg.TabWidth,
+		TabWidth:   cfg.IndentWidth,
 		UseTabs:    cfg.UseTabs(),
 		EOL:        cfg.EOL(),
 	})
@@ -536,7 +536,7 @@ func LoopClauseFlatWidth(src []byte, tokens []parser.Token, stmt parser.Stmt, cf
 
 	b := &builder{src: src, cfg: cfg, tokens: tokens, comments: commentOffsets(tokens), crLiterals: crLiteralOffsets(tokens), embed: true, noAuthorBreaks: true}
 
-	return document.FlatWidth(build(b), cfg.TabWidth)
+	return document.FlatWidth(build(b), cfg.IndentWidth)
 }
 
 // loopClause returns the builder for what a foreach's or a for's parentheses
@@ -560,17 +560,17 @@ func buildWidth(src []byte, tokens []parser.Token, cfg *config.File, indentCols,
 
 	// The column the host will re-home this fragment at, so a `=>` alignment's block
 	// test measures the real line rather than one starting at zero.
-	b.depth = indentCols / max(cfg.TabWidth, 1)
+	b.depth = indentCols / max(cfg.IndentWidth, 1)
 
 	doc := b.keepComments(b.withLeadingComments(span), build(b), nil)
-	for range indentCols / max(cfg.TabWidth, 1) {
+	for range indentCols / max(cfg.IndentWidth, 1) {
 		doc = document.Indent(doc)
 	}
 
 	out := document.Print(doc, document.Options{
 		PrintWidth:  width,
 		StartColumn: startCol,
-		TabWidth:    cfg.TabWidth,
+		TabWidth:    cfg.IndentWidth,
 		UseTabs:     cfg.UseTabs(),
 		EOL:         cfg.EOL(),
 	})
@@ -594,7 +594,7 @@ func BuildStmts(src []byte, tokens []parser.Token, stmts []parser.Stmt, cfg *con
 	b := &builder{src: src, cfg: columnZeroConfig(cfg, indentCols), tokens: tokens, comments: commentOffsets(tokens), crLiterals: crLiteralOffsets(tokens), rehomeSlices: true, embed: true}
 
 	b.headerSpacing = startsWithOpenTag(stmts) && !containsInlineHTML(stmts)
-	b.depth = indentCols / max(cfg.TabWidth, 1)
+	b.depth = indentCols / max(cfg.IndentWidth, 1)
 
 	stmts = b.preprocessUseRuns(stmts)
 
@@ -623,7 +623,7 @@ func BuildStmts(src []byte, tokens []parser.Token, stmts []parser.Stmt, cfg *con
 
 	return document.Print(body, document.Options{
 		PrintWidth: width,
-		TabWidth:   cfg.TabWidth,
+		TabWidth:   cfg.IndentWidth,
 		UseTabs:    cfg.UseTabs(),
 		EOL:        cfg.EOL(),
 	})
@@ -634,7 +634,7 @@ func BuildStmts(src []byte, tokens []parser.Token, stmts []parser.Stmt, cfg *con
 // whole indent levels, so the columns past the last level come off its width,
 // or its predictions run that many columns wider than the printer.
 func columnZeroConfig(cfg *config.File, indentCols int) *config.File {
-	rest := indentCols % max(cfg.TabWidth, 1)
+	rest := indentCols % max(cfg.IndentWidth, 1)
 	if rest == 0 {
 		return cfg
 	}

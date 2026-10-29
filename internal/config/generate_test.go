@@ -43,7 +43,7 @@ func TestSkeletonOverridesNothing(t *testing.T) {
 
 	detected := Default()
 	detected.PrintWidth = 99
-	detected.TabWidth = 2
+	detected.IndentWidth = 2
 
 	loaded, err := LoadFile(detected, path)
 	if err != nil {

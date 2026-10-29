@@ -332,7 +332,7 @@ func applyMago(cfg *config.File, m *Mago) {
 	}
 
 	if effective.TabWidth != nil && *effective.TabWidth > 0 {
-		cfg.TabWidth = *effective.TabWidth
+		cfg.IndentWidth = *effective.TabWidth
 	}
 
 	if effective.UseTabs != nil {

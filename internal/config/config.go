@@ -106,7 +106,7 @@ type File struct {
 
 	PrintWidth  int    `json:"printWidth"`
 	IndentStyle string `json:"indentStyle"`
-	TabWidth    int    `json:"indentWidth"`
+	IndentWidth int    `json:"indentWidth"`
 	EndOfLine   string `json:"endOfLine"`
 	QuoteStyle  string `json:"quoteStyle"`
 
@@ -122,7 +122,7 @@ type File struct {
 	TailwindTheme *tailwind.Theme `json:"-"`
 
 	// IndentExplicit is set when EditorConfig or laravel-fmt.json sets the
-	// indent; JSON and YAML then use TabWidth instead of their own default.
+	// indent; JSON and YAML then use IndentWidth instead of their own default.
 	IndentExplicit bool `json:"-"`
 }
 
@@ -301,7 +301,7 @@ func Default() *File {
 		},
 		PrintWidth:  120,
 		IndentStyle: IndentStyleSpace,
-		TabWidth:    4,
+		IndentWidth: 4,
 		EndOfLine:   EndOfLineLF,
 		QuoteStyle:  QuoteStyleAuto,
 		PHP: PHP{
@@ -334,7 +334,7 @@ func (f *File) validate() error {
 		return errors.New("printWidth must be >= 1")
 	}
 
-	if f.TabWidth < 1 {
+	if f.IndentWidth < 1 {
 		return errors.New("indentWidth must be >= 1")
 	}
 

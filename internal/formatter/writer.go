@@ -50,7 +50,7 @@ type snapshot struct {
 // NewWriter returns an empty Writer configured from cfg.
 func NewWriter(cfg *config.File) *Writer {
 	return &Writer{
-		tabWidth:   cfg.TabWidth,
+		tabWidth:   cfg.IndentWidth,
 		useTabs:    cfg.UseTabs(),
 		eol:        cfg.EOL(),
 		printWidth: cfg.PrintWidth,

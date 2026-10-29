@@ -253,7 +253,7 @@ func (e *emitter) emitEchoArgs(open, closeTag parser.Span, tokens []php.Token, a
 
 	bodyCols := e.w.IndentColumn()
 	if lines {
-		bodyCols += e.cfg.TabWidth
+		bodyCols += e.cfg.IndentWidth
 	}
 
 	var buf [2][]byte
@@ -454,7 +454,7 @@ func (e *emitter) emitDirective(n *parser.DirectiveNode) {
 				col = 0
 			}
 
-			col += formatter.VisualWidthBytes(args[i][nl+1:], e.cfg.TabWidth) + len(", ")
+			col += formatter.VisualWidthBytes(args[i][nl+1:], e.cfg.IndentWidth) + len(", ")
 		}
 
 		if e.emitWrappedCondition(n, content, args, indentCols) {
@@ -578,7 +578,7 @@ func (e *emitter) emitWrappedCondition(n *parser.DirectiveNode, content []byte, 
 
 	// A condition that fits on its own line still takes this form when the hugged
 	// one would break: hugged, it breaks at whatever operator reaches the edge.
-	body := phpfmt.BuildDirectiveArgWrapped(content, n.Tokens, n.Args[0], e.cfg, indentCols+e.cfg.TabWidth)
+	body := phpfmt.BuildDirectiveArgWrapped(content, n.Tokens, n.Args[0], e.cfg, indentCols+e.cfg.IndentWidth)
 	if bytes.IndexByte(body, '\n') < 0 && bytes.IndexByte(args[0], '\n') < 0 {
 		return false
 	}
@@ -606,7 +606,7 @@ func (e *emitter) emitWrappedLoop(n *parser.DirectiveNode) bool {
 		return false
 	}
 
-	indentCols := e.w.IndentColumn() + e.cfg.TabWidth
+	indentCols := e.w.IndentColumn() + e.cfg.IndentWidth
 
 	e.w.Indent()
 	e.w.Newline()
@@ -4244,7 +4244,7 @@ func (e *emitter) sourceColumnAt(offset int) int {
 	column := 0
 	for _, r := range string(line) {
 		if r == '\t' {
-			column += e.cfg.TabWidth
+			column += e.cfg.IndentWidth
 
 			continue
 		}

@@ -131,7 +131,7 @@ func TestDirectiveArgWrappedLayoutDependsOnlyOnTheWidthLeft(t *testing.T) {
 	args, tokens, _ := parser.ParseCallArgs(src)
 
 	for indent := range 101 {
-		rest := indent % config.Default().TabWidth
+		rest := indent % config.Default().IndentWidth
 
 		narrower := config.Default()
 		narrower.PrintWidth -= rest

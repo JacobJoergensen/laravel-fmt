@@ -657,10 +657,10 @@ func applyEditorConfigSection(cfg *config.File, section EditorConfigSection, use
 	if !userKeys["indentWidth"] {
 		switch {
 		case section.IndentSize > 0:
-			cfg.TabWidth = section.IndentSize
+			cfg.IndentWidth = section.IndentSize
 			cfg.IndentExplicit = true
 		case section.TabWidth > 0:
-			cfg.TabWidth = section.TabWidth
+			cfg.IndentWidth = section.TabWidth
 			cfg.IndentExplicit = true
 		}
 	}

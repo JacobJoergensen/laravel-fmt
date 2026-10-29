@@ -13,7 +13,7 @@ func TestExplicitIndentWins(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.IndentExplicit = true
-	cfg.TabWidth = 4
+	cfg.IndentWidth = 4
 
 	out, err := Format("settings.json", src, cfg)
 	if err != nil {
@@ -29,7 +29,7 @@ func TestConventionWithoutExplicitIndent(t *testing.T) {
 	src := []byte("{\n\"a\": 1,\n\"b\": 2\n}\n")
 
 	cfg := config.Default()
-	cfg.TabWidth = 4
+	cfg.IndentWidth = 4
 
 	out, err := Format("settings.json", src, cfg)
 	if err != nil {

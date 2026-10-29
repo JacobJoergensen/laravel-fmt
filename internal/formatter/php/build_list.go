@@ -89,7 +89,7 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 				arrayFlattened = arrayFlattened || isArrayArg(args[i])
 			}
 
-			leadingWidth += document.FlatWidth(leading[i], b.cfg.TabWidth) + len(", ")
+			leadingWidth += document.FlatWidth(leading[i], b.cfg.IndentWidth) + len(", ")
 		}
 
 		// Behind a flattened leading array, a last array that fits its own line
@@ -152,7 +152,7 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 			whole := false
 
 			if soleOverflows {
-				opener, _ = document.BrokenPrefixWidth(sole, b.cfg.TabWidth)
+				opener, _ = document.BrokenPrefixWidth(sole, b.cfg.IndentWidth)
 			} else {
 				opener = b.measureWidth(func() int { return b.hugOpenerWidth(args[last]) })
 
@@ -164,7 +164,7 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 						return document.ForcedBreakWidth
 					}
 
-					return document.FlatWidth(doc, b.cfg.TabWidth)
+					return document.FlatWidth(doc, b.cfg.IndentWidth)
 				})
 			}
 
@@ -334,7 +334,7 @@ func (b *builder) closureUseOpenerWidth(c *parser.ClosureExpr, signature int) in
 // leadingArgIsMinor reports whether a first-argument hug would carry no more
 // than the arguments riding its closer; the hug pays only for a payload.
 func (b *builder) leadingArgIsMinor(args []parser.Expr) bool {
-	limit := b.cfg.PrintWidth - (b.depth+1)*b.cfg.TabWidth - len(",")
+	limit := b.cfg.PrintWidth - (b.depth+1)*b.cfg.IndentWidth - len(",")
 	trailing := 0
 
 	for i, a := range args {
@@ -344,7 +344,7 @@ func (b *builder) leadingArgIsMinor(args []parser.Expr) bool {
 				return limit + 1
 			}
 
-			return document.FlatWidth(doc, b.cfg.TabWidth)
+			return document.FlatWidth(doc, b.cfg.IndentWidth)
 		})
 
 		if width > limit {
@@ -356,7 +356,7 @@ func (b *builder) leadingArgIsMinor(args []parser.Expr) bool {
 		}
 	}
 
-	first := b.measureWidth(func() int { return document.FlatWidth(b.expr(args[0]), b.cfg.TabWidth) })
+	first := b.measureWidth(func() int { return document.FlatWidth(b.expr(args[0]), b.cfg.IndentWidth) })
 
 	return first <= trailing
 }
@@ -372,7 +372,7 @@ func (b *builder) leadingArgStaysUnhugged(args []parser.Expr) bool {
 }
 
 func (b *builder) argsFitTheirOwnLines(args []parser.Expr) bool {
-	limit := b.cfg.PrintWidth - (b.depth+1)*b.cfg.TabWidth - len(",")
+	limit := b.cfg.PrintWidth - (b.depth+1)*b.cfg.IndentWidth - len(",")
 
 	for _, a := range args {
 		width := b.measureWidth(func() int {
@@ -381,7 +381,7 @@ func (b *builder) argsFitTheirOwnLines(args []parser.Expr) bool {
 				return limit + 1
 			}
 
-			return document.FlatWidth(doc, b.cfg.TabWidth)
+			return document.FlatWidth(doc, b.cfg.IndentWidth)
 		})
 
 		if width > limit {
@@ -480,7 +480,7 @@ const hugCalleeReserve = 20
 // hugHeadBudget is the width a hugged head may occupy: the print width less the
 // call's indent and an allowance for the callee.
 func (b *builder) hugHeadBudget() int {
-	return max(b.cfg.PrintWidth-b.depth*b.cfg.TabWidth-hugCalleeReserve, 1)
+	return max(b.cfg.PrintWidth-b.depth*b.cfg.IndentWidth-hugCalleeReserve, 1)
 }
 
 func (b *builder) trailingArgsHug(lead parser.Expr, trailing []parser.Expr) bool {
@@ -488,14 +488,14 @@ func (b *builder) trailingArgsHug(lead parser.Expr, trailing []parser.Expr) bool
 		return false
 	}
 
-	width := b.depth*b.cfg.TabWidth + hugCloserWidth(lead) + len(");")
+	width := b.depth*b.cfg.IndentWidth + hugCloserWidth(lead) + len(");")
 
 	for _, a := range trailing {
 		if isHuggableArg(a) {
 			return false
 		}
 
-		w := b.measureWidth(func() int { return document.FlatWidth(b.expr(a), b.cfg.TabWidth) })
+		w := b.measureWidth(func() int { return document.FlatWidth(b.expr(a), b.cfg.IndentWidth) })
 		if w >= document.ForcedBreakWidth {
 			return false
 		}
@@ -705,9 +705,9 @@ func (b *builder) arrowBinaryHeadWidth(arrow *parser.ArrowFnExpr) int {
 	head, _ := flattenBinary(run)
 
 	return b.measureWidth(func() int {
-		prefix := document.FlatWidth(b.expr(arrow), b.cfg.TabWidth) - document.FlatWidth(b.expr(arrow.Body), b.cfg.TabWidth)
+		prefix := document.FlatWidth(b.expr(arrow), b.cfg.IndentWidth) - document.FlatWidth(b.expr(arrow.Body), b.cfg.IndentWidth)
 
-		return prefix + document.FlatWidth(b.expr(head), b.cfg.TabWidth)
+		return prefix + document.FlatWidth(b.expr(head), b.cfg.IndentWidth)
 	})
 }
 
@@ -717,7 +717,7 @@ func (b *builder) soleArgOverflows(arg *document.Doc, linkArgs bool) bool {
 		depth++
 	}
 
-	return depth*b.cfg.TabWidth+document.FlatWidth(arg, b.cfg.TabWidth)+len(",") > b.cfg.PrintWidth
+	return depth*b.cfg.IndentWidth+document.FlatWidth(arg, b.cfg.IndentWidth)+len(",") > b.cfg.PrintWidth
 }
 
 // isHuggableArrowBody reports whether an arrow function's body wraps cleanly
@@ -940,7 +940,7 @@ func (b *builder) array(n *parser.ArrayExpr) *document.Doc {
 			width := b.measureWidth(func() int {
 				value := b.expr(n.Elements[i].Value)
 				breaks = document.CanBreak(value)
-				first, _ = document.BrokenPrefixWidth(value, b.cfg.TabWidth)
+				first, _ = document.BrokenPrefixWidth(value, b.cfg.IndentWidth)
 
 				return b.oneLineWidth(value)
 			})
@@ -1203,15 +1203,15 @@ func (b *builder) breaksAfterArrow(e parser.Expr, key, value *document.Doc) bool
 		return false
 	}
 
-	width := document.FlatWidth(value, b.cfg.TabWidth) + len(",")
-	indent := b.depth * b.cfg.TabWidth
-	head := indent + document.FlatWidth(key, b.cfg.TabWidth) + len(" => ")
+	width := document.FlatWidth(value, b.cfg.IndentWidth) + len(",")
+	indent := b.depth * b.cfg.IndentWidth
+	head := indent + document.FlatWidth(key, b.cfg.IndentWidth) + len(" => ")
 
 	if head+width <= b.cfg.PrintWidth {
 		return false
 	}
 
-	if binary && indent+b.cfg.TabWidth+width <= b.cfg.PrintWidth {
+	if binary && indent+b.cfg.IndentWidth+width <= b.cfg.PrintWidth {
 		return true
 	}
 
@@ -1220,14 +1220,14 @@ func (b *builder) breaksAfterArrow(e parser.Expr, key, value *document.Doc) bool
 		return false
 	}
 
-	opener, _ := document.BrokenPrefixWidth(value, b.cfg.TabWidth)
+	opener, _ := document.BrokenPrefixWidth(value, b.cfg.IndentWidth)
 
 	// A first operand that is itself a binary opens whole: a break inside it
 	// would split a tighter operator (`=== $id` left under `&&`).
 	if binary {
 		if first, _ := flattenBinary(run); isBinaryExpr(first) {
 			firstWidth := b.measureWidth(func() int {
-				return document.FlatWidth(b.expr(first), b.cfg.TabWidth)
+				return document.FlatWidth(b.expr(first), b.cfg.IndentWidth)
 			})
 			opener = max(opener, firstWidth)
 		}

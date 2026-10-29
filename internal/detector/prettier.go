@@ -495,7 +495,7 @@ func applyPrettierOptions(cfg *config.File, o prettierOptions, userKeys map[stri
 	}
 
 	if o.TabWidth != nil && *o.TabWidth > 0 && !userKeys["indentWidth"] {
-		cfg.TabWidth = *o.TabWidth
+		cfg.IndentWidth = *o.TabWidth
 		cfg.IndentExplicit = true
 	}
 

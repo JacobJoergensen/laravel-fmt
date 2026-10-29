@@ -169,7 +169,7 @@ func BuildFile(file *parser.File, cfg *config.File) []byte {
 
 	out := document.Print(document.Concat(parts...), document.Options{
 		PrintWidth: cfg.PrintWidth,
-		TabWidth:   cfg.TabWidth,
+		TabWidth:   cfg.IndentWidth,
 		UseTabs:    cfg.UseTabs(),
 		EOL:        cfg.EOL(),
 	})
@@ -277,7 +277,7 @@ func (b *builder) buildMixed(file *parser.File) []byte {
 	// and removes the flat/broken flip that shared line would otherwise cause.
 	out := document.Print(document.Concat(parts...), document.Options{
 		PrintWidth: inlineWidth,
-		TabWidth:   b.cfg.TabWidth,
+		TabWidth:   b.cfg.IndentWidth,
 		UseTabs:    b.cfg.UseTabs(),
 		EOL:        b.cfg.EOL(),
 	})

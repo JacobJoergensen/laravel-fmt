@@ -22,8 +22,8 @@ func TestApplyPrettierOverridesEditorConfig(t *testing.T) {
 		Prettier:     &Prettier{Options: prettierOptions{TabWidth: new(4)}},
 	})
 
-	if cfg.TabWidth != 4 {
-		t.Errorf("TabWidth = %d, want 4 (Prettier overrides EditorConfig)", cfg.TabWidth)
+	if cfg.IndentWidth != 4 {
+		t.Errorf("IndentWidth = %d, want 4 (Prettier overrides EditorConfig)", cfg.IndentWidth)
 	}
 }
 
@@ -48,8 +48,8 @@ func TestResolveFileConfigEditorConfigUnsetFallsBackToDefaults(t *testing.T) {
 		t.Errorf("IndentStyle = %q, want default %q", got.IndentStyle, base.IndentStyle)
 	}
 
-	if got.TabWidth != base.TabWidth {
-		t.Errorf("TabWidth = %d, want default %d", got.TabWidth, base.TabWidth)
+	if got.IndentWidth != base.IndentWidth {
+		t.Errorf("IndentWidth = %d, want default %d", got.IndentWidth, base.IndentWidth)
 	}
 
 	if got.EndOfLine != base.EndOfLine {
@@ -83,8 +83,8 @@ func TestResolveFileConfigAppliesPrettierOverrideToARelativePath(t *testing.T) {
 		t.Fatalf("ResolveFileConfig: %v", err)
 	}
 
-	if got.TabWidth != 8 {
-		t.Errorf("TabWidth = %d, want 8 from the override matching resources/css/app.css", got.TabWidth)
+	if got.IndentWidth != 8 {
+		t.Errorf("IndentWidth = %d, want 8 from the override matching resources/css/app.css", got.IndentWidth)
 	}
 }
 
@@ -102,8 +102,8 @@ func TestResolveFileConfigUnsetIndentSizeKeepsTabWidth(t *testing.T) {
 		t.Fatalf("ResolveFileConfig: %v", err)
 	}
 
-	if got.TabWidth != 8 {
-		t.Errorf("TabWidth = %d, want 8 (tab_width stands once indent_size is cleared)", got.TabWidth)
+	if got.IndentWidth != 8 {
+		t.Errorf("IndentWidth = %d, want 8 (tab_width stands once indent_size is cleared)", got.IndentWidth)
 	}
 
 	if !got.IndentExplicit {
@@ -122,8 +122,8 @@ func TestApplyMagoWinsOverPint(t *testing.T) {
 		t.Errorf("FunctionBraceStyle = %q, want %q (Mago wins over Pint)", cfg.PHP.FunctionBraceStyle, config.BraceStyleSameLine)
 	}
 
-	if cfg.TabWidth != 2 {
-		t.Errorf("TabWidth = %d, want 2 (Mago drupal wins)", cfg.TabWidth)
+	if cfg.IndentWidth != 2 {
+		t.Errorf("IndentWidth = %d, want 2 (Mago drupal wins)", cfg.IndentWidth)
 	}
 }
 
@@ -354,13 +354,13 @@ func TestFileLayoutFollowsThePrecedenceChain(t *testing.T) {
 			"unset indent_size drops to the default",
 			map[string]string{".editorconfig": "root = true\n[*]\nindent_size = 2\n[*.php]\nindent_size = unset\n"},
 			"a.php",
-			func(c config.File) (any, any) { return c.TabWidth, def.TabWidth },
+			func(c config.File) (any, any) { return c.IndentWidth, def.IndentWidth },
 		},
 		{
 			"unset indent_size leaves other files their width",
 			map[string]string{".editorconfig": "root = true\n[*]\nindent_size = 2\n[*.php]\nindent_size = unset\n"},
 			"a.json",
-			func(c config.File) (any, any) { return c.TabWidth, 2 },
+			func(c config.File) (any, any) { return c.IndentWidth, 2 },
 		},
 		{
 			"unset indent_style drops to the default",
@@ -387,7 +387,7 @@ func TestFileLayoutFollowsThePrecedenceChain(t *testing.T) {
 				".prettierrc":   `{"tabWidth": 3, "plugins": ["@prettier/plugin-php"]}`,
 			},
 			"a.php",
-			func(c config.File) (any, any) { return c.TabWidth, 3 },
+			func(c config.File) (any, any) { return c.IndentWidth, 3 },
 		},
 		{
 			"Mago outranks a file's EditorConfig section",
@@ -396,7 +396,7 @@ func TestFileLayoutFollowsThePrecedenceChain(t *testing.T) {
 				"mago.toml":     "[formatter]\ntab-width = 8\nprint-width = 100\n",
 			},
 			"a.php",
-			func(c config.File) (any, any) { return [2]int{c.TabWidth, c.PrintWidth}, [2]int{8, 100} },
+			func(c config.File) (any, any) { return [2]int{c.IndentWidth, c.PrintWidth}, [2]int{8, 100} },
 		},
 		{
 			"Mago outranks the global section",
@@ -405,7 +405,7 @@ func TestFileLayoutFollowsThePrecedenceChain(t *testing.T) {
 				"mago.toml":     "[formatter]\ntab-width = 8\n",
 			},
 			"a.php",
-			func(c config.File) (any, any) { return c.TabWidth, 8 },
+			func(c config.File) (any, any) { return c.IndentWidth, 8 },
 		},
 		{
 			"laravel-fmt.json outranks every detected source",
@@ -415,13 +415,13 @@ func TestFileLayoutFollowsThePrecedenceChain(t *testing.T) {
 				"laravel-fmt.json": `{"indentWidth": 6}`,
 			},
 			"a.php",
-			func(c config.File) (any, any) { return c.TabWidth, 6 },
+			func(c config.File) (any, any) { return c.IndentWidth, 6 },
 		},
 		{
 			"indent_size = tab defers to tab_width",
 			map[string]string{".editorconfig": "root = true\n[*]\nindent_size = 2\n[*.php]\nindent_size = tab\ntab_width = 3\n"},
 			"a.php",
-			func(c config.File) (any, any) { return c.TabWidth, 3 },
+			func(c config.File) (any, any) { return c.IndentWidth, 3 },
 		},
 	}
 
@@ -520,7 +520,7 @@ func TestPrettierShapesOnlyTheLanguagesItFormats(t *testing.T) {
 	const jsOnly = `{"tabWidth": 2, "printWidth": 80, "singleQuote": false}`
 
 	def := config.Default()
-	layout := func(c config.File) any { return [3]any{c.TabWidth, c.PrintWidth, c.QuoteStyle} }
+	layout := func(c config.File) any { return [3]any{c.IndentWidth, c.PrintWidth, c.QuoteStyle} }
 
 	tests := []struct {
 		name  string
@@ -528,9 +528,9 @@ func TestPrettierShapesOnlyTheLanguagesItFormats(t *testing.T) {
 		file  string
 		want  any
 	}{
-		{"a JS-only config leaves PHP alone", map[string]string{".prettierrc": jsOnly}, "a.php", [3]any{def.TabWidth, def.PrintWidth, def.QuoteStyle}},
+		{"a JS-only config leaves PHP alone", map[string]string{".prettierrc": jsOnly}, "a.php", [3]any{def.IndentWidth, def.PrintWidth, def.QuoteStyle}},
 		{"a JS-only config shapes CSS", map[string]string{".prettierrc": jsOnly}, "a.css", [3]any{2, 80, config.QuoteStyleDouble}},
-		{"a JS-only config leaves Blade alone", map[string]string{".prettierrc": jsOnly}, "a.blade.php", [3]any{def.TabWidth, def.PrintWidth, def.QuoteStyle}},
+		{"a JS-only config leaves Blade alone", map[string]string{".prettierrc": jsOnly}, "a.blade.php", [3]any{def.IndentWidth, def.PrintWidth, def.QuoteStyle}},
 		{
 			"the PHP plugin brings PHP in",
 			map[string]string{".prettierrc": `{"tabWidth": 2, "printWidth": 80, "singleQuote": false, "plugins": ["@prettier/plugin-php"]}`},
@@ -568,12 +568,12 @@ func TestPintFixesTheLayoutOfThePHPItFormats(t *testing.T) {
 	}
 
 	php := resolveLayout(t, files, "a.php")
-	if got, want := [3]any{php.TabWidth, php.IndentStyle, php.EndOfLine}, [3]any{4, config.IndentStyleSpace, config.EndOfLineLF}; got != want {
+	if got, want := [3]any{php.IndentWidth, php.IndentStyle, php.EndOfLine}, [3]any{4, config.IndentStyleSpace, config.EndOfLineLF}; got != want {
 		t.Fatalf("PHP layout = %v, want Pint's %v", got, want)
 	}
 
 	json := resolveLayout(t, files, "a.json")
-	if got, want := [3]any{json.TabWidth, json.IndentStyle, json.EndOfLine}, [3]any{3, config.IndentStyleTab, config.EndOfLineCRLF}; got != want {
+	if got, want := [3]any{json.IndentWidth, json.IndentStyle, json.EndOfLine}, [3]any{3, config.IndentStyleTab, config.EndOfLineCRLF}; got != want {
 		t.Fatalf("JSON layout = %v, want Prettier and EditorConfig's %v", got, want)
 	}
 }

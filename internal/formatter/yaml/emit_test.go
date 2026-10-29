@@ -193,7 +193,7 @@ func TestBlockScalarBodySitsOneIndentUnderItsOwner(t *testing.T) {
 
 func TestDashMappingKeysLineUpAtAnyIndentWidth(t *testing.T) {
 	cfg := config.Default()
-	cfg.TabWidth = 4
+	cfg.IndentWidth = 4
 	cfg.IndentExplicit = true
 
 	src := "steps:\n  - name: a\n    uses: b\n    with:\n      k: v\n    run: |\n      echo\n  - |\n    text\n"

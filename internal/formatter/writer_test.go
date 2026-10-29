@@ -15,7 +15,7 @@ const (
 func writerCfg() *config.File {
 	cfg := config.Default()
 	cfg.PrintWidth = 20
-	cfg.TabWidth = 4
+	cfg.IndentWidth = 4
 	cfg.IndentStyle = config.IndentStyleSpace
 	cfg.EndOfLine = config.EndOfLineLF
 
@@ -84,7 +84,7 @@ func TestIndentUsesTabsOrSpaces(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := writerCfg()
 			cfg.IndentStyle = config.IndentStyleFor(tc.useTabs)
-			cfg.TabWidth = tc.tabWidth
+			cfg.IndentWidth = tc.tabWidth
 
 			w := NewWriter(cfg)
 

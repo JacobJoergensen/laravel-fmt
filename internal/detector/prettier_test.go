@@ -318,8 +318,8 @@ func TestApplyPrettierMapsOptions(t *testing.T) {
 		t.Errorf("PrintWidth = %d, want 100", cfg.PrintWidth)
 	}
 
-	if cfg.TabWidth != 2 {
-		t.Errorf("TabWidth = %d, want 2", cfg.TabWidth)
+	if cfg.IndentWidth != 2 {
+		t.Errorf("IndentWidth = %d, want 2", cfg.IndentWidth)
 	}
 
 	if !cfg.IndentExplicit {
@@ -409,8 +409,8 @@ func TestPrettierConfigComesFromTheNearestDirectory(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveLayout(t, tc.files, tc.file).TabWidth; got != tc.want {
-				t.Fatalf("TabWidth = %d, want %d", got, tc.want)
+			if got := resolveLayout(t, tc.files, tc.file).IndentWidth; got != tc.want {
+				t.Fatalf("IndentWidth = %d, want %d", got, tc.want)
 			}
 		})
 	}

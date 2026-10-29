@@ -348,8 +348,8 @@ func TestApplyMagoDrupalPreset(t *testing.T) {
 	cfg := config.Default()
 	Apply(cfg, Context{Mago: &Mago{Preset: magoPresetDrupal}})
 
-	if cfg.TabWidth != 2 {
-		t.Errorf("TabWidth = %d, want 2", cfg.TabWidth)
+	if cfg.IndentWidth != 2 {
+		t.Errorf("IndentWidth = %d, want 2", cfg.IndentWidth)
 	}
 
 	for _, tc := range []struct {

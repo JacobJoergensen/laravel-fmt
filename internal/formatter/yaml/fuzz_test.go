@@ -23,7 +23,7 @@ func FuzzFormat(f *testing.F) {
 func FuzzFormatWideIndent(f *testing.F) {
 	formattertest.AddFuzzSeeds(f, ".yml")
 	cfg := config.Default()
-	cfg.TabWidth = 4
+	cfg.IndentWidth = 4
 	cfg.IndentExplicit = true
 
 	f.Fuzz(func(t *testing.T, src []byte) {

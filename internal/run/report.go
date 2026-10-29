@@ -143,7 +143,7 @@ func (r *runner) explainConfig(projects *detector.Resolver, cfg *config.File) er
 		value any
 	}{
 		{"printWidth", cfg.PrintWidth},
-		{"indentWidth", cfg.TabWidth},
+		{"indentWidth", cfg.IndentWidth},
 		{"indentStyle", cfg.IndentStyle},
 		{"endOfLine", cfg.EndOfLine},
 		{"quoteStyle", cfg.QuoteStyle},

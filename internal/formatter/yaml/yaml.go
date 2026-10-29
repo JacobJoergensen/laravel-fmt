@@ -38,7 +38,7 @@ func Format(src []byte, cfg *config.File) ([]byte, error) {
 	yamlCfg.IndentStyle = config.IndentStyleSpace
 
 	if !cfg.IndentExplicit {
-		yamlCfg.TabWidth = indentWidth
+		yamlCfg.IndentWidth = indentWidth
 	}
 
 	w := formatter.NewWriter(&yamlCfg)

@@ -428,7 +428,7 @@ func (b *builder) insideBlockComment(offset int) bool {
 func (b *builder) sourceColumn(start, offset int) int {
 	prefix := document.Text(string(b.src[start:offset]))
 
-	column := document.FlatWidth(prefix, b.cfg.TabWidth)
+	column := document.FlatWidth(prefix, b.cfg.IndentWidth)
 	if start == 0 {
 		column += b.firstLineColumn
 	}

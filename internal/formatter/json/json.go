@@ -23,7 +23,7 @@ import (
 )
 
 // Format returns src formatted as JSON, or nil and an error joining every parse
-// diagnostic. It always indents with spaces, by cfg.TabWidth when the indent
+// diagnostic. It always indents with spaces, by cfg.IndentWidth when the indent
 // was set explicitly and by the file's convention otherwise.
 func Format(filename string, src []byte, cfg *config.File) ([]byte, error) {
 	parse := parser.Parse
@@ -41,7 +41,7 @@ func Format(filename string, src []byte, cfg *config.File) ([]byte, error) {
 	jsonCfg.IndentStyle = config.IndentStyleSpace
 
 	if !cfg.IndentExplicit {
-		jsonCfg.TabWidth = indentWidth(filename)
+		jsonCfg.IndentWidth = indentWidth(filename)
 	}
 
 	w := formatter.NewWriter(&jsonCfg)

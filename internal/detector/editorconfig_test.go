@@ -563,7 +563,7 @@ func TestEditorConfigIndentSetsExplicit(t *testing.T) {
 		t.Fatal("IndentExplicit not set when EditorConfig provides indent_size")
 	}
 
-	if cfg.TabWidth != 2 {
-		t.Fatalf("TabWidth = %d, want 2", cfg.TabWidth)
+	if cfg.IndentWidth != 2 {
+		t.Fatalf("IndentWidth = %d, want 2", cfg.IndentWidth)
 	}
 }

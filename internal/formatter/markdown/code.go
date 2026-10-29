@@ -148,7 +148,7 @@ func wrapInSnippetClass(members []byte) []byte {
 }
 
 func outdent(src []byte, cfg *config.File) []byte {
-	level := []byte(strings.Repeat(" ", cfg.TabWidth))
+	level := []byte(strings.Repeat(" ", cfg.IndentWidth))
 	if cfg.UseTabs() {
 		level = []byte("\t")
 	}

@@ -201,7 +201,7 @@ func (b *builder) postfix(e parser.Expr, stmtLevel bool) *document.Doc {
 
 		document.HasForcedBreak(glued)
 
-		if width, _ := document.OpeningLineWidth(glued, b.cfg.TabWidth); b.depth*b.cfg.TabWidth+b.chainStmtLead+width <= b.cfg.PrintWidth {
+		if width, _ := document.OpeningLineWidth(glued, b.cfg.IndentWidth); b.depth*b.cfg.IndentWidth+b.chainStmtLead+width <= b.cfg.PrintWidth {
 			return glued
 		}
 
@@ -262,12 +262,12 @@ func (b *builder) headCallArgsBreak(headDoc *document.Doc, links []chainLink, i 
 		return false
 	}
 
-	base := b.depth * b.cfg.TabWidth
-	movedDown := base + b.cfg.TabWidth + document.FlatWidth(l.doc, b.cfg.TabWidth)
+	base := b.depth * b.cfg.IndentWidth
+	movedDown := base + b.cfg.IndentWidth + document.FlatWidth(l.doc, b.cfg.IndentWidth)
 
-	onHead := base + b.chainStmtLead + document.FlatWidth(headDoc, b.cfg.TabWidth)
+	onHead := base + b.chainStmtLead + document.FlatWidth(headDoc, b.cfg.IndentWidth)
 	for _, prev := range links[:i+1] {
-		onHead += document.FlatWidth(prev.doc, b.cfg.TabWidth)
+		onHead += document.FlatWidth(prev.doc, b.cfg.IndentWidth)
 	}
 
 	return onHead > b.cfg.PrintWidth && movedDown > b.cfg.PrintWidth
@@ -288,7 +288,7 @@ func (b *builder) tailRidesCloser(headDoc *document.Doc, links []chainLink, head
 			return false
 		}
 
-		tailWidth += document.FlatWidth(l.doc, b.cfg.TabWidth)
+		tailWidth += document.FlatWidth(l.doc, b.cfg.IndentWidth)
 	}
 
 	closer, broke := b.closerLineWidth(headDoc, links[:last+1])
@@ -305,11 +305,11 @@ func (b *builder) tailRidesCloser(headDoc *document.Doc, links []chainLink, head
 		}
 
 		for _, l := range links[headEnd+1 : last+1] {
-			closer += document.FlatWidth(l.doc, b.cfg.TabWidth)
+			closer += document.FlatWidth(l.doc, b.cfg.IndentWidth)
 		}
 	}
 
-	width := b.depth*b.cfg.TabWidth + closer + tailWidth
+	width := b.depth*b.cfg.IndentWidth + closer + tailWidth
 	if stmtLevel {
 		width += b.chainStmtTail
 	}
@@ -366,7 +366,7 @@ func (b *builder) closerLineWidth(headDoc *document.Doc, links []chainLink) (int
 	for _, l := range slices.Backward(links) {
 		document.HasForcedBreak(l.doc)
 
-		w, broke := document.ClosingLineWidth(l.doc, b.cfg.TabWidth)
+		w, broke := document.ClosingLineWidth(l.doc, b.cfg.IndentWidth)
 		width += w
 
 		if broke {
@@ -376,7 +376,7 @@ func (b *builder) closerLineWidth(headDoc *document.Doc, links []chainLink) (int
 
 	document.HasForcedBreak(headDoc)
 
-	w, broke := document.ClosingLineWidth(headDoc, b.cfg.TabWidth)
+	w, broke := document.ClosingLineWidth(headDoc, b.cfg.IndentWidth)
 
 	return width + w, broke
 }
@@ -438,10 +438,10 @@ func (b *builder) pestChain(headDoc *document.Doc, links []chainLink, stmtLevel 
 		}
 
 		line := document.Concat(glued...)
-		movedDown := (b.depth+1)*b.cfg.TabWidth + document.FlatWidth(line, b.cfg.TabWidth) + tail
+		movedDown := (b.depth+1)*b.cfg.IndentWidth + document.FlatWidth(line, b.cfg.IndentWidth) + tail
 
 		if stmtLevel && len(idx) == 2 && (document.HasForcedBreak(line) || movedDown > b.cfg.PrintWidth) {
-			if width, _ := document.BrokenPrefixWidth(line, b.cfg.TabWidth); lead+width <= b.cfg.PrintWidth {
+			if width, _ := document.BrokenPrefixWidth(line, b.cfg.IndentWidth); lead+width <= b.cfg.PrintWidth {
 				return line, true
 			}
 		}
@@ -456,7 +456,7 @@ func (b *builder) pestChain(headDoc *document.Doc, links []chainLink, stmtLevel 
 			tail = b.chainStmtTail
 		}
 
-		lead := (b.depth+1)*b.cfg.TabWidth + document.FlatWidth(links[idx[0]].doc, b.cfg.TabWidth)
+		lead := (b.depth+1)*b.cfg.IndentWidth + document.FlatWidth(links[idx[0]].doc, b.cfg.IndentWidth)
 		segment, _ := matchers(idx, lead, tail)
 		rest = append(rest, document.SoftLine(), links[idx[0]].doc, segment)
 	}
@@ -471,7 +471,7 @@ func (b *builder) pestChain(headDoc *document.Doc, links []chainLink, stmtLevel 
 
 	head := document.Concat(headParts...)
 	first := segments[0][headRun:]
-	lead := b.depth*b.cfg.TabWidth + b.chainStmtLead + document.FlatWidth(head, b.cfg.TabWidth)
+	lead := b.depth*b.cfg.IndentWidth + b.chainStmtLead + document.FlatWidth(head, b.cfg.IndentWidth)
 	// A glued first matcher belongs to the head line, so its block closes at the
 	// statement's indent and only the pairs after it are indented.
 	firstDoc, glued := matchers(first, lead, 0)
@@ -707,7 +707,7 @@ func (b *builder) qualifiesTrailingBreak(e parser.Expr, stmtLevel bool) bool {
 			tail += b.chainStmtTail
 		}
 
-		if (b.depth+1)*b.cfg.TabWidth+b.linkOpenerWidth(mem, call)+tail > b.cfg.PrintWidth {
+		if (b.depth+1)*b.cfg.IndentWidth+b.linkOpenerWidth(mem, call)+tail > b.cfg.PrintWidth {
 			return false
 		}
 
@@ -723,12 +723,12 @@ func (b *builder) qualifiesTrailingBreak(e parser.Expr, stmtLevel bool) bool {
 	// on its real line: a head that breaks there anyway reads back as
 	// author-broken, and the next pass glues the call to its closer.
 	width := b.measureWidth(func() int {
-		return document.FlatWidth(b.headWithoutConcatBreaks(head), b.cfg.TabWidth)
+		return document.FlatWidth(b.headWithoutConcatBreaks(head), b.cfg.IndentWidth)
 	})
 
-	limit := b.cfg.PrintWidth - 2*b.cfg.TabWidth
+	limit := b.cfg.PrintWidth - 2*b.cfg.IndentWidth
 	if stmtLevel {
-		limit = b.cfg.PrintWidth - b.depth*b.cfg.TabWidth - b.chainStmtLead
+		limit = b.cfg.PrintWidth - b.depth*b.cfg.IndentWidth - b.chainStmtLead
 	}
 
 	return width <= limit
@@ -784,7 +784,7 @@ func (b *builder) subscriptsWidth(whole, inner parser.Expr) int {
 
 			width += len("[]")
 			if s.Index != nil {
-				width += document.FlatWidth(b.expr(s.Index), b.cfg.TabWidth)
+				width += document.FlatWidth(b.expr(s.Index), b.cfg.IndentWidth)
 			}
 
 			cur = s.Array
@@ -812,10 +812,10 @@ func (b *builder) movedLinkHugsOrFits(mem *parser.MemberExpr, call *parser.CallE
 		args, hug := b.argListHug(call.Args, withTrailingComma)
 		hugged = hug
 
-		return document.FlatWidth(document.Concat(b.tok(mem.Arrow), b.expr(mem.Property), args), b.cfg.TabWidth)
+		return document.FlatWidth(document.Concat(b.tok(mem.Arrow), b.expr(mem.Property), args), b.cfg.IndentWidth)
 	})
 
-	return hugged || (b.depth+1)*b.cfg.TabWidth+width+tail <= b.cfg.PrintWidth
+	return hugged || (b.depth+1)*b.cfg.IndentWidth+width+tail <= b.cfg.PrintWidth
 }
 
 // onlyLastCallBreaks keeps the head and every link before the last one flat, so
@@ -842,7 +842,7 @@ func (b *builder) lastCallBreaksAnyway(e parser.Expr, headDoc *document.Doc, lin
 		return false
 	}
 
-	if (b.depth+1)*b.cfg.TabWidth+b.linkOpenerWidth(mem, call)+b.chainStmtTail <= b.cfg.PrintWidth {
+	if (b.depth+1)*b.cfg.IndentWidth+b.linkOpenerWidth(mem, call)+b.chainStmtTail <= b.cfg.PrintWidth {
 		return false
 	}
 
@@ -860,21 +860,21 @@ func (b *builder) lastCallBreaksAnyway(e parser.Expr, headDoc *document.Doc, lin
 	glued := b.measureWidth(func() int {
 		width := 0
 		for _, d := range head {
-			width += document.FlatWidth(d, b.cfg.TabWidth)
+			width += document.FlatWidth(d, b.cfg.IndentWidth)
 		}
 
 		opener := document.Concat(b.tok(mem.Arrow), b.expr(mem.Property))
 
-		return width + document.FlatWidth(opener, b.cfg.TabWidth) + len("(")
+		return width + document.FlatWidth(opener, b.cfg.IndentWidth) + len("(")
 	})
 
-	return b.depth*b.cfg.TabWidth+b.chainStmtLead+glued <= b.cfg.PrintWidth
+	return b.depth*b.cfg.IndentWidth+b.chainStmtLead+glued <= b.cfg.PrintWidth
 }
 
 func (b *builder) linkOpenerWidth(mem *parser.MemberExpr, call *parser.CallExpr) int {
 	if len(call.Args) == 0 {
 		return b.measureWidth(func() int {
-			return document.FlatWidth(document.Concat(b.tok(mem.Arrow), b.expr(mem.Property)), b.cfg.TabWidth) + len("()")
+			return document.FlatWidth(document.Concat(b.tok(mem.Arrow), b.expr(mem.Property)), b.cfg.IndentWidth) + len("()")
 		})
 	}
 
@@ -885,10 +885,10 @@ func (b *builder) linkOpenerWidth(mem *parser.MemberExpr, call *parser.CallExpr)
 
 	if arr, isArray := last.(*parser.ArrayExpr); isArray && len(arr.Elements) > 0 {
 		return b.measureWidth(func() int {
-			width := document.FlatWidth(document.Concat(b.tok(mem.Arrow), b.expr(mem.Property)), b.cfg.TabWidth) + len("(")
+			width := document.FlatWidth(document.Concat(b.tok(mem.Arrow), b.expr(mem.Property)), b.cfg.IndentWidth) + len("(")
 
 			for _, a := range call.Args[:len(call.Args)-1] {
-				width += document.FlatWidth(b.expr(a), b.cfg.TabWidth) + len(", ")
+				width += document.FlatWidth(b.expr(a), b.cfg.IndentWidth) + len(", ")
 			}
 
 			return width + b.hugOpenerWidth(call.Args[len(call.Args)-1])
@@ -910,7 +910,7 @@ func (b *builder) linkOpenerWidth(mem *parser.MemberExpr, call *parser.CallExpr)
 		defer func() { b.noConcatBreaks = savedConcat }()
 
 		link := document.Concat(b.tok(mem.Arrow), b.expr(mem.Property), b.argList(call.Args, withTrailingComma))
-		width, _ := document.FlatPrefixWidth(link, b.cfg.TabWidth)
+		width, _ := document.FlatPrefixWidth(link, b.cfg.IndentWidth)
 
 		return width
 	})
@@ -1041,10 +1041,10 @@ func (b *builder) arrayLinkFitsAlone(call *parser.CallExpr, stmtLevel bool) bool
 			return b.cfg.PrintWidth
 		}
 
-		return document.FlatWidth(doc, b.cfg.TabWidth)
+		return document.FlatWidth(doc, b.cfg.IndentWidth)
 	})
 
-	return (b.depth+1)*b.cfg.TabWidth+link+b.chainStmtTail <= b.cfg.PrintWidth
+	return (b.depth+1)*b.cfg.IndentWidth+link+b.chainStmtTail <= b.cfg.PrintWidth
 }
 
 // unhuggingHelps reports whether one argument per line beats the hug. It does
@@ -1055,22 +1055,22 @@ func (b *builder) unhuggingHelps(call *parser.CallExpr) bool {
 	if shortListClosure(last) != nil {
 		width := b.measureWidth(func() int { return b.hugOpenerWidth(last) })
 
-		return (b.depth+1)*b.cfg.TabWidth+width <= b.cfg.PrintWidth
+		return (b.depth+1)*b.cfg.IndentWidth+width <= b.cfg.PrintWidth
 	}
 
 	if len(call.Args) > 1 {
 		return true
 	}
 
-	width := b.measureWidth(func() int { return document.FlatWidth(b.expr(call.Args[0]), b.cfg.TabWidth) })
+	width := b.measureWidth(func() int { return document.FlatWidth(b.expr(call.Args[0]), b.cfg.IndentWidth) })
 
 	if arrow, ok := call.Args[0].(*parser.ArrowFnExpr); ok {
 		if head := b.arrowBinaryHeadWidth(arrow); head > 0 {
-			return (b.depth+1)*b.cfg.TabWidth+head <= b.cfg.PrintWidth
+			return (b.depth+1)*b.cfg.IndentWidth+head <= b.cfg.PrintWidth
 		}
 	}
 
-	return (b.depth+1)*b.cfg.TabWidth+width+len(",") <= b.cfg.PrintWidth
+	return (b.depth+1)*b.cfg.IndentWidth+width+len(",") <= b.cfg.PrintWidth
 }
 
 func hugsInsideOut(call *parser.CallExpr) bool {
@@ -1214,13 +1214,13 @@ func (b *builder) compactBlockChainFits(e parser.Expr, chain []chainLink) bool {
 			if !breaks {
 				d := b.expr(call)
 				breaks = document.HasForcedBreak(d) ||
-					b.depth*b.cfg.TabWidth+b.chainStmtLead+document.FlatWidth(d, b.cfg.TabWidth) > b.cfg.PrintWidth
+					b.depth*b.cfg.IndentWidth+b.chainStmtLead+document.FlatWidth(d, b.cfg.IndentWidth) > b.cfg.PrintWidth
 			}
 
 			w := 0
 
 			for cur, i := outer, 0; i < len(links); i++ {
-				w += document.FlatWidth(document.Concat(b.tok(links[i].Arrow), b.expr(links[i].Property), b.argList(cur.Args, withTrailingComma)), b.cfg.TabWidth)
+				w += document.FlatWidth(document.Concat(b.tok(links[i].Arrow), b.expr(links[i].Property), b.argList(cur.Args, withTrailingComma)), b.cfg.IndentWidth)
 				cur, _ = links[i].Object.(*parser.CallExpr)
 			}
 
@@ -1237,7 +1237,7 @@ func (b *builder) compactBlockChainFits(e parser.Expr, chain []chainLink) bool {
 		return false
 	}
 
-	closer := b.depth*b.cfg.TabWidth + hugCloserWidth(call.Args[len(call.Args)-1]) + len(")") + tail + b.chainStmtTail
+	closer := b.depth*b.cfg.IndentWidth + hugCloserWidth(call.Args[len(call.Args)-1]) + len(")") + tail + b.chainStmtTail
 
 	return closer <= b.cfg.PrintWidth
 }
@@ -1275,9 +1275,9 @@ func (b *builder) arrayHugOpener(e parser.Expr, headDoc *document.Doc, links []c
 		return 0, false
 	}
 
-	width := document.FlatWidth(headDoc, b.cfg.TabWidth)
+	width := document.FlatWidth(headDoc, b.cfg.IndentWidth)
 	for _, l := range links[:len(links)-1] {
-		width += document.FlatWidth(l.doc, b.cfg.TabWidth)
+		width += document.FlatWidth(l.doc, b.cfg.IndentWidth)
 	}
 
 	mem, _ := call.Callee.(*parser.MemberExpr)
@@ -1422,7 +1422,7 @@ func (b *builder) arrowFitsAlone(args []parser.Expr, lead, indent, tail int) boo
 				return 0
 			}
 
-			line += document.FlatWidth(d, b.cfg.TabWidth) + len(", ")
+			line += document.FlatWidth(d, b.cfg.IndentWidth) + len(", ")
 		}
 
 		// An arrow holding a break of its own (an author-broken list, a block
@@ -1432,7 +1432,7 @@ func (b *builder) arrowFitsAlone(args []parser.Expr, lead, indent, tail int) boo
 			return 0
 		}
 
-		width := document.FlatWidth(doc, b.cfg.TabWidth)
+		width := document.FlatWidth(doc, b.cfg.IndentWidth)
 		fits = line+width+len(")")+tail > b.cfg.PrintWidth && indent+width+len(",") <= b.cfg.PrintWidth
 
 		return 0
@@ -1442,14 +1442,14 @@ func (b *builder) arrowFitsAlone(args []parser.Expr, lead, indent, tail int) boo
 }
 
 func (b *builder) stmtArrowFitsAlone(call *parser.CallExpr) bool {
-	callee := b.measureWidth(func() int { return document.FlatWidth(b.expr(call.Callee), b.cfg.TabWidth) })
+	callee := b.measureWidth(func() int { return document.FlatWidth(b.expr(call.Callee), b.cfg.IndentWidth) })
 	if callee >= document.ForcedBreakWidth {
 		return false
 	}
 
-	lead := b.depth*b.cfg.TabWidth + b.chainStmtLead + callee
+	lead := b.depth*b.cfg.IndentWidth + b.chainStmtLead + callee
 
-	return b.arrowFitsAlone(call.Args, lead, (b.depth+1)*b.cfg.TabWidth, b.chainStmtTail)
+	return b.arrowFitsAlone(call.Args, lead, (b.depth+1)*b.cfg.IndentWidth, b.chainStmtTail)
 }
 
 // hugLineWidth is the width of the line call's hugged last argument opens, from
@@ -1469,7 +1469,7 @@ func (b *builder) hugLineWidth(call *parser.CallExpr) (int, bool) {
 	width := b.measureWidth(func() int {
 		// A callee that renders multi-line (`it(…, function () {…})->with`) puts
 		// the hug after its own closer, at a column no flat width tells.
-		w := document.FlatWidth(b.expr(call.Callee), b.cfg.TabWidth)
+		w := document.FlatWidth(b.expr(call.Callee), b.cfg.IndentWidth)
 		if w >= document.ForcedBreakWidth {
 			hugs = false
 		}
@@ -1479,7 +1479,7 @@ func (b *builder) hugLineWidth(call *parser.CallExpr) (int, bool) {
 		for _, a := range call.Args[:last] {
 			d := b.expr(a)
 			hugs = hugs && !document.CanBreak(d)
-			w += document.FlatWidth(d, b.cfg.TabWidth) + len(", ")
+			w += document.FlatWidth(d, b.cfg.IndentWidth) + len(", ")
 		}
 
 		// A binary arrow body opens with its first operand, as argList hugs it.
@@ -1492,11 +1492,11 @@ func (b *builder) hugLineWidth(call *parser.CallExpr) (int, bool) {
 		return w + b.hugOpenerWidth(call.Args[last])
 	})
 
-	return b.depth*b.cfg.TabWidth + b.chainStmtLead + width, hugs
+	return b.depth*b.cfg.IndentWidth + b.chainStmtLead + width, hugs
 }
 
 func (b *builder) hugOpenerWidth(arg parser.Expr) int {
-	tab := b.cfg.TabWidth
+	tab := b.cfg.IndentWidth
 
 	switch v := arg.(type) {
 	case *parser.NamedArgExpr:
@@ -1548,7 +1548,7 @@ func (b *builder) callOpenerWidth(callee int, args []parser.Expr) int {
 	for _, a := range args {
 		d := b.expr(a)
 		forced = forced || document.HasForcedBreak(d)
-		flat += document.FlatWidth(d, b.cfg.TabWidth) + len(", ")
+		flat += document.FlatWidth(d, b.cfg.IndentWidth) + len(", ")
 	}
 
 	// A call that breaks anyway (an author-broken array) is not short.
@@ -1563,7 +1563,7 @@ func (b *builder) callOpenerWidth(callee int, args []parser.Expr) int {
 		for _, a := range args[:last] {
 			d := b.expr(a)
 			simple = simple && !document.CanBreak(d)
-			width += document.FlatWidth(d, b.cfg.TabWidth) + len(", ")
+			width += document.FlatWidth(d, b.cfg.IndentWidth) + len(", ")
 		}
 
 		hugged := width + b.hugOpenerWidth(args[last])
@@ -1615,12 +1615,12 @@ func (b *builder) closureUseListAbsorbs(head parser.Expr, call *parser.CallExpr)
 	}
 
 	width := b.measureWidth(func() int {
-		line := document.FlatWidth(document.Concat(b.expr(head), b.tok(mem.Arrow), b.expr(mem.Property)), b.cfg.TabWidth)
+		line := document.FlatWidth(document.Concat(b.expr(head), b.tok(mem.Arrow), b.expr(mem.Property)), b.cfg.IndentWidth)
 
 		return line + len("(") + b.closureUseOpenerWidth(c, b.hugOpenerWidth(c))
 	})
 
-	return b.depth*b.cfg.TabWidth+b.chainStmtLead+width <= b.cfg.PrintWidth
+	return b.depth*b.cfg.IndentWidth+b.chainStmtLead+width <= b.cfg.PrintWidth
 }
 
 func chainHeadWithArgs(e parser.Expr) (parser.Expr, []parser.Expr, bool) {
@@ -1777,12 +1777,12 @@ func (b *builder) flattenChain(e parser.Expr) (parser.Expr, []chainLink) {
 				property := b.expr(c.Property)
 				// A laddered link sits one level in at the least, so a hug that
 				// overflows there overflows wherever the link prints.
-				if ladders && b.arrowFitsAlone(n.Args, (b.depth+1)*b.cfg.TabWidth+len("->")+len(method), (b.depth+2)*b.cfg.TabWidth, 0) {
+				if ladders && b.arrowFitsAlone(n.Args, (b.depth+1)*b.cfg.IndentWidth+len("->")+len(method), (b.depth+2)*b.cfg.IndentWidth, 0) {
 					b.noHugNext = true
 				}
 
 				if ladders {
-					b.hugLeadNext = (b.depth+1)*b.cfg.TabWidth + len("->") + document.FlatWidth(property, b.cfg.TabWidth)
+					b.hugLeadNext = (b.depth+1)*b.cfg.IndentWidth + len("->") + document.FlatWidth(property, b.cfg.IndentWidth)
 				}
 
 				b.linkArgsNext = ladders
@@ -1816,7 +1816,7 @@ func (b *builder) flattenChain(e parser.Expr) (parser.Expr, []chainLink) {
 				}
 
 				if b.stmtChain {
-					b.hugLeadNext = b.depth*b.cfg.TabWidth + b.chainStmtLead + b.flatSourceWidth(n.Callee.Span().Start.Offset, n.Callee.Span().End.Offset)
+					b.hugLeadNext = b.depth*b.cfg.IndentWidth + b.chainStmtLead + b.flatSourceWidth(n.Callee.Span().Start.Offset, n.Callee.Span().End.Offset)
 				}
 
 				links = append(links, chainLink{doc: b.argList(n.Args, trailing), call: true, noArgs: len(n.Args) == 0})
@@ -1920,7 +1920,7 @@ func chainAuthorBroken(links []chainLink) bool {
 // column shifts as an enclosing group breaks, and gating on it would flip
 // preservation between passes.
 func (b *builder) chainLayoutFits(headDoc *document.Doc, links []chainLink) bool {
-	base := b.depth * b.cfg.TabWidth
+	base := b.depth * b.cfg.IndentWidth
 	limit := b.cfg.PrintWidth - base - b.chainStmtLead
 	line := []*document.Doc{headDoc}
 
@@ -1937,7 +1937,7 @@ func (b *builder) chainLayoutFits(headDoc *document.Doc, links []chainLink) bool
 			return false
 		}
 
-		limit = b.cfg.PrintWidth - base - b.cfg.TabWidth
+		limit = b.cfg.PrintWidth - base - b.cfg.IndentWidth
 		line = []*document.Doc{l.doc}
 		opener = &links[i]
 	}
@@ -1950,7 +1950,7 @@ func (b *builder) breaksInsideLink(l *chainLink, line []*document.Doc, limit int
 		return false
 	}
 
-	opener := document.FlatWidth(l.doc, b.cfg.TabWidth) - document.FlatWidth(l.args, b.cfg.TabWidth) + len("([")
+	opener := document.FlatWidth(l.doc, b.cfg.IndentWidth) - document.FlatWidth(l.args, b.cfg.IndentWidth) + len("([")
 
 	return opener <= limit
 }
@@ -1962,7 +1962,7 @@ func (b *builder) lineFits(parts []*document.Doc, limit int) bool {
 	// once its break is propagated.
 	document.HasForcedBreak(line)
 
-	width, _ := document.OpeningLineWidth(line, b.cfg.TabWidth)
+	width, _ := document.OpeningLineWidth(line, b.cfg.IndentWidth)
 
 	return width <= limit
 }
@@ -2070,17 +2070,17 @@ func (b *builder) middleCallBreaks(headDoc *document.Doc, links []chainLink) boo
 		return false
 	}
 
-	base := b.depth*b.cfg.TabWidth + b.chainStmtLead
+	base := b.depth*b.cfg.IndentWidth + b.chainStmtLead
 
-	opening, _ := document.OpeningLineWidth(chainConcat(headDoc, links[:k+1]), b.cfg.TabWidth)
+	opening, _ := document.OpeningLineWidth(chainConcat(headDoc, links[:k+1]), b.cfg.IndentWidth)
 	if base+opening > b.cfg.PrintWidth {
 		return false
 	}
 
 	closer, _ := b.closerLineWidth(headDoc, links[:k+1])
-	tail := document.FlatWidth(links[k+1].doc, b.cfg.TabWidth)
+	tail := document.FlatWidth(links[k+1].doc, b.cfg.IndentWidth)
 
-	return b.depth*b.cfg.TabWidth+closer+tail+b.chainStmtTail <= b.cfg.PrintWidth
+	return b.depth*b.cfg.IndentWidth+closer+tail+b.chainStmtTail <= b.cfg.PrintWidth
 }
 
 func isCallLink(l chainLink) bool {

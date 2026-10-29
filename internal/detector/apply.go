@@ -122,7 +122,7 @@ func fileLayout(absPath string, ctx Context, prettier *Prettier, sources map[str
 	// formats has this layout whatever the other sources say.
 	if ctx.Pint != nil && lang == formatter.LangPHP {
 		applyLayout(layout, sources, ctx.Pint.Path, func(cfg *config.File) {
-			cfg.TabWidth = pintIndentWidth
+			cfg.IndentWidth = pintIndentWidth
 			cfg.IndentStyle = config.IndentStyleSpace
 			cfg.EndOfLine = config.EndOfLineLF
 		})
@@ -157,7 +157,7 @@ func applyLayout(layout *config.File, sources map[string]string, source string, 
 	}
 
 	credit("printWidth", alone.PrintWidth != 0)
-	credit("indentWidth", alone.TabWidth != 0)
+	credit("indentWidth", alone.IndentWidth != 0)
 	credit("indentStyle", alone.IndentStyle != "")
 	credit("endOfLine", alone.EndOfLine != "")
 	credit("quoteStyle", alone.QuoteStyle != "")
@@ -170,7 +170,7 @@ func copyLayout(cfg, layout *config.File, userKeys map[string]bool) {
 	}
 
 	if !userKeys["indentWidth"] {
-		cfg.TabWidth = layout.TabWidth
+		cfg.IndentWidth = layout.IndentWidth
 		cfg.IndentExplicit = layout.IndentExplicit
 	}
 

@@ -635,13 +635,13 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 		if width, ok := b.blockOpenerWidth(onlyTail[0].operand); ok {
 			op := " " + string(onlyTail[0].op.Text) + " "
 			operand := b.expr(onlyTail[0].operand)
-			alone := (saved+1)*b.cfg.TabWidth + len(op) + b.oneLineWidth(operand) + b.chainStmtTail
+			alone := (saved+1)*b.cfg.IndentWidth + len(op) + b.oneLineWidth(operand) + b.chainStmtTail
 
 			if alone > b.cfg.PrintWidth {
 				// The head measures its line up to the block's opener only, as
 				// the block breaks below it.
 				glued := document.Concat(headDoc, document.Text(op), document.Opener(width, operand))
-				width += document.FlatWidth(headDoc, b.cfg.TabWidth) + len(op)
+				width += document.FlatWidth(headDoc, b.cfg.IndentWidth) + len(op)
 
 				return document.ConditionalGroup(document.Opener(width, glued), broken)
 			}
@@ -674,7 +674,7 @@ func (b *builder) blockOpenerWidth(operand parser.Expr) (int, bool) {
 			return 0, false
 		}
 
-		class := b.measureWidth(func() int { return document.FlatWidth(b.expr(n.Class), b.cfg.TabWidth) })
+		class := b.measureWidth(func() int { return document.FlatWidth(b.expr(n.Class), b.cfg.IndentWidth) })
 
 		return len("new ") + class + len("("), true
 	}
@@ -690,9 +690,9 @@ func (b *builder) blockOpenerWidth(operand parser.Expr) (int, bool) {
 		width := b.measureWidth(func() int {
 			_, hugged = b.argListHug(call.Args, withTrailingComma)
 
-			width := document.FlatWidth(b.expr(call.Callee), b.cfg.TabWidth) + len("([")
+			width := document.FlatWidth(b.expr(call.Callee), b.cfg.IndentWidth) + len("([")
 			for _, arg := range call.Args[:len(call.Args)-1] {
-				width += document.FlatWidth(b.expr(arg), b.cfg.TabWidth) + len(", ")
+				width += document.FlatWidth(b.expr(arg), b.cfg.IndentWidth) + len(", ")
 			}
 
 			return width
@@ -713,7 +713,7 @@ func (b *builder) blockOpenerWidth(operand parser.Expr) (int, bool) {
 		return 0, false
 	}
 
-	callee := b.measureWidth(func() int { return document.FlatWidth(b.expr(call.Callee), b.cfg.TabWidth) })
+	callee := b.measureWidth(func() int { return document.FlatWidth(b.expr(call.Callee), b.cfg.IndentWidth) })
 
 	return callee + len("("), true
 }
@@ -753,16 +753,16 @@ func (b *builder) chainTail(chainStmt bool, last parser.Expr, tails []binaryTail
 		if document.HasForcedBreak(doc) {
 			// Broken arguments: the tail rides their closing line instead,
 			// as it does once a fitting link breaks there on the first pass.
-			closing, _ := document.ClosingLineWidth(doc, b.cfg.TabWidth)
+			closing, _ := document.ClosingLineWidth(doc, b.cfg.IndentWidth)
 
 			return closing
 		}
 
-		return document.FlatWidth(doc, b.cfg.TabWidth)
+		return document.FlatWidth(doc, b.cfg.IndentWidth)
 	})
-	tail := len(" ") + document.FlatWidth(step, b.cfg.TabWidth)
+	tail := len(" ") + document.FlatWidth(step, b.cfg.IndentWidth)
 
-	if depth*b.cfg.TabWidth+link+tail+b.chainStmtTail > b.cfg.PrintWidth {
+	if depth*b.cfg.IndentWidth+link+tail+b.chainStmtTail > b.cfg.PrintWidth {
 		return nil
 	}
 
@@ -777,7 +777,7 @@ func (b *builder) hidesForcedBreak(operand parser.Expr, doc *document.Doc) bool 
 		return false
 	}
 
-	return !document.HasForcedBreak(doc) && document.FlatWidth(doc, b.cfg.TabWidth) >= document.ForcedBreakWidth
+	return !document.HasForcedBreak(doc) && document.FlatWidth(doc, b.cfg.IndentWidth) >= document.ForcedBreakWidth
 }
 
 func (b *builder) gluedRun(tails []binaryTail, spaced, headBreaks bool, glueID int32, glueText string, sep, plain *document.Doc, indented func(*document.Doc) *document.Doc) []*document.Doc {
@@ -802,7 +802,7 @@ func (b *builder) gluedRun(tails []binaryTail, spaced, headBreaks bool, glueID i
 		b.noConcatBreaks = saved
 		freeForced = freeForced || document.HasForcedBreak(free[i]) || b.hidesForcedBreak(t.operand, free[i])
 
-		fits = fits && b.depth*b.cfg.TabWidth+document.FlatWidth(free[i], b.cfg.TabWidth) <= b.cfg.PrintWidth
+		fits = fits && b.depth*b.cfg.IndentWidth+document.FlatWidth(free[i], b.cfg.IndentWidth) <= b.cfg.PrintWidth
 	}
 
 	if !fits {
@@ -944,7 +944,7 @@ func (b *builder) alignGaps(lefts []*document.Doc, breaksBefore []bool, value fu
 
 		aligned[i] = true
 		rigid[i] = !document.CanBreak(l)
-		widths[i] = document.FlatWidth(l, b.cfg.TabWidth)
+		widths[i] = document.FlatWidth(l, b.cfg.IndentWidth)
 
 		if widths[i] < document.ForcedBreakWidth {
 			values[i], firsts[i], breakable[i] = value(i)
@@ -983,7 +983,7 @@ func (b *builder) alignGaps(lefts []*document.Doc, breaksBefore []bool, value fu
 func (b *builder) alignWidths(widths, values, firsts []int, aligned, breakable, rigid, breaksBefore []bool) (targets []int, cuts []bool) {
 	const arrow, comma = len("=> ") + 1, len(",")
 
-	indent := (b.depth + 1) * b.cfg.TabWidth
+	indent := (b.depth + 1) * b.cfg.IndentWidth
 	flat := make([]bool, len(widths))
 	single := make([]bool, len(widths))
 
@@ -1112,7 +1112,7 @@ func alignAsPint(widths []int, aligned []bool, targets []int) {
 func (b *builder) unreserveOverflow(targets, widths, values []int, breakable []bool) {
 	const arrow, comma = len("=> ") + 1, len(",")
 
-	indent := (b.depth + 1) * b.cfg.TabWidth
+	indent := (b.depth + 1) * b.cfg.IndentWidth
 
 	for i, target := range targets {
 		if target >= 0 && !breakable[i] && indent+target+arrow+values[i]+comma > b.cfg.PrintWidth {
@@ -1164,7 +1164,7 @@ func (b *builder) alignRun(run []int, widths, values []int, aligned, flat, break
 func (b *builder) paddingCut(run []int, widths, values []int, breakable []bool, targets []int) int {
 	const arrow, comma = len("=> ") + 1, len(",")
 
-	indent := (b.depth + 1) * b.cfg.TabWidth
+	indent := (b.depth + 1) * b.cfg.IndentWidth
 
 	for pos, i := range run[:len(run)-1] {
 		if targets[i] < 0 || !breakable[i] {
@@ -1186,13 +1186,13 @@ func (b *builder) oneLineWidth(d *document.Doc) int {
 		return document.ForcedBreakWidth
 	}
 
-	return document.FlatWidth(d, b.cfg.TabWidth)
+	return document.FlatWidth(d, b.cfg.IndentWidth)
 }
 
 func (b *builder) paddingOverflows(widest int, widths, values []int, aligned, breakable []bool) bool {
 	const arrow, comma = len("=> ") + 1, len(",")
 
-	indent := (b.depth + 1) * b.cfg.TabWidth
+	indent := (b.depth + 1) * b.cfg.IndentWidth
 
 	for i := range widths {
 		if !aligned[i] || !breakable[i] || widths[i] >= widest || widths[i] >= document.ForcedBreakWidth {
@@ -1225,7 +1225,7 @@ func (b *builder) matchResultLeads(arms []*parser.MatchArm) []int {
 						heads[i] += len(", ")
 					}
 
-					heads[i] += document.FlatWidth(b.expr(c), b.cfg.TabWidth)
+					heads[i] += document.FlatWidth(b.expr(c), b.cfg.IndentWidth)
 				}
 			}
 
@@ -1285,7 +1285,7 @@ func (b *builder) preservedPipe(n *parser.BinaryExpr) *document.Doc {
 
 	b.depth--
 
-	base := b.depth * b.cfg.TabWidth
+	base := b.depth * b.cfg.IndentWidth
 	limit := b.cfg.PrintWidth - base - b.chainStmtLead
 	line := []*document.Doc{headDoc}
 	parts := []*document.Doc{headDoc}
@@ -1302,7 +1302,7 @@ func (b *builder) preservedPipe(n *parser.BinaryExpr) *document.Doc {
 			return nil
 		}
 
-		limit = b.cfg.PrintWidth - base - b.cfg.TabWidth
+		limit = b.cfg.PrintWidth - base - b.cfg.IndentWidth
 		line = []*document.Doc{step}
 		parts = append(parts, document.Indent(document.Concat(document.HardLine(), step)))
 	}
@@ -1397,7 +1397,7 @@ func (b *builder) binaryChainHead(head parser.Expr, indent, stmtLevel bool, tail
 	b.measureWidth(func() int {
 		operand := b.expr(tails[0].operand)
 		breaks = document.HasForcedBreak(operand)
-		tail = len(" "+string(tails[0].op.Text)+" ") + document.FlatWidth(operand, b.cfg.TabWidth)
+		tail = len(" "+string(tails[0].op.Text)+" ") + document.FlatWidth(operand, b.cfg.IndentWidth)
 
 		return 0
 	})
@@ -1680,10 +1680,10 @@ func (b *builder) assign(n *parser.AssignExpr, stmtLevel, continued bool) *docum
 // see whether the printer will break it, so both passes must measure it alike.
 func (b *builder) targetEnd(left *document.Doc) int {
 	if document.HasForcedBreak(left) {
-		return b.chainStmtLead + document.FlatWidth(left, b.cfg.TabWidth)
+		return b.chainStmtLead + document.FlatWidth(left, b.cfg.IndentWidth)
 	}
 
-	return b.chainStmtLead + flatWidth(left, b.cfg.TabWidth)
+	return b.chainStmtLead + flatWidth(left, b.cfg.IndentWidth)
 }
 
 func (b *builder) valueBelowList(n *parser.AssignExpr, left *document.Doc, level bool, lead int) bool {
@@ -1691,7 +1691,7 @@ func (b *builder) valueBelowList(n *parser.AssignExpr, left *document.Doc, level
 		return false
 	}
 
-	line := b.depth*b.cfg.TabWidth + b.chainStmtLead + flatWidth(left, b.cfg.TabWidth) + len(" =")
+	line := b.depth*b.cfg.IndentWidth + b.chainStmtLead + flatWidth(left, b.cfg.IndentWidth) + len(" =")
 	if line > b.cfg.PrintWidth {
 		return false
 	}
@@ -1707,7 +1707,7 @@ func (b *builder) valueBelowList(n *parser.AssignExpr, left *document.Doc, level
 			b.chainStmtLead = valueLead
 		}
 
-		width, _ := document.BrokenPrefixWidth(b.expr(n.Right), b.cfg.TabWidth)
+		width, _ := document.BrokenPrefixWidth(b.expr(n.Right), b.cfg.IndentWidth)
 		b.chainStmtLevel, b.chainStmtLead = savedLevel, savedLead
 
 		return width
@@ -1772,16 +1772,16 @@ func (b *builder) binaryHeadOverflows(value parser.Expr, lead int, op string) bo
 		doc := b.expr(head)
 		breakable = document.CanBreak(doc)
 
-		return document.FlatWidth(doc, b.cfg.TabWidth)
+		return document.FlatWidth(doc, b.cfg.IndentWidth)
 	})
 
 	if !grouped && breakable {
 		return false
 	}
-	indent := b.depth * b.cfg.TabWidth
+	indent := b.depth * b.cfg.IndentWidth
 
 	return indent+lead+width > b.cfg.PrintWidth &&
-		indent+b.cfg.TabWidth+len(op)+width <= b.cfg.PrintWidth
+		indent+b.cfg.IndentWidth+len(op)+width <= b.cfg.PrintWidth
 }
 
 // unaryFuses reports whether writing op straight before operand would join them
@@ -1877,7 +1877,7 @@ func (b *builder) ternary(n *parser.TernaryExpr, lineKnown bool) *document.Doc {
 	if isDefaultValue(n.Else) {
 		if width, ok := b.branchOpenerWidth(n.Then, then, 0); ok {
 			glued := document.Concat(cond, document.Text(" ? "), document.Opener(width, then), document.Text(" : "), other)
-			width += document.FlatWidth(cond, b.cfg.TabWidth) + len(" ? ")
+			width += document.FlatWidth(cond, b.cfg.IndentWidth) + len(" ? ")
 
 			return document.ConditionalGroup(document.Opener(width, glued), broken)
 		}
@@ -1889,7 +1889,7 @@ func (b *builder) ternary(n *parser.TernaryExpr, lineKnown bool) *document.Doc {
 		if width, ok := b.branchOpenerWidth(n.Else, other, len(";")); ok {
 			lead := document.Concat(cond, document.Text(" ? "), then, document.Text(" : "))
 			glued := document.Concat(lead, document.Opener(width, other))
-			width += document.FlatWidth(lead, b.cfg.TabWidth)
+			width += document.FlatWidth(lead, b.cfg.IndentWidth)
 
 			return document.ConditionalGroup(document.Opener(width, glued), broken)
 		}
@@ -1900,7 +1900,7 @@ func (b *builder) ternary(n *parser.TernaryExpr, lineKnown bool) *document.Doc {
 
 func (b *builder) branchOpenerWidth(branch parser.Expr, doc *document.Doc, trail int) (int, bool) {
 	width, ok := b.blockOpenerWidth(branch)
-	if !ok || (b.depth+1)*b.cfg.TabWidth+len("? ")+b.oneLineWidth(doc)+trail <= b.cfg.PrintWidth {
+	if !ok || (b.depth+1)*b.cfg.IndentWidth+len("? ")+b.oneLineWidth(doc)+trail <= b.cfg.PrintWidth {
 		return 0, false
 	}
 
@@ -2024,7 +2024,7 @@ func (b *builder) arrowFn(n *parser.ArrowFnExpr) *document.Doc {
 	// one argument per line instead, as a statement's call does (postfix).
 	if call, ok := n.Body.(*parser.CallExpr); ok && hugsInsideOut(call) {
 		saved := b.chainStmtLead
-		b.chainStmtLead = document.FlatWidth(document.Concat(append(slices.Clone(parts), params, returnType, arrow)...), b.cfg.TabWidth)
+		b.chainStmtLead = document.FlatWidth(document.Concat(append(slices.Clone(parts), params, returnType, arrow)...), b.cfg.IndentWidth)
 
 		if b.staysOnStatementLine(call) && b.hugLineOverflows(call, true) && b.unhuggingHelps(call) {
 			b.noHugNext = true
@@ -2045,8 +2045,8 @@ func (b *builder) arrowFn(n *parser.ArrowFnExpr) *document.Doc {
 	// The parameters break only when even the body's narrowest first line
 	// cannot follow the signature; the printer judges that at the real column.
 	signature := document.Concat(append(slices.Clone(parts), params, returnType, arrow)...)
-	first, _ := document.BrokenPrefixWidth(body, b.cfg.TabWidth)
-	opener := document.FlatWidth(signature, b.cfg.TabWidth) + first
+	first, _ := document.BrokenPrefixWidth(body, b.cfg.IndentWidth)
+	opener := document.FlatWidth(signature, b.cfg.IndentWidth) + first
 
 	wide := document.Concat(append(parts, broken, returnType, arrow, body)...)
 
@@ -2068,13 +2068,13 @@ func (b *builder) arrowParams(ps []*parser.Param, rparen parser.Token) (params, 
 
 	// A list that breaks anyway stays a group, so its lines take the indent
 	// they print at; printed to text here they would lose it.
-	if breaks || document.FlatWidth(grouped, b.cfg.TabWidth) > b.cfg.PrintWidth-2*b.cfg.TabWidth {
+	if breaks || document.FlatWidth(grouped, b.cfg.IndentWidth) > b.cfg.PrintWidth-2*b.cfg.IndentWidth {
 		return grouped, nil
 	}
 
 	flat := document.Print(grouped, document.Options{
 		PrintWidth: inlineWidth,
-		TabWidth:   b.cfg.TabWidth,
+		TabWidth:   b.cfg.IndentWidth,
 		UseTabs:    b.cfg.UseTabs(),
 		EOL:        b.cfg.EOL(),
 	})
@@ -2139,7 +2139,7 @@ func (b *builder) match(n *parser.MatchExpr) *document.Doc {
 		}
 
 		gaps = b.alignGaps(heads, b.alignBreaks(offsets), func(i int) (int, int, bool) {
-			first, _ := document.BrokenPrefixWidth(results[i], b.cfg.TabWidth)
+			first, _ := document.BrokenPrefixWidth(results[i], b.cfg.IndentWidth)
 
 			return b.oneLineWidth(results[i]), first, document.CanBreak(results[i])
 		})
@@ -2215,7 +2215,7 @@ func (b *builder) matchArmHead(arm *parser.MatchArm, result *document.Doc) *docu
 		return document.Text("default")
 	}
 
-	resultWidth, _ := document.FlatPrefixWidth(result, b.cfg.TabWidth)
+	resultWidth, _ := document.FlatPrefixWidth(result, b.cfg.IndentWidth)
 
 	condDocs := make([]*document.Doc, len(arm.Conds))
 	for j, c := range arm.Conds {
@@ -2225,7 +2225,7 @@ func (b *builder) matchArmHead(arm *parser.MatchArm, result *document.Doc) *docu
 	if len(arm.Conds) == 1 {
 		// A result that cannot break and leaves no column overflows whatever
 		// the condition does, so break nothing.
-		avail := b.cfg.PrintWidth - b.depth*b.cfg.TabWidth -
+		avail := b.cfg.PrintWidth - b.depth*b.cfg.IndentWidth -
 			4 - resultWidth - 1
 
 		if avail <= 0 && !document.CanBreak(result) && !document.HasForcedBreak(condDocs[0]) {
@@ -2236,7 +2236,7 @@ func (b *builder) matchArmHead(arm *parser.MatchArm, result *document.Doc) *docu
 	}
 
 	flat := document.Join(document.Text(", "), condDocs)
-	armWidth := b.depth*b.cfg.TabWidth + flatWidth(flat, b.cfg.TabWidth) +
+	armWidth := b.depth*b.cfg.IndentWidth + flatWidth(flat, b.cfg.IndentWidth) +
 		4 + resultWidth + 1
 
 	// Only a result that can break opens a hug; one kept as written cannot.
@@ -2328,7 +2328,7 @@ func (b *builder) flatText(e parser.Expr) *document.Doc {
 func (b *builder) flatDoc(doc *document.Doc) *document.Doc {
 	return document.Text(string(document.Print(doc, document.Options{
 		PrintWidth: inlineWidth,
-		TabWidth:   b.cfg.TabWidth,
+		TabWidth:   b.cfg.IndentWidth,
 		UseTabs:    b.cfg.UseTabs(),
 		EOL:        b.cfg.EOL(),
 	})))
