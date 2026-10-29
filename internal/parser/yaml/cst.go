@@ -1,15 +1,15 @@
 package yaml
 
-import "github.com/JacobJoergensen/laravel-fmt/internal/parser/php"
+import parserpkg "github.com/JacobJoergensen/laravel-fmt/internal/parser"
 
-// Position is php.Position.
-type Position = php.Position
+// Position is parser.Position.
+type Position = parserpkg.Position
 
 // Span is a half-open byte range [Start, End) in source.
-type Span = php.Span
+type Span = parserpkg.Span
 
 // Error is a parse diagnostic.
-type Error = php.Error
+type Error = parserpkg.Error
 
 // Node is any YAML value node.
 type Node interface {

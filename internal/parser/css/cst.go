@@ -1,16 +1,15 @@
 package css
 
-import "github.com/JacobJoergensen/laravel-fmt/internal/parser/php"
+import parserpkg "github.com/JacobJoergensen/laravel-fmt/internal/parser"
 
-// Position is php.Position, shared so the whole parsing stack uses one
-// coordinate type.
-type Position = php.Position
+// Position is parser.Position.
+type Position = parserpkg.Position
 
 // Span is a half-open byte range [Start, End) in source.
-type Span = php.Span
+type Span = parserpkg.Span
 
 // Error is a parse diagnostic.
-type Error = php.Error
+type Error = parserpkg.Error
 
 // Node is any CSS CST node.
 type Node interface {

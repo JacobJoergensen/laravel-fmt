@@ -19,6 +19,9 @@ type Position = parserpkg.Position
 // parser.Span for the same reason as Position.
 type Span = parserpkg.Span
 
+// Error is a parse diagnostic.
+type Error = parserpkg.Error
+
 // Kind identifies a PHP token.
 type Kind uint16
 

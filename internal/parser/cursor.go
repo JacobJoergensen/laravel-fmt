@@ -1,4 +1,4 @@
-// Package parser holds the shared primitives (Position, Span, Cursor) the
+// Package parser holds the shared primitives (Position, Span, Error, Cursor) the
 // per-language parsers under internal/parser build on.
 package parser
 

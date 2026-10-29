@@ -14,7 +14,7 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/detector"
 	"github.com/JacobJoergensen/laravel-fmt/internal/diff"
 	"github.com/JacobJoergensen/laravel-fmt/internal/git"
-	"github.com/JacobJoergensen/laravel-fmt/internal/parser/php"
+	parserpkg "github.com/JacobJoergensen/laravel-fmt/internal/parser"
 	"github.com/JacobJoergensen/laravel-fmt/internal/terminal"
 )
 
@@ -192,7 +192,7 @@ func (r *runner) warnConfigFile(path, why string) {
 func (r *runner) renderFileError(path, shown string, src []byte, err error) {
 	r.errf("%s", pathLine(terminal.Red, terminal.CrossMark, shown))
 
-	parseErrors := php.CollectErrors(err)
+	parseErrors := parserpkg.CollectErrors(err)
 
 	if len(parseErrors) == 0 {
 		r.errf("  %s%v%s\n", terminal.Dim, err, terminal.Reset)
@@ -255,7 +255,7 @@ func displayPath(workDir, path string) string {
 }
 
 func collectFailures(path string, err error) []ci.Failure {
-	parseErrors := php.CollectErrors(err)
+	parseErrors := parserpkg.CollectErrors(err)
 
 	if len(parseErrors) == 0 {
 		return []ci.Failure{{Path: path, Message: err.Error()}}
