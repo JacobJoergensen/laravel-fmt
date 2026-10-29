@@ -75,7 +75,8 @@ func (e *Element) Span() Span {
 // Parts holds the html.Text and echo nodes when a Blade echo is embedded in
 // the value. Directive holds a Blade directive, echo or comment standing in
 // attribute position (@class([...]), {{ $attributes }}), with the name and
-// value fields zero. Only the Blade parser sets Expr, Parts and Directive.
+// value fields zero. Only the Blade parser sets Expr, Parts, Directive and
+// MayRenderDelimiter.
 type Attr struct {
 	Start     Position
 	End       Position
@@ -95,19 +96,11 @@ type Attr struct {
 	// RawPhp is a `<?php … ?>` or `<?= … ?>` tag in attribute position, kept
 	// whole so its PHP is not read as attribute names; only Blade sets it.
 	RawPhp []byte
-	// KeepUnquoted reports that an unquoted value has to be emitted exactly as
-	// authored rather than gaining quotes, because its rendered bytes can carry
-	// whitespace, a `>` or a quote of their own. That covers literal whitespace or
-	// `>` (an HTML tokenizer already reads `x-data={ open: false }` as four
-	// attributes, and quoting would merge them), an escaped echo or a Blade comment
-	// (rendered literally, not executed), and a raw `{!! !!}` echo or a `@name(…)`
-	// argument list, which expand to unescaped markup. A `{{ }}` echo is the one
-	// safe case: e() escapes both quote characters, so it cannot break out.
-	KeepUnquoted bool
-	// KeepQuote reports that a quoted value has to keep the quote it was written
-	// with, because it holds output that can print either quote: a `@name(…)`
-	// directive (`@json` prints raw JSON), a raw `{!! !!}` echo or a `<?` tag.
-	KeepQuote bool
+	// MayRenderDelimiter reports that the rendered value can hold one of its own
+	// delimiters: a quote, or for an unquoted value whitespace or `>`. Directives,
+	// raw echoes and `<?` tags print output the source does not show; a `{{ }}`
+	// echo cannot, since e() escapes both quotes.
+	MayRenderDelimiter bool
 }
 
 func (a *Attr) Span() Span {

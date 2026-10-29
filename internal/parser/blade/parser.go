@@ -2055,7 +2055,7 @@ func (p *bladeParser) parseAttrValue(attr *html.Attr, component bool) {
 		// HTML5 ends an unquoted value at whitespace, but a Blade echo, escape
 		// or directive argument is one unit that may hold whitespace and `>`,
 		// so a byte scan would cut `src={{ $url }}` at the space in the echo.
-		attr.Parts, attr.KeepUnquoted = p.parseAttrParts(0)
+		attr.Parts, attr.MayRenderDelimiter = p.parseAttrParts(0)
 		attr.Value = p.Src[contentOffset:p.Pos.Offset]
 		attr.ValueStart = contentOffset
 
@@ -2084,7 +2084,7 @@ func (p *bladeParser) parseAttrValue(attr *html.Attr, component bool) {
 		//
 		// PHP has to consume the whole value, or Alpine JS whose first token
 		// happens to parse as PHP would be cut down to that token.
-		attr.Parts, attr.KeepQuote = p.parseAttrParts(c)
+		attr.Parts, attr.MayRenderDelimiter = p.parseAttrParts(c)
 		attr.Value = p.Src[contentOffset:p.Pos.Offset]
 		attr.ValueStart = contentOffset
 
@@ -2098,7 +2098,7 @@ func (p *bladeParser) parseAttrValue(attr *html.Attr, component bool) {
 		// decompose). wire:* is a Livewire DSL, not PHP: reflowing it would
 		// rewrite a wire:model dot-path like form.name into a `.` concatenation
 		// and break the bind.
-		attr.Parts, attr.KeepQuote = p.parseAttrParts(c)
+		attr.Parts, attr.MayRenderDelimiter = p.parseAttrParts(c)
 		attr.Value = p.Src[contentOffset:p.Pos.Offset]
 		attr.ValueStart = contentOffset
 	}
@@ -2132,10 +2132,9 @@ func (p *bladeParser) skipRegion(open, closer string) {
 //
 // endQuote 0 means the value was left unquoted, where whitespace and `>` end it.
 // A Blade echo, an escaped echo, a comment and a `@name(…)` argument list are each
-// one unit that may hold both, so they are consumed whole. keep then reports
-// whether the value has to stay unquoted, per html.Attr.KeepUnquoted; for a
-// quoted value it reports html.Attr.KeepQuote.
-func (p *bladeParser) parseAttrParts(endQuote byte) (parts []html.Node, keep bool) {
+// one unit that may hold both, so they are consumed whole. mayRender reports
+// html.Attr.MayRenderDelimiter.
+func (p *bladeParser) parseAttrParts(endQuote byte) (parts []html.Node, mayRender bool) {
 	literalStart := p.Pos
 	literalOffset := literalStart.Offset
 	hasEcho := false
@@ -2152,8 +2151,8 @@ func (p *bladeParser) parseAttrParts(endQuote byte) (parts []html.Node, keep boo
 	// Literal bytes reach the browser as they are, so whitespace or a `>` among
 	// them has already ended an unquoted value for an HTML tokenizer.
 	literal := func(from int) {
-		if endQuote == 0 && !keep && bytes.ContainsAny(p.Src[from:p.Pos.Offset], attrValueBreakers) {
-			keep = true
+		if endQuote == 0 && !mayRender && bytes.ContainsAny(p.Src[from:p.Pos.Offset], attrValueBreakers) {
+			mayRender = true
 		}
 	}
 
@@ -2169,14 +2168,14 @@ func (p *bladeParser) parseAttrParts(endQuote byte) (parts []html.Node, keep boo
 			literal(from)
 		case endQuote == 0 && p.StartsWith("{{--") && p.hasCloseAhead("--}}"):
 			p.skipRegion("{{--", "--}}")
-			keep = true
+			mayRender = true
 		case endQuote == 0 && p.atUnquotedDirectiveArgs():
 			p.skipDirectiveArgs()
 
 			// A directive expands to unescaped markup (@class([…]) becomes a whole
 			// `class="…"` attribute), so quoting the value around it would break the
 			// expansion out of its own delimiters.
-			keep = true
+			mayRender = true
 		case endQuote == 0 && p.directiveParenAt(false) >= 0:
 			p.addError(p.Pos, p.unclosedArgsError(p.directiveParenAt(false)))
 			p.Advance()
@@ -2195,7 +2194,7 @@ func (p *bladeParser) parseAttrParts(endQuote byte) (parts []html.Node, keep boo
 			literalOffset = p.Pos.Offset
 
 			// A raw echo prints unescaped, so its runtime value can hold a quote.
-			keep = true
+			mayRender = true
 		case endQuote != 0 && p.atQuotedValueOutput():
 			// Blade compiles a directive and PHP runs a tag before any HTML is read,
 			// so a quote inside either does not end the value: each is one unit.
@@ -2211,13 +2210,13 @@ func (p *bladeParser) parseAttrParts(endQuote byte) (parts []html.Node, keep boo
 				p.Advance()
 			}
 
-			keep = true
+			mayRender = true
 		case endQuote == 0 && p.atPHPOpenTag():
 			// PHP runs the tag before any HTML is read, so the `>` of its `?>` does
 			// not end the value, and quotes put around it would land inside the PHP.
 			p.skipRawPhpOrRest()
 
-			keep = true
+			mayRender = true
 		default:
 			p.Advance()
 			literal(from)
@@ -2225,12 +2224,12 @@ func (p *bladeParser) parseAttrParts(endQuote byte) (parts []html.Node, keep boo
 	}
 
 	if !hasEcho {
-		return nil, keep
+		return nil, mayRender
 	}
 
 	flush()
 
-	return parts, keep
+	return parts, mayRender
 }
 
 // attrValueBreakers are the bytes that end an unquoted attribute value, or the

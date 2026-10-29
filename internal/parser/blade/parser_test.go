@@ -825,7 +825,7 @@ func TestRawBodyRecordsThePHPLiteralsWhoseLinesAreData(t *testing.T) {
 	}
 }
 
-func TestQuotedValueHoldingOutputKeepsItsQuote(t *testing.T) {
+func TestValueHoldingOutputMayRenderADelimiter(t *testing.T) {
 	cases := []struct {
 		name  string
 		value string
@@ -838,8 +838,15 @@ func TestQuotedValueHoldingOutputKeepsItsQuote(t *testing.T) {
 		{"php tag", `'<?= $x ?>'`, true},
 		{"bare short tag", `'<?x'`, false},
 		{"plain text", `'a b'`, false},
-		{"escaped echo", `'{{ $x }}'`, false},
+		{"echo", `'{{ $x }}'`, false},
 		{"at sign inside a word", `'mail@x(y)'`, false},
+		{"unquoted raw echo", `{!! $raw !!}`, true},
+		{"unquoted directive", `@json($v)`, true},
+		{"unquoted php tag", `<?= $x ?>`, true},
+		{"unquoted comment", `{{--c--}}`, true},
+		{"unquoted @-escaped echo with a space", `@{{ $a }}`, true},
+		{"unquoted @-escaped echo without one", `@{{$a}}`, false},
+		{"unquoted echo", `{{ $x }}`, false},
 	}
 
 	for _, tc := range cases {
@@ -851,8 +858,8 @@ func TestQuotedValueHoldingOutputKeepsItsQuote(t *testing.T) {
 				t.Fatalf("node = %T with attributes %v, want one *html.Element attribute", file.Nodes[0], el)
 			}
 
-			if got := el.Attributes[0].KeepQuote; got != tc.want {
-				t.Fatalf("KeepQuote = %v, want %v", got, tc.want)
+			if got := el.Attributes[0].MayRenderDelimiter; got != tc.want {
+				t.Fatalf("MayRenderDelimiter = %v, want %v", got, tc.want)
 			}
 		})
 	}

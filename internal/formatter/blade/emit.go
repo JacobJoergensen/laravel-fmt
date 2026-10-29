@@ -1878,7 +1878,7 @@ func (e *emitter) emitAttr(a *htmlparser.Attr, component bool) {
 	// A component value compiles into PHP, so it keeps a lone CR as the byte of the
 	// string it is.
 	if hasValueLineBreak(a.Value, component) {
-		if !a.KeepQuote {
+		if !a.MayRenderDelimiter {
 			quote = formatter.AttrQuote(quote, a.Value, e.cfg)
 		}
 
@@ -1909,7 +1909,7 @@ func (e *emitter) emitAttr(a *htmlparser.Attr, component bool) {
 		}
 	}
 
-	if a.KeepQuote {
+	if a.MayRenderDelimiter {
 		e.w.Write(string(quote))
 		e.w.WriteBytes(value)
 		e.w.Write(string(quote))
@@ -1960,7 +1960,7 @@ func (e *emitter) withoutSwallowedCRs(a *htmlparser.Attr) []byte {
 }
 
 func (e *emitter) unquotedDelimiter(a *htmlparser.Attr) byte {
-	if a.KeepUnquoted {
+	if a.MayRenderDelimiter {
 		return 0
 	}
 
