@@ -3,7 +3,10 @@ package lsp
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -41,6 +44,28 @@ func TestConnReadNotificationHasNoID(t *testing.T) {
 
 	if !req.isNotification() {
 		t.Fatal("message without id must be a notification")
+	}
+}
+
+func TestConnReadDoesNotAllocateABodyThatNeverArrives(t *testing.T) {
+	const declared = 256 << 20
+	const allowed = 16 << 20
+
+	in := fmt.Sprintf("Content-Length: %d\r\n\r\n{}", declared)
+	c := newConn(strings.NewReader(in), &bytes.Buffer{})
+
+	var before, after runtime.MemStats
+
+	runtime.ReadMemStats(&before)
+	_, err := c.read()
+	runtime.ReadMemStats(&after)
+
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("read = %v, want io.ErrUnexpectedEOF", err)
+	}
+
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > allowed {
+		t.Fatalf("read allocated %d bytes for a 2-byte body, want at most %d", allocated, allowed)
 	}
 }
 

@@ -162,15 +162,31 @@ func TestPositionToByteRoundTripsByteToPosition(t *testing.T) {
 }
 
 func TestPositionToByteClampsOutOfRangePositions(t *testing.T) {
-	src := []byte("ab\ncd\n")
+	src := []byte("ab\ncd\r\néf\n")
 	lineStart := lspLineStarts(src)
 
-	if got := positionToByte(src, lineStart, Position{Line: 99, Character: 0}, encodingUTF8); got != len(src) {
-		t.Fatalf("a line past the document = %d, want %d", got, len(src))
+	cases := []struct {
+		name string
+		pos  Position
+		enc  string
+		want int
+	}{
+		{name: "line past the document", pos: Position{Line: 99}, enc: encodingUTF8, want: len(src)},
+		{name: "negative column utf-8", pos: Position{Line: 1, Character: -5}, enc: encodingUTF8, want: 3},
+		{name: "negative column utf-16", pos: Position{Line: 1, Character: -5}, enc: encodingUTF16, want: 3},
+		{name: "past an lf line end utf-8", pos: Position{Line: 0, Character: 99}, enc: encodingUTF8, want: 2},
+		{name: "past an lf line end utf-16", pos: Position{Line: 0, Character: 99}, enc: encodingUTF16, want: 2},
+		{name: "past a crlf line end utf-8", pos: Position{Line: 1, Character: 99}, enc: encodingUTF8, want: 5},
+		{name: "past a crlf line end utf-16", pos: Position{Line: 1, Character: 99}, enc: encodingUTF16, want: 5},
+		{name: "inside a multibyte character utf-8", pos: Position{Line: 2, Character: 1}, enc: encodingUTF8, want: 9},
 	}
 
-	if got := positionToByte(src, lineStart, Position{Line: 0, Character: 99}, encodingUTF8); got != 3 {
-		t.Fatalf("a character past the line = %d, want the line's end 3", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := positionToByte(src, lineStart, tc.pos, tc.enc); got != tc.want {
+				t.Fatalf("positionToByte(%+v) = %d, want %d", tc.pos, got, tc.want)
+			}
+		})
 	}
 }
 

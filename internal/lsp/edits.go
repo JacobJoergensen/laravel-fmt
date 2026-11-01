@@ -3,6 +3,7 @@ package lsp
 import (
 	"bytes"
 	"sort"
+	"unicode/utf8"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/diff"
 )
@@ -33,8 +34,8 @@ func buildEdits(src, out []byte, enc string) []TextEdit {
 }
 
 // positionToByte is the inverse of byteToPosition. A client may send a position
-// past the end of its line or of the document, so both are clamped rather than
-// trusted.
+// outside its line or the document, so it is clamped rather than trusted: LSP
+// puts a column past the line's text at the line's end, before its break.
 func positionToByte(src []byte, lineStart []int, p Position, enc string) int {
 	if p.Line < 0 {
 		return 0
@@ -48,11 +49,18 @@ func positionToByte(src []byte, lineStart []int, p Position, enc string) int {
 	end := len(src)
 
 	if p.Line+1 < len(lineStart) {
-		end = lineStart[p.Line+1]
+		end = withoutLineBreak(src, start, lineStart[p.Line+1])
 	}
 
 	if enc == encodingUTF8 {
-		return min(start+p.Character, end)
+		offset := min(start+max(p.Character, 0), end)
+
+		// A column inside a character moves past it, as the UTF-16 count does.
+		for offset < end && !utf8.RuneStart(src[offset]) {
+			offset++
+		}
+
+		return offset
 	}
 
 	units := 0
@@ -67,6 +75,18 @@ func positionToByte(src []byte, lineStart []int, p Position, enc string) int {
 		} else {
 			units++
 		}
+	}
+
+	return end
+}
+
+func withoutLineBreak(src []byte, start, end int) int {
+	if end > start && src[end-1] == '\n' {
+		end--
+	}
+
+	if end > start && src[end-1] == '\r' {
+		end--
 	}
 
 	return end

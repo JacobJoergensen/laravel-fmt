@@ -1,7 +1,15 @@
 # Changelog
 
 ## Unreleased
-* Fixed `laravel-fmt lsp` converting the line endings of a file it could not format
+* Added a `laravel-fmt/format` request to `laravel-fmt lsp` that formats the text it is sent, so editor plugins do not have to open the file
+* Optimized `laravel-fmt lsp` to look up a file's config once when an editor asks for its line ending
+* Fixed `laravel-fmt lsp` converting the line endings of a file it could not format or was not given
+* Fixed `laravel-fmt lsp` exiting on a message that is not valid JSON
+* Fixed `laravel-fmt lsp` answering requests after an editor asked it to shut down
+* Fixed `laravel-fmt lsp` replying to a request method sent as a notification
+* Fixed `laravel-fmt lsp` running out of memory on a corrupted message header
+* Fixed `laravel-fmt lsp` range formatting reaching past the selected lines when a range position is out of bounds
+* Fixed `laravel-fmt lsp` on macOS and Linux reading a folder named like `a:b` as a Windows drive
 
 ## Version 0.7.0 (2026-10-29)
 * Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON

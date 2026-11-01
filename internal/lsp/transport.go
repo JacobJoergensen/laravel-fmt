@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -55,7 +56,19 @@ type responseError struct {
 const (
 	jsonrpcVersion = "2.0"
 
+	codeParseError     = -32700
+	codeInvalidRequest = -32600
 	codeMethodNotFound = -32601
+	codeInvalidParams  = -32602
+
+	maxPreallocatedBody = 1 << 20
+)
+
+// A message whose body fails to decode was still framed, so the stream stays
+// in sync and the server answers it instead of exiting.
+var (
+	errParse          = errors.New("message is not valid JSON")
+	errInvalidRequest = errors.New("message is not a request")
 )
 
 // read returns the next framed message; at end of input the error wraps io.EOF.
@@ -91,17 +104,49 @@ func (c *conn) read() (*request, error) {
 		return nil, errors.New("message missing content-length header")
 	}
 
-	body := make([]byte, length)
-	if _, err := io.ReadFull(c.r, body); err != nil {
+	body, err := c.readBody(length)
+	if err != nil {
 		return nil, fmt.Errorf("read message body: %w", err)
 	}
 
+	if !json.Valid(body) {
+		return nil, errParse
+	}
+
+	// JSON-RPC answers an invalid request with its id when the id can be read,
+	// so the request returned alongside the error keeps it.
 	var req request
 	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, fmt.Errorf("decode message: %w", err)
+		var idOnly struct {
+			ID json.RawMessage `json:"id"`
+		}
+
+		_ = json.Unmarshal(body, &idOnly)
+
+		return &request{ID: idOnly.ID}, fmt.Errorf("%w: %w", errInvalidRequest, err)
 	}
 
 	return &req, nil
+}
+
+// A corrupted header can declare any length, so the body is read in chunks
+// and memory grows only with the bytes that arrive.
+func (c *conn) readBody(length int) ([]byte, error) {
+	body := make([]byte, 0, min(length, maxPreallocatedBody))
+
+	for len(body) < length {
+		chunk := min(length-len(body), maxPreallocatedBody)
+		body = slices.Grow(body, chunk)
+
+		n, err := io.ReadFull(c.r, body[len(body):len(body)+chunk])
+		body = body[:len(body)+n]
+
+		if err != nil {
+			return nil, fmt.Errorf("got %d of %d bytes: %w", len(body), length, err)
+		}
+	}
+
+	return body, nil
 }
 
 func (c *conn) reply(id json.RawMessage, result any) error {

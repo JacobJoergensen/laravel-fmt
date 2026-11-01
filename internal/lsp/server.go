@@ -62,6 +62,14 @@ func Serve(in io.Reader, out, logw io.Writer, version string) error {
 			return nil
 		}
 
+		if errors.Is(err, errParse) || errors.Is(err, errInvalidRequest) {
+			if err := s.replyMalformed(req, err); err != nil {
+				return err
+			}
+
+			continue
+		}
+
 		if err != nil {
 			return fmt.Errorf("read message: %w", err)
 		}
@@ -77,46 +85,80 @@ func Serve(in io.Reader, out, logw io.Writer, version string) error {
 	}
 }
 
-func (s *server) handle(req *request) (bool, error) {
-	switch req.Method {
-	case "initialize":
-		return false, s.handleInitialize(req)
-	case "shutdown":
-		s.shutdownRequested = true
+func (s *server) replyMalformed(req *request, readErr error) error {
+	s.logf("read message: %v", readErr)
 
-		// JSON-RPC requires result on success; shutdown's is null, so send it
-		// explicitly rather than letting omitempty drop the field.
-		return false, s.conn.reply(req.ID, json.RawMessage("null"))
-	case "exit":
+	code := codeInvalidRequest
+	if errors.Is(readErr, errParse) {
+		code = codeParseError
+	}
+
+	id := json.RawMessage("null")
+	if req != nil && !req.isNotification() {
+		id = req.ID
+	}
+
+	return s.conn.replyError(id, code, readErr.Error())
+}
+
+// exit is a notification, but one sent with an id still ends the server.
+func (s *server) handle(req *request) (bool, error) {
+	if req.Method == "exit" {
 		if s.shutdownRequested {
 			return true, nil
 		}
 
 		return false, ErrExitWithoutShutdown
+	}
+
+	if req.isNotification() {
+		s.handleNotification(req)
+
+		return false, nil
+	}
+
+	return false, s.handleRequest(req)
+}
+
+func (s *server) handleNotification(req *request) {
+	if s.shutdownRequested {
+		return
+	}
+
+	switch req.Method {
 	case "textDocument/didOpen":
 		s.handleDidOpen(req)
-
-		return false, nil
 	case "textDocument/didChange":
 		s.handleDidChange(req)
-
-		return false, nil
 	case "textDocument/didClose":
 		s.handleDidClose(req)
+	}
+}
 
-		return false, nil
+func (s *server) handleRequest(req *request) error {
+	if s.shutdownRequested {
+		return s.conn.replyError(req.ID, codeInvalidRequest, "server is shutting down")
+	}
+
+	switch req.Method {
+	case "initialize":
+		return s.handleInitialize(req)
+	case "shutdown":
+		s.shutdownRequested = true
+
+		// JSON-RPC requires result on success; shutdown's is null, so send it
+		// explicitly rather than letting omitempty drop the field.
+		return s.conn.reply(req.ID, json.RawMessage("null"))
 	case "textDocument/formatting":
-		return false, s.handleFormatting(req)
+		return s.handleFormatting(req)
 	case "textDocument/rangeFormatting":
-		return false, s.handleRangeFormatting(req)
+		return s.handleRangeFormatting(req)
 	case "laravel-fmt/endOfLine":
-		return false, s.handleEndOfLine(req)
+		return s.handleEndOfLine(req)
+	case "laravel-fmt/format":
+		return s.handleFormat(req)
 	default:
-		if req.isNotification() {
-			return false, nil
-		}
-
-		return false, s.conn.replyError(req.ID, codeMethodNotFound, "method not supported: "+req.Method)
+		return s.conn.replyError(req.ID, codeMethodNotFound, "method not supported: "+req.Method)
 	}
 }
 
@@ -136,6 +178,7 @@ func (s *server) handleInitialize(req *request) error {
 			TextDocumentSync:                textDocumentSyncOptions{OpenClose: true, Change: syncFull},
 			DocumentFormattingProvider:      true,
 			DocumentRangeFormattingProvider: true,
+			Experimental:                    experimentalCapabilities{LaravelFmtFormat: true},
 		},
 		ServerInfo: serverInfo{Name: "laravel-fmt", Version: s.version},
 	}
@@ -224,44 +267,80 @@ func (s *server) handleRangeFormatting(req *request) error {
 	return s.replyEdits(req.ID, edits, err)
 }
 
-// The answer is the configured value. auto, also sent for a file the
-// formatter leaves alone, means the client keeps the line ending it has.
-//
-// A held document that does not parse is auto too: formatting refused it, and
-// an empty edit list cannot tell the client that from a document that was
-// already formatted.
+// The answer is the configured value for a document the server formats.
+// Anything else is auto, which means the client keeps the line ending it has:
+// an empty edit list cannot tell a refused or unheld document from one that
+// was already formatted.
 func (s *server) handleEndOfLine(req *request) error {
 	var p endOfLineParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return s.conn.reply(req.ID, config.EndOfLineAuto)
 	}
 
-	_, cfg, err := s.fileConfig(p.TextDocument.URI)
+	res, err := s.format(p.TextDocument.URI, scopeDocument)
 	if err != nil {
-		if !errors.Is(err, errUntouched) {
+		if !errors.Is(err, errUntouched) && !errors.Is(err, errUnparseable) {
 			s.logf("endOfLine %s: %v", p.TextDocument.URI, err)
 		}
 
 		return s.conn.reply(req.ID, config.EndOfLineAuto)
 	}
 
-	if _, err := s.format(p.TextDocument.URI, scopeDocument); errors.Is(err, errUnparseable) {
-		return s.conn.reply(req.ID, config.EndOfLineAuto)
+	return s.conn.reply(req.ID, res.endOfLine)
+}
+
+func (s *server) handleFormat(req *request) error {
+	// The request is laravel-fmt's own, so a malformed one is an error rather
+	// than an empty edit list that reads as an already formatted document.
+	var p formatParams
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		return s.conn.replyError(req.ID, codeInvalidParams, "laravel-fmt/format: "+err.Error())
 	}
 
-	return s.conn.reply(req.ID, cfg.EndOfLine)
+	if p.Text == nil {
+		return s.conn.replyError(req.ID, codeInvalidParams, "laravel-fmt/format: missing text")
+	}
+
+	scope := scopeDocument
+	if p.Range != nil {
+		scope = scopeRange
+	}
+
+	res, err := s.formatText(p.TextDocument.URI, *p.Text, scope)
+	if err != nil {
+		untouched := formatReply{Edits: []TextEdit{}, EndOfLine: config.EndOfLineAuto}
+
+		return s.replyFailure(req.ID, untouched, err)
+	}
+
+	var edits []TextEdit
+	if p.Range != nil {
+		edits = s.selectRange(res, *p.Range)
+	} else {
+		edits = buildEdits(res.src, res.out, s.encoding)
+	}
+
+	clear(s.shownFailures)
+
+	return s.conn.reply(req.ID, formatReply{Edits: edits, EndOfLine: res.endOfLine})
+}
+
+func (s *server) replyEdits(id json.RawMessage, edits []TextEdit, formatErr error) error {
+	if formatErr != nil {
+		return s.replyFailure(id, []TextEdit{}, formatErr)
+	}
+
+	clear(s.shownFailures)
+
+	return s.conn.reply(id, edits)
 }
 
 // An editor discards or merely logs an error reply to a formatting request,
 // so a failure the user has to fix is shown as a message instead. A document
 // that does not parse is usually mid-edit and already marked by the editor,
 // so it only goes to the server log.
-func (s *server) replyEdits(id json.RawMessage, edits []TextEdit, formatErr error) error {
+func (s *server) replyFailure(id json.RawMessage, untouched any, formatErr error) error {
 	switch {
-	case formatErr == nil:
-		clear(s.shownFailures)
-
-		return s.conn.reply(id, edits)
 	case errors.Is(formatErr, errUntouched):
 	case errors.Is(formatErr, errUnparseable):
 		if err := s.conn.notify("window/logMessage", messageParams{Type: messageWarning, Message: formatErr.Error()}); err != nil {
@@ -275,7 +354,7 @@ func (s *server) replyEdits(id json.RawMessage, edits []TextEdit, formatErr erro
 		}
 	}
 
-	return s.conn.reply(id, []TextEdit{})
+	return s.conn.reply(id, untouched)
 }
 
 func (s *server) documentEdits(uri string) ([]TextEdit, error) {
@@ -296,6 +375,10 @@ func (s *server) rangeEdits(uri string, r Range) ([]TextEdit, error) {
 		return nil, err
 	}
 
+	return s.selectRange(res, r), nil
+}
+
+func (s *server) selectRange(res *formatResult, r Range) []TextEdit {
 	lineStart := lspLineStarts(res.src)
 	start := positionToByte(res.src, lineStart, r.Start, s.encoding)
 	end := positionToByte(res.src, lineStart, r.End, s.encoding)
@@ -308,16 +391,18 @@ func (s *server) rangeEdits(uri string, r Range) ([]TextEdit, error) {
 
 	ranged := diff.ApplyInRange(res.src, res.out, start, end, parses)
 
-	return buildEdits(res.src, ranged, s.encoding), nil
+	return buildEdits(res.src, ranged, s.encoding)
 }
 
 // The range handler re-formats candidate splices, so the result keeps the
-// path and config, not just the output.
+// path and config, not just the output. endOfLine is the configured value,
+// before formatting resolves cfg's to the buffer's own.
 type formatResult struct {
-	path string
-	cfg  config.File
-	src  []byte
-	out  []byte
+	path      string
+	cfg       config.File
+	endOfLine string
+	src       []byte
+	out       []byte
 }
 
 var (
@@ -325,15 +410,19 @@ var (
 	errUnparseable = errors.New("cannot format")
 )
 
-// A document the server does not hold, cannot map to a file or ignores is
-// errUntouched. One that does not parse is errUnparseable: a formatter never
-// emits recovery output.
 func (s *server) format(uri string, scope formatScope) (*formatResult, error) {
 	text, ok := s.docs[uri]
 	if !ok {
 		return nil, errUntouched
 	}
 
+	return s.formatText(uri, text, scope)
+}
+
+// A document the server cannot map to a file or ignores is errUntouched. One
+// that does not parse is errUnparseable: a formatter never emits recovery
+// output.
+func (s *server) formatText(uri, text string, scope formatScope) (*formatResult, error) {
 	path, cfg, err := s.fileConfig(uri)
 	if err != nil {
 		return nil, err
@@ -348,6 +437,7 @@ func (s *server) format(uri string, scope formatScope) (*formatResult, error) {
 	// here only replaces every line on every save; handleEndOfLine tells the
 	// client instead.
 	src := []byte(text)
+	configured := cfg.EndOfLine
 	cfg.EndOfLine = config.EndOfLineAuto
 	config.ResolveEndOfLine(src, &cfg)
 
@@ -356,7 +446,7 @@ func (s *server) format(uri string, scope formatScope) (*formatResult, error) {
 		return nil, fmt.Errorf("%w %s: %w", errUnparseable, path, err)
 	}
 
-	return &formatResult{path: path, cfg: cfg, src: src, out: out}, nil
+	return &formatResult{path: path, cfg: cfg, endOfLine: configured, src: src, out: out}, nil
 }
 
 func (s *server) fileConfig(uri string) (string, config.File, error) {
@@ -435,20 +525,31 @@ func uriToPathFor(uri, goos string) (string, error) {
 	}
 
 	path := u.Path
+	windows := goos == "windows"
 
 	if host != "" && !strings.EqualFold(host, "localhost") {
-		if goos != "windows" {
+		if !windows {
 			return "", fmt.Errorf("uri host %q names a network share, which only Windows can open", host)
 		}
 
 		path = "//" + host + path
-	} else if len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+	} else if windows && isDrivePath(path) {
 		path = path[1:]
 	}
 
-	if goos == "windows" {
+	if windows {
 		path = strings.ReplaceAll(path, "/", `\`)
 	}
 
 	return path, nil
+}
+
+func isDrivePath(path string) bool {
+	if len(path) < 3 || path[0] != '/' || path[2] != ':' {
+		return false
+	}
+
+	letter := path[1]
+
+	return ('a' <= letter && letter <= 'z') || ('A' <= letter && letter <= 'Z')
 }

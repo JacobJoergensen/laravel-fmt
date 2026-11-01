@@ -284,6 +284,122 @@ func TestServeShutdownThenExitIsClean(t *testing.T) {
 	}
 }
 
+func TestServeAnswersAMalformedMessageAndKeepsServing(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		id   string
+		code int
+	}{
+		{name: "invalid json", body: `{"jsonrpc":`, id: "null", code: codeParseError},
+		{name: "empty body", body: "", id: "null", code: codeParseError},
+		{name: "not a request object", body: `[]`, id: "null", code: codeInvalidRequest},
+		{name: "request with a mistyped field", body: `{"jsonrpc":"2.0","id":7,"method":5}`, id: "7", code: codeInvalidRequest},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			input := frame(tc.body) +
+				frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`) +
+				frame(`{"jsonrpc":"2.0","method":"exit"}`)
+
+			var out bytes.Buffer
+			if err := Serve(strings.NewReader(input), &out, io.Discard, ""); err != nil {
+				t.Fatalf("Serve = %v, want nil", err)
+			}
+
+			malformed := responseTo(t, out.Bytes(), tc.id)
+			if malformed.Error == nil || malformed.Error.Code != tc.code {
+				t.Fatalf("error = %+v, want code %d", malformed.Error, tc.code)
+			}
+		})
+	}
+}
+
+func TestRequestAfterShutdownIsRefused(t *testing.T) {
+	input := frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`) +
+		frame(`{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///x.php"}}}`) +
+		frame(`{"jsonrpc":"2.0","method":"exit"}`)
+
+	var out bytes.Buffer
+	if err := Serve(strings.NewReader(input), &out, io.Discard, ""); err != nil {
+		t.Fatalf("Serve = %v, want nil", err)
+	}
+
+	if resp := responseTo(t, out.Bytes(), "2"); resp.Error == nil || resp.Error.Code != codeInvalidRequest {
+		t.Fatalf("formatting after shutdown got %+v, want error code %d", resp.Error, codeInvalidRequest)
+	}
+}
+
+func TestExitWithAnIDEndsTheServer(t *testing.T) {
+	input := frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`) +
+		frame(`{"jsonrpc":"2.0","id":2,"method":"exit"}`) +
+		frame(`{"jsonrpc":"2.0","id":3,"method":"shutdown"}`)
+
+	var out bytes.Buffer
+	if err := Serve(strings.NewReader(input), &out, io.Discard, ""); err != nil {
+		t.Fatalf("Serve = %v, want nil", err)
+	}
+
+	if got := framesIn(t, out.Bytes()); got != 1 {
+		t.Fatalf("frames written = %d, want only the shutdown reply:\n%s", got, out.Bytes())
+	}
+}
+
+func TestRequestMethodSentAsNotificationIsIgnored(t *testing.T) {
+	cases := []struct {
+		name       string
+		input      string
+		wantErr    error
+		wantFrames int
+	}{
+		{
+			name: "formatting",
+			input: frame(`{"jsonrpc":"2.0","method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///x.php"}}}`) +
+				frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`) +
+				frame(`{"jsonrpc":"2.0","method":"exit"}`),
+			wantFrames: 1,
+		},
+		{
+			name:    "shutdown",
+			input:   frame(`{"jsonrpc":"2.0","method":"shutdown"}`) + frame(`{"jsonrpc":"2.0","method":"exit"}`),
+			wantErr: ErrExitWithoutShutdown,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+
+			err := Serve(strings.NewReader(tc.input), &out, io.Discard, "")
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("Serve = %v, want %v", err, tc.wantErr)
+			}
+
+			if got := framesIn(t, out.Bytes()); got != tc.wantFrames {
+				t.Fatalf("frames written = %d, want %d:\n%s", got, tc.wantFrames, out.Bytes())
+			}
+		})
+	}
+}
+
+func framesIn(t *testing.T, out []byte) int {
+	t.Helper()
+
+	r := bufio.NewReader(bytes.NewReader(out))
+
+	for count := 0; ; count++ {
+		_, err := readFrame(r)
+		if errors.Is(err, io.EOF) {
+			return count
+		}
+
+		if err != nil {
+			t.Fatalf("read frame: %v", err)
+		}
+	}
+}
+
 func TestInitializeReportsTheServerVersion(t *testing.T) {
 	input := frame(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`) +
 		frame(`{"jsonrpc":"2.0","id":2,"method":"shutdown"}`) +
@@ -301,6 +417,25 @@ func TestInitializeReportsTheServerVersion(t *testing.T) {
 
 	if result.ServerInfo.Version != "1.2.3" {
 		t.Fatalf("serverInfo.version = %q, want 1.2.3", result.ServerInfo.Version)
+	}
+}
+
+func TestInitializeAdvertisesTheFormatRequest(t *testing.T) {
+	s, out := newRecordingServer(map[string]string{})
+
+	req := &request{JSONRPC: "2.0", ID: json.RawMessage("1"), Params: json.RawMessage("{}")}
+
+	if err := s.handleInitialize(req); err != nil {
+		t.Fatalf("handleInitialize: %v", err)
+	}
+
+	var result initializeResult
+	if err := json.Unmarshal(responseTo(t, out.Bytes(), "1").Result, &result); err != nil {
+		t.Fatalf("decode initialize result: %v", err)
+	}
+
+	if !result.Capabilities.Experimental.LaravelFmtFormat {
+		t.Fatal("capabilities.experimental.laravelFmtFormat = false, want true")
 	}
 }
 
@@ -463,6 +598,7 @@ func TestFileURIBecomesAPathForTheTargetOS(t *testing.T) {
 	}{
 		{uri: "file:///C:/app/x.php", goos: "windows", want: `C:\app\x.php`},
 		{uri: "file:///home/app/x.php", goos: "linux", want: "/home/app/x.php"},
+		{uri: "file:///a:b/x.php", goos: "linux", want: "/a:b/x.php"},
 		{uri: "file://localhost/C:/app/x.php", goos: "windows", want: `C:\app\x.php`},
 		{uri: "file://localhost/home/app/x.php", goos: "linux", want: "/home/app/x.php"},
 		{uri: "file://wsl$/Ubuntu/home/app/x.php", goos: "windows", want: `\\wsl$\Ubuntu\home\app\x.php`},
@@ -906,7 +1042,7 @@ func TestEndOfLineReportsTheProjectsLineEnding(t *testing.T) {
 		text *string
 		want string
 	}{
-		{name: "editorconfig section", file: "app/a.php", want: "crlf"},
+		{name: "document the server does not hold", file: "app/a.php", want: "auto"},
 		{name: "ignored file", file: "generated/a.php", want: "auto"},
 		{name: "held document that parses", file: "app/a.php", text: new("<?php\n\n$a = 1;\n"), want: "crlf"},
 		{name: "held document that does not parse", file: "app/a.php", text: new("<?php\n\n$a = ;\n"), want: "auto"},
@@ -941,6 +1077,139 @@ func TestEndOfLineReportsTheProjectsLineEnding(t *testing.T) {
 
 			if got != tc.want {
 				t.Fatalf("endOfLine = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatRequestFormatsTheTextItCarries(t *testing.T) {
+	workspace := t.TempDir()
+
+	seedFiles(t, workspace, map[string]string{
+		".editorconfig":    "root = true\n[*.php]\nend_of_line = crlf\n",
+		"laravel-fmt.json": `{"ignore": ["generated/**"]}`,
+	})
+
+	// The blank line keeps the two statements in separate changes, so a range
+	// over one leaves the other.
+	const unformatted = "<?php\n\n$a=1;\n\n$b=2;\n"
+
+	cases := []struct {
+		name          string
+		file          string
+		held          *string
+		text          string
+		rng           *Range
+		want          string
+		wantEndOfLine string
+	}{
+		{
+			name:          "document the server does not hold",
+			file:          "app/a.php",
+			text:          unformatted,
+			want:          "<?php\n\n$a = 1;\n\n$b = 2;\n",
+			wantEndOfLine: "crlf",
+		},
+		{
+			name:          "held document with other text",
+			file:          "app/a.php",
+			held:          new("<?php\n\n$c=3;\n"),
+			text:          unformatted,
+			want:          "<?php\n\n$a = 1;\n\n$b = 2;\n",
+			wantEndOfLine: "crlf",
+		},
+		{
+			name:          "range",
+			file:          "app/a.php",
+			text:          unformatted,
+			rng:           &Range{Start: Position{Line: 2}, End: Position{Line: 2, Character: 5}},
+			want:          "<?php\n\n$a = 1;\n\n$b=2;\n",
+			wantEndOfLine: "crlf",
+		},
+		{
+			name:          "text that does not parse",
+			file:          "app/a.php",
+			text:          "<?php\n\n$a = ;\n",
+			want:          "<?php\n\n$a = ;\n",
+			wantEndOfLine: "auto",
+		},
+		{
+			name:          "ignored file",
+			file:          "generated/a.php",
+			text:          unformatted,
+			want:          unformatted,
+			wantEndOfLine: "auto",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			uri := pathToURI(filepath.Join(workspace, filepath.FromSlash(tc.file)))
+			docs := map[string]string{}
+
+			if tc.held != nil {
+				docs[uri] = *tc.held
+			}
+
+			s, out := newRecordingServer(docs)
+
+			sent := map[string]any{"textDocument": textDocumentIdentifier{URI: uri}, "text": tc.text}
+			if tc.rng != nil {
+				sent["range"] = tc.rng
+			}
+
+			params, err := json.Marshal(sent)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			req := &request{JSONRPC: "2.0", ID: json.RawMessage(formatRequestID), Method: "laravel-fmt/format", Params: params}
+
+			if _, err := s.handle(req); err != nil {
+				t.Fatalf("handle: %v", err)
+			}
+
+			var got formatReply
+			if err := json.Unmarshal(responseTo(t, out.Bytes(), formatRequestID).Result, &got); err != nil {
+				t.Fatalf("decode result: %v", err)
+			}
+
+			if formatted := applyEditsUTF8(tc.text, got.Edits); formatted != tc.want {
+				t.Fatalf("formatted = %q, want %q", formatted, tc.want)
+			}
+
+			if got.EndOfLine != tc.wantEndOfLine {
+				t.Fatalf("endOfLine = %q, want %q", got.EndOfLine, tc.wantEndOfLine)
+			}
+		})
+	}
+}
+
+func TestFormatRequestRejectsInvalidParams(t *testing.T) {
+	cases := []struct {
+		name   string
+		params string
+	}{
+		{name: "missing text", params: `{"textDocument":{"uri":"file:///x.php"}}`},
+		{name: "text that is not a string", params: `{"textDocument":{"uri":"file:///x.php"},"text":5}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, out := newRecordingServer(map[string]string{})
+			req := &request{
+				JSONRPC: "2.0",
+				ID:      json.RawMessage(formatRequestID),
+				Method:  "laravel-fmt/format",
+				Params:  json.RawMessage(tc.params),
+			}
+
+			if _, err := s.handle(req); err != nil {
+				t.Fatalf("handle: %v", err)
+			}
+
+			if resp := responseTo(t, out.Bytes(), formatRequestID); resp.Error == nil || resp.Error.Code != codeInvalidParams {
+				t.Fatalf("error = %+v, want code %d", resp.Error, codeInvalidParams)
 			}
 		})
 	}

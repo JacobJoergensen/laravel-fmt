@@ -55,10 +55,15 @@ type initializeResult struct {
 }
 
 type serverCapabilities struct {
-	PositionEncoding                string                  `json:"positionEncoding"`
-	TextDocumentSync                textDocumentSyncOptions `json:"textDocumentSync"`
-	DocumentFormattingProvider      bool                    `json:"documentFormattingProvider"`
-	DocumentRangeFormattingProvider bool                    `json:"documentRangeFormattingProvider"`
+	PositionEncoding                string                   `json:"positionEncoding"`
+	TextDocumentSync                textDocumentSyncOptions  `json:"textDocumentSync"`
+	DocumentFormattingProvider      bool                     `json:"documentFormattingProvider"`
+	DocumentRangeFormattingProvider bool                     `json:"documentRangeFormattingProvider"`
+	Experimental                    experimentalCapabilities `json:"experimental"`
+}
+
+type experimentalCapabilities struct {
+	LaravelFmtFormat bool `json:"laravelFmtFormat"`
 }
 
 type textDocumentSyncOptions struct {
@@ -101,6 +106,20 @@ type formattingParams struct {
 
 type endOfLineParams struct {
 	TextDocument textDocumentIdentifier `json:"textDocument"`
+}
+
+// The request carries the text, so the edits apply to exactly what the client
+// holds, whatever the server was last sent. Without a range the whole
+// document is formatted.
+type formatParams struct {
+	TextDocument textDocumentIdentifier `json:"textDocument"`
+	Text         *string                `json:"text"`
+	Range        *Range                 `json:"range"`
+}
+
+type formatReply struct {
+	Edits     []TextEdit `json:"edits"`
+	EndOfLine string     `json:"endOfLine"`
 }
 
 type rangeFormattingParams struct {
