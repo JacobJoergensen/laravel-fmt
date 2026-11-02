@@ -94,6 +94,12 @@ var BlankLineStatements = []string{
 	StmtReturn, StmtSwitch, StmtThrow, StmtTry, StmtWhile, StmtYield, StmtYieldFrom,
 }
 
+// IgnoreLayer is another tool's ignore list, matched as that tool matches it.
+type IgnoreLayer struct {
+	Patterns   []string
+	IgnoreCase bool
+}
+
 // File is the laravel-fmt.json configuration.
 type File struct {
 	Schema string `json:"$schema,omitempty"`
@@ -102,7 +108,7 @@ type File struct {
 
 	// AdoptedIgnore is one layer per tool: a negation re-includes only what
 	// its own list excluded.
-	AdoptedIgnore [][]string `json:"-"`
+	AdoptedIgnore []IgnoreLayer `json:"-"`
 
 	PrintWidth  int    `json:"printWidth"`
 	IndentStyle string `json:"indentStyle"`

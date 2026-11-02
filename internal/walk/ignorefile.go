@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unicode"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
 )
@@ -45,18 +46,49 @@ func readGitignore(dir string) ([]string, error) {
 	return ReadIgnoreFile(filepath.Join(dir, ".gitignore"))
 }
 
+// git probes the file system the same way to set core.ignorecase.
+func caseInsensitive(dir string) bool {
+	swapped := swapCase(dir)
+	if swapped == dir {
+		return false
+	}
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		return false
+	}
+
+	swappedInfo, err := os.Stat(swapped)
+	if err != nil {
+		return false
+	}
+
+	return os.SameFile(info, swappedInfo)
+}
+
+func swapCase(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsUpper(r) {
+			return unicode.ToLower(r)
+		}
+
+		return unicode.ToUpper(r)
+	}, s)
+}
+
 // relDir is absDir's slash path from the ignore root, empty for the root
 // itself.
 func (s *ignoreSet) addGitignore(absDir, relDir string) error {
 	lines, err := readGitignore(absDir)
-	if err != nil {
+	if err != nil || len(lines) == 0 {
 		return err
 	}
 
 	repo, nested := s.repoOf(relDir + "/")
+	ignoreCase := caseInsensitive(absDir)
 
 	for _, raw := range lines {
-		p, ok := compileScopedPattern(relDir, raw)
+		p, ok := compileScopedPattern(relDir, raw, ignoreCase)
 
 		switch {
 		case !ok:
@@ -141,14 +173,17 @@ func (s *ignoreSet) addOuterGitignores(base string) error {
 
 	for i := range below {
 		dir := strings.Join(below[:i], "/")
+		absDir := filepath.Join(top, filepath.FromSlash(dir))
 
-		lines, err := readGitignore(filepath.Join(top, filepath.FromSlash(dir)))
+		lines, err := readGitignore(absDir)
 		if err != nil {
 			return err
 		}
 
+		ignoreCase := len(lines) > 0 && caseInsensitive(absDir)
+
 		for _, raw := range lines {
-			if p, ok := compileScopedPattern(dir, raw); ok {
+			if p, ok := compileScopedPattern(dir, raw, ignoreCase); ok {
 				outer = append(outer, p)
 			}
 		}

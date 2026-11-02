@@ -4,26 +4,28 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 )
 
 type ignorePattern struct {
-	negate   bool
-	anchored bool
-	dirOnly  bool
-	segments []string
+	negate     bool
+	anchored   bool
+	dirOnly    bool
+	ignoreCase bool
+	segments   []string
 }
 
 type ignoreMatcher []ignorePattern
 
 // Input order is preserved; match relies on it for last-match-wins.
-func compileMatcher(lines []string) ignoreMatcher {
+func compileMatcher(lines []string, ignoreCase bool) ignoreMatcher {
 	out := make(ignoreMatcher, 0, len(lines))
 
 	for _, raw := range lines {
-		if p, ok := compilePattern(raw); ok {
+		if p, ok := compilePattern(raw, ignoreCase); ok {
 			out = append(out, p)
 		}
 	}
@@ -31,14 +33,18 @@ func compileMatcher(lines []string) ignoreMatcher {
 	return out
 }
 
-func compilePattern(raw string) (ignorePattern, bool) {
+func compilePattern(raw string, ignoreCase bool) (ignorePattern, bool) {
 	line := trimTrailingSpaces(raw)
 
 	if line == "" || line[0] == '#' {
 		return ignorePattern{}, false
 	}
 
-	var p ignorePattern
+	if ignoreCase {
+		line = strings.ToLower(line)
+	}
+
+	p := ignorePattern{ignoreCase: ignoreCase}
 
 	if line[0] == '!' {
 		p.negate = true
@@ -90,10 +96,14 @@ func trimTrailingSpaces(line string) string {
 // cannot match outside its own subtree however broad it reads: a bare `*` in
 // `storage/` compiles to `storage/**/*`. Scoping a nested file by anything
 // weaker is how a lone `*` ends up ignoring an entire project.
-func compileScopedPattern(dir, raw string) (ignorePattern, bool) {
-	p, ok := compilePattern(raw)
+func compileScopedPattern(dir, raw string, ignoreCase bool) (ignorePattern, bool) {
+	p, ok := compilePattern(raw, ignoreCase)
 	if !ok || dir == "" {
 		return p, ok
+	}
+
+	if ignoreCase {
+		dir = strings.ToLower(dir)
 	}
 
 	p.segments = append(strings.Split(dir, "/"), p.segments...)
@@ -116,8 +126,20 @@ func (m ignoreMatcher) matchFrom(ignored bool, rel string, isDir bool) bool {
 }
 
 func (m ignoreMatcher) matchSegmentsFrom(ignored bool, segments []string, isDir bool) bool {
+	var lowered []string
+
 	for _, p := range m {
-		if !p.matches(segments, isDir) {
+		tested := segments
+
+		if p.ignoreCase {
+			if lowered == nil {
+				lowered = lowerSegments(segments)
+			}
+
+			tested = lowered
+		}
+
+		if !p.matches(tested, isDir) {
 			continue
 		}
 
@@ -125,6 +147,26 @@ func (m ignoreMatcher) matchSegmentsFrom(ignored bool, segments []string, isDir 
 	}
 
 	return ignored
+}
+
+// Most paths are already lower case, and strings.ToLower then returns its
+// argument, so they cost no allocation.
+func lowerSegments(segments []string) []string {
+	hasUpper := func(segment string) bool {
+		return strings.ToLower(segment) != segment
+	}
+
+	if !slices.ContainsFunc(segments, hasUpper) {
+		return segments
+	}
+
+	lowered := make([]string, len(segments))
+
+	for i, segment := range segments {
+		lowered[i] = strings.ToLower(segment)
+	}
+
+	return lowered
 }
 
 // ignoreRules are the configured patterns. Each adopted list is a layer that
@@ -136,15 +178,17 @@ type ignoreRules struct {
 	own     ignoreMatcher
 }
 
-func compileRules(cfg *config.File) ignoreRules {
+// dir is where the patterns are written from; laravel-fmt.json's list follows
+// its file system's case, as .gitignore does.
+func compileRules(cfg *config.File, dir string) ignoreRules {
 	if cfg == nil {
 		return ignoreRules{}
 	}
 
-	rules := ignoreRules{own: compileMatcher(cfg.Ignore)}
+	rules := ignoreRules{own: compileMatcher(cfg.Ignore, caseInsensitive(dir))}
 
-	for _, list := range cfg.AdoptedIgnore {
-		rules.adopted = append(rules.adopted, compileMatcher(list))
+	for _, layer := range cfg.AdoptedIgnore {
+		rules.adopted = append(rules.adopted, compileMatcher(layer.Patterns, layer.IgnoreCase))
 	}
 
 	return rules
@@ -208,7 +252,7 @@ func (s *ignoreSet) addProject(anchor string, cfg *config.File) {
 		}
 	}
 
-	s.projects = append(s.projects, projectPatterns{anchor: anchor, patterns: compileRules(cfg)})
+	s.projects = append(s.projects, projectPatterns{anchor: anchor, patterns: compileRules(cfg, anchor)})
 }
 
 // enterProject records the project dir belongs to. With anchoredHere, only a

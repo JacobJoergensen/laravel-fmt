@@ -40,8 +40,10 @@ func adoptIgnores(cfg *config.File, ctx Context, anchor string) error {
 		return err
 	}
 
+	// Prettier's matcher ignores case on every file system; Symfony Finder,
+	// which applies Pint's excludes, never does.
 	if len(prettier) > 0 {
-		cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, prettier)
+		cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, config.IgnoreLayer{Patterns: prettier, IgnoreCase: true})
 	}
 
 	owns, err := oxfmtOwnsFrontend(anchor)
@@ -50,12 +52,12 @@ func adoptIgnores(cfg *config.File, ctx Context, anchor string) error {
 	}
 
 	if owns {
-		cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, slices.Clone(oxfmtLanguages))
+		cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, config.IgnoreLayer{Patterns: slices.Clone(oxfmtLanguages)})
 	}
 
 	if ctx.Pint != nil && filepath.Clean(filepath.Dir(ctx.Pint.Path)) == filepath.Clean(anchor) {
 		if pint := pintIgnores(ctx.Pint); len(pint) > 0 {
-			cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, pint)
+			cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, config.IgnoreLayer{Patterns: pint})
 		}
 	}
 

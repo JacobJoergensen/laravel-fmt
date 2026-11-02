@@ -82,10 +82,17 @@ func TestLoadConfigAdoptsExclusionsBeneathTheUsersList(t *testing.T) {
 		t.Fatalf("Ignore =\n%q\nwant\n%q", loaded.File.Ignore, want)
 	}
 
-	wantAdopted := [][]string{{"# generated", "CLAUDE.md", "", "!keep.md"}, {"**/resources/views/flux/"}}
+	wantAdopted := []config.IgnoreLayer{
+		{Patterns: []string{"# generated", "CLAUDE.md", "", "!keep.md"}, IgnoreCase: true},
+		{Patterns: []string{"**/resources/views/flux/"}},
+	}
 
-	if !slices.EqualFunc(loaded.File.AdoptedIgnore, wantAdopted, slices.Equal) {
-		t.Fatalf("AdoptedIgnore = %q, want %q", loaded.File.AdoptedIgnore, wantAdopted)
+	sameLayer := func(a, b config.IgnoreLayer) bool {
+		return a.IgnoreCase == b.IgnoreCase && slices.Equal(a.Patterns, b.Patterns)
+	}
+
+	if !slices.EqualFunc(loaded.File.AdoptedIgnore, wantAdopted, sameLayer) {
+		t.Fatalf("AdoptedIgnore = %+v, want %+v", loaded.File.AdoptedIgnore, wantAdopted)
 	}
 }
 
@@ -98,7 +105,7 @@ func TestAdoptIgnoresSkipsAPintConfigFromAnotherDirectory(t *testing.T) {
 	}
 
 	if cfg.AdoptedIgnore != nil {
-		t.Fatalf("adopted from another directory: %q", cfg.AdoptedIgnore)
+		t.Fatalf("adopted from another directory: %+v", cfg.AdoptedIgnore)
 	}
 }
 
@@ -125,12 +132,12 @@ func TestOxfmtOwnsTheFileTypesItFormatsWhenTheProjectDeclaresIt(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			owned := slices.ContainsFunc(cfg.AdoptedIgnore, func(list []string) bool {
-				return slices.Equal(list, oxfmtLanguages)
+			owned := slices.ContainsFunc(cfg.AdoptedIgnore, func(layer config.IgnoreLayer) bool {
+				return slices.Equal(layer.Patterns, oxfmtLanguages)
 			})
 
 			if owned != tc.owned {
-				t.Fatalf("Oxfmt owns the frontend files = %v, want %v (adopted %q)", owned, tc.owned, cfg.AdoptedIgnore)
+				t.Fatalf("Oxfmt owns the frontend files = %v, want %v (adopted %+v)", owned, tc.owned, cfg.AdoptedIgnore)
 			}
 		})
 	}

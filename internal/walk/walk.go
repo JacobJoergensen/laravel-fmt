@@ -36,7 +36,7 @@ func Files(root, ignoreRoot string, cfg *config.File, args []string, projectOf P
 		return nil, fmt.Errorf("resolve %s: %w", root, err)
 	}
 
-	patterns := compileRules(cfg)
+	patterns := compileRules(cfg, ignoreRoot)
 
 	if len(args) > 0 {
 		return fromArgs(ignoreRoot, args, patterns, projectOf)
@@ -119,7 +119,7 @@ func IgnoresFile(anchor string, cfg *config.File, file string) (bool, error) {
 
 	dir := filepath.Dir(absPath)
 	prefix := ignorePrefix(anchor, dir)
-	set := &ignoreSet{cfg: compileRules(cfg)}
+	set := &ignoreSet{cfg: compileRules(cfg, anchor)}
 
 	if err := set.addChain(anchor, dir, prefix); err != nil {
 		return false, err

@@ -1,8 +1,12 @@
 package walk
 
 import (
+	"fmt"
+	"maps"
+	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
@@ -57,7 +61,7 @@ func TestIgnoreMatcher(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := compileMatcher(tc.patterns)
+			m := compileMatcher(tc.patterns, false)
 
 			got := m.match(tc.path, tc.isDir)
 
@@ -84,14 +88,14 @@ func TestAdoptedIgnoreListsAreLayersOfTheirOwn(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Ignore = append(cfg.Ignore, "!own/a.php")
-	cfg.AdoptedIgnore = [][]string{
-		{
+	cfg.AdoptedIgnore = []config.IgnoreLayer{
+		{Patterns: []string{
 			"keep/*.php", "!keep/manual.php", "!keep/pint.php",
 			"!gitkept/x.php", "!vendor/pkg/a.php",
 			"dirout/", "!dirout/manual.php",
 			"own/a.php",
-		},
-		{"keep/pint.php"},
+		}},
+		{Patterns: []string{"keep/pint.php"}},
 	}
 
 	paths, err := Files(root, root, cfg, nil, nil)
@@ -132,5 +136,83 @@ func TestAdoptedIgnoreListsAreLayersOfTheirOwn(t *testing.T) {
 		if skipped := mustSkip(t, skip, rel); skipped == slices.Contains(want, rel) {
 			t.Errorf("IgnoreFilter(%s) = %v, the walk selected it = %v", rel, skipped, !skipped)
 		}
+	}
+}
+
+func TestGitAndOwnIgnorePatternsIgnoreCaseWhereTheFileSystemDoes(t *testing.T) {
+	patterns := []string{"build/", "Old.php"}
+	gitignore := strings.Join(patterns, "\n")
+
+	tests := []struct {
+		name   string
+		extra  map[string]string
+		ignore []string
+		walked string
+	}{
+		{".gitignore", map[string]string{".gitignore": gitignore}, nil, "."},
+		{"laravel-fmt.json ignore", nil, patterns, "."},
+		{".gitignore above the walked folder", map[string]string{".git": "gitdir: elsewhere\n", ".gitignore": gitignore}, nil, "app"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tree := map[string]string{}
+			maps.Copy(tree, tt.extra)
+
+			for _, rel := range []string{"Build/b.php", "old.php", "keep.php"} {
+				tree[path.Join(tt.walked, rel)] = "<?php"
+			}
+
+			cfg := config.Default()
+			cfg.Ignore = append(cfg.Ignore, tt.ignore...)
+
+			root := buildTree(t, tree)
+			dir := filepath.Join(root, filepath.FromSlash(tt.walked))
+			caseInsensitiveFS := exists(filepath.Join(dir, "KEEP.PHP"))
+
+			got := mustFiles(t, dir, cfg)
+
+			for _, rel := range []string{"Build/b.php", "old.php"} {
+				if selected := containsRel(got, dir, rel); selected == caseInsensitiveFS {
+					t.Errorf("%s selected = %v, want %v", rel, selected, !caseInsensitiveFS)
+				}
+			}
+
+			if !containsRel(got, dir, "keep.php") {
+				t.Errorf("keep.php not selected: %v", got)
+			}
+
+			ignored, err := IgnoresFile(dir, cfg, filepath.Join(dir, "old.php"))
+			if err != nil {
+				t.Fatalf("IgnoresFile: %v", err)
+			}
+
+			if ignored != caseInsensitiveFS {
+				t.Errorf("IgnoresFile(old.php) = %v, want %v", ignored, caseInsensitiveFS)
+			}
+		})
+	}
+}
+
+func TestAdoptedIgnoreLayersMatchCaseAsTheirToolDoes(t *testing.T) {
+	root := buildTree(t, map[string]string{"Docs/a.md": "# a\n", "readme.md": "# r\n", "keep.md": "# k\n"})
+
+	for _, ignoreCase := range []bool{true, false} {
+		t.Run(fmt.Sprintf("ignoreCase=%v", ignoreCase), func(t *testing.T) {
+			cfg := config.Default()
+			cfg.AdoptedIgnore = []config.IgnoreLayer{{Patterns: []string{"docs/", "README.MD"}, IgnoreCase: ignoreCase}}
+
+			got := mustFiles(t, root, cfg)
+
+			for _, rel := range []string{"Docs/a.md", "readme.md"} {
+				if containsRel(got, root, rel) == ignoreCase {
+					t.Errorf("%s selected = %v, want %v", rel, ignoreCase, !ignoreCase)
+				}
+			}
+
+			if !containsRel(got, root, "keep.md") {
+				t.Errorf("keep.md not selected: %v", got)
+			}
+		})
 	}
 }
