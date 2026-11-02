@@ -105,10 +105,19 @@ func prettierIgnores(dir string) ([]string, error) {
 }
 
 // pintIgnores translates pint.json's Finder options: exclude names directories
-// at any depth, notName globs the file name, and notPath is a path fragment.
-// What gitignore cannot express (a regex, a notName with / or {}) is dropped.
+// at any depth, notName globs the file name, and notPath is found anywhere in
+// the path.
 func pintIgnores(p *Pint) []string {
 	var patterns []string
+
+	// Finder filters names without pruning, so a directory a notName matches
+	// is still walked. notName goes first so exclude and notPath still win
+	// over that negation.
+	for _, name := range p.NotName {
+		for _, glob := range notNameGlobs(name) {
+			patterns = append(patterns, glob, "!"+glob+"/")
+		}
+	}
 
 	for _, dir := range p.Exclude {
 		dir = strings.TrimRight(dir, "/")
@@ -124,28 +133,140 @@ func pintIgnores(p *Pint) []string {
 		patterns = append(patterns, pattern)
 	}
 
-	for _, name := range p.NotName {
-		if name == "" || strings.ContainsAny(name, "/{") || isFinderRegex(name) {
-			continue
-		}
-
-		patterns = append(patterns, escapeLeading(name))
-	}
-
 	for _, fragment := range p.NotPath {
 		if isFinderRegex(fragment) {
+			literal, ok := regexLiteral(fragment)
+			if !ok {
+				continue
+			}
+
+			fragment = literal
+		}
+
+		if strings.Trim(fragment, "/") == "" || strings.Contains(fragment, "//") {
 			continue
 		}
 
-		fragment = strings.Trim(fragment, "/")
-		if fragment == "" {
-			continue
-		}
-
-		patterns = append(patterns, "**/"+escapeGlob(fragment))
+		patterns = append(patterns, substringPattern(fragment))
 	}
 
 	return patterns
+}
+
+// Symfony's glob expands {a,b}, and a name never holds a slash, so a notName
+// with one matches nothing.
+func notNameGlobs(name string) []string {
+	if isFinderRegex(name) {
+		literal, ok := regexLiteral(name)
+		if !ok || strings.Contains(literal, "/") {
+			return nil
+		}
+
+		return []string{"*" + escapeGlob(literal) + "*"}
+	}
+
+	// gitignore and Symfony both read a backslash as an escape, so expanding
+	// around an escaped brace would misread it.
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, `\`) && strings.Contains(name, "{") {
+		return nil
+	}
+
+	globs := expandBraces(name)
+	for i, glob := range globs {
+		globs[i] = escapeLeading(glob)
+	}
+
+	return globs
+}
+
+// An unclosed brace is an invalid regex to Symfony, which then matches nothing.
+func expandBraces(glob string) []string {
+	open := strings.IndexByte(glob, '{')
+	if open < 0 {
+		return []string{glob}
+	}
+
+	depth, start := 0, open+1
+
+	var alternatives []string
+
+	for i := open; i < len(glob); i++ {
+		switch glob[i] {
+		case '{':
+			depth++
+		case ',':
+			if depth == 1 {
+				alternatives = append(alternatives, glob[start:i])
+				start = i + 1
+			}
+		case '}':
+			depth--
+			if depth > 0 {
+				continue
+			}
+
+			alternatives = append(alternatives, glob[start:i])
+
+			var out []string
+
+			for _, alternative := range alternatives {
+				for _, rest := range expandBraces(alternative + glob[i+1:]) {
+					out = append(out, glob[:open]+rest)
+				}
+			}
+
+			return out
+		}
+	}
+
+	return nil
+}
+
+// A Finder regex with no regex syntax or modifiers finds its text anywhere,
+// like a substring.
+func regexLiteral(regex string) (string, bool) {
+	closing := regex[0]
+
+	for _, pair := range [...]string{"{}", "()", "[]", "<>"} {
+		if closing == pair[0] {
+			closing = pair[1]
+		}
+	}
+
+	body := regex[1 : len(regex)-1]
+
+	if regex[len(regex)-1] != closing || body == "" || strings.ContainsAny(body, `\^$.|?*+()[]{}`+string(regex[0])) {
+		return "", false
+	}
+
+	return body, true
+}
+
+// The fragment's first and last parts may be the ends of longer names; a
+// slash at either end pins a name boundary there.
+func substringPattern(fragment string) string {
+	parts := strings.Split(fragment, "/")
+	for i, part := range parts {
+		parts[i] = escapeGlob(part)
+	}
+
+	if len(parts) == 1 {
+		return "*" + parts[0] + "*"
+	}
+
+	last := len(parts) - 1
+
+	if parts[0] == "" {
+		parts[0] = "*/**"
+	} else {
+		parts[0] = "**/*" + parts[0]
+	}
+
+	if parts[last] != "" {
+		parts[last] += "*"
+	}
+
+	return strings.Join(parts, "/")
 }
 
 func escapeGlob(literal string) string {

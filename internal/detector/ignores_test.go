@@ -10,28 +10,47 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/walk"
 )
 
-func TestPintIgnoresSelectWhatPintsWalkSkips(t *testing.T) {
+// Each row is what Symfony Finder, which Pint walks with, does with the file.
+func TestPintIgnoresSkipWhatPintSkips(t *testing.T) {
 	cases := []struct {
-		name string
-		pint Pint
-		want []string
+		name     string
+		pint     Pint
+		file     string
+		wantSkip bool
 	}{
-		{"exclude by name matches that directory at any depth", Pint{Exclude: []string{"build/"}}, []string{"build/"}},
-		{"exclude by path matches that path at any depth", Pint{Exclude: []string{"resources/views/flux"}}, []string{"**/resources/views/flux/"}},
-		{"exclude is literal", Pint{Exclude: []string{"a*b", "#tmp"}}, []string{`a\*b/`, `\#tmp/`}},
-		{"notName is a file name glob", Pint{NotName: []string{"*-my-file.php"}}, []string{"*-my-file.php"}},
-		{"notPath is a literal fragment", Pint{NotPath: []string{"path/to/excluded-file.php"}}, []string{"**/path/to/excluded-file.php"}},
-		{
-			"forms gitignore cannot say are left out",
-			Pint{NotName: []string{"/\\.gen\\.php$/", "{a,b}.php", "sub/x.php"}, NotPath: []string{"#tests/.*#i", "/tests/Fixtures/"}},
-			nil,
-		},
+		{"exclude by name matches that directory at any depth", Pint{Exclude: []string{"build/"}}, "src/build/a.php", true},
+		{"exclude by path matches that path at any depth", Pint{Exclude: []string{"resources/views/flux"}}, "pkg/resources/views/flux/a.php", true},
+		{"exclude is literal", Pint{Exclude: []string{"a*b"}}, "axb/a.php", false},
+		{"exclude starting with # is not a comment", Pint{Exclude: []string{"#tmp"}}, "#tmp/a.php", true},
+		{"notName globs the file name", Pint{NotName: []string{"*-my-file.php"}}, "app/x-my-file.php", true},
+		{"notName matching a directory does not prune its children", Pint{NotName: []string{"legacy*"}}, "app/legacy_helpers/Support.php", false},
+		{"exclude still prunes a directory notName matches", Pint{NotName: []string{"legacy*"}, Exclude: []string{"legacy_helpers"}}, "app/legacy_helpers/Support.php", true},
+		{"notName expands braces", Pint{NotName: []string{"*.{stub,tpl}.php"}}, "app/x.tpl.php", true},
+		{"notName regex without regex syntax matches part of the name", Pint{NotName: []string{"/legacy/"}}, "app/old_legacy_x.php", true},
+		{"notName with a slash matches no name", Pint{NotName: []string{"sub/x.php"}}, "sub/x.php", false},
+		{"notPath matches a file path", Pint{NotPath: []string{"path/to/excluded-file.php"}}, "src/path/to/excluded-file.php", true},
+		{"notPath is a substring match across a segment", Pint{NotPath: []string{"tests/Fixtures"}}, "tests/FixturesTest.php", true},
+		{"notPath is a substring match within a segment", Pint{NotPath: []string{"Fixtures/bad"}}, "tests/Fixtures/bad_input.php", true},
+		{"notPath with a leading slash needs a directory before it", Pint{NotPath: []string{"/fixtures"}}, "fixtures/a.php", false},
+		{"notPath regex without regex syntax matches anywhere", Pint{NotPath: []string{"/Models/"}}, "app/Models/User.php", true},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := pintIgnores(&tc.pint); !slices.Equal(got, tc.want) {
-				t.Fatalf("got %q, want %q", got, tc.want)
+			root := t.TempDir()
+			seedFileAt(t, root, tc.file, "<?php\n")
+
+			cfg := config.Default()
+			cfg.AdoptedIgnore = []config.IgnoreLayer{{Patterns: pintIgnores(&tc.pint)}}
+
+			paths, err := walk.Files(root, root, cfg, nil, nil)
+			if err != nil {
+				t.Fatalf("Files: %v", err)
+			}
+
+			skipped := len(paths) == 0
+			if skipped != tc.wantSkip {
+				t.Fatalf("%s skipped = %v, want %v (patterns %q)", tc.file, skipped, tc.wantSkip, pintIgnores(&tc.pint))
 			}
 		})
 	}

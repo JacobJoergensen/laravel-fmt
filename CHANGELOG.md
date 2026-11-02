@@ -19,6 +19,9 @@
 * Fixed `--staged` storing CRLF in the commit when git's line-ending conversion would store LF
 * Fixed a project opened through a symlinked folder or junction formatting no files
 * Fixed `--since` and `--staged` in a project opened through a symlinked folder ignoring the `--config` file's `ignore` list
+* Fixed a Pint `notName` like `legacy*` skipping every file in a folder it matches, which Pint still formats
+* Fixed a Pint `notPath` like `tests/Fixtures` missing `tests/FixturesTest.php`, which Pint matches as part of the path
+* Fixed Pint `notName` braces like `*.{stub,tpl}.php` and plain regexes like `/Models/` in `notName` or `notPath` being ignored
 
 ## Version 0.7.0 (2026-10-29)
 * Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON
