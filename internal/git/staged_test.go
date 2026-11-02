@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -25,6 +26,8 @@ type mockRepo struct {
 	staged   map[string]string
 	stages   int
 	counter  int
+
+	workingTreeWriteErr error
 }
 
 func (m *mockRepo) Root() string { return m.root }
@@ -51,6 +54,21 @@ func (m *mockRepo) WriteBlob(path string, content []byte) (string, error) {
 	m.writes[path] = content
 
 	return sha, nil
+}
+
+func (m *mockRepo) WriteWorkingTreeBlob(path string) (string, error) {
+	if m.workingTreeWriteErr != nil {
+		return "", m.workingTreeWriteErr
+	}
+
+	native := filepath.FromSlash(path)
+
+	content, err := os.ReadFile(filepath.Join(m.root, native))
+	if err != nil {
+		return "", fmt.Errorf("read working tree: %w", err)
+	}
+
+	return m.WriteBlob(path, content)
 }
 
 func (m *mockRepo) Stage(entries []StagedFile) error {
@@ -148,6 +166,50 @@ func TestFormatStagedFormatsWorkingTreeUnderEOLFilter(t *testing.T) {
 
 	if len(res.PartiallyStaged) != 0 {
 		t.Errorf("PartiallyStaged = %v, want none: git reports no unstaged edit", res.PartiallyStaged)
+	}
+}
+
+func TestFormatStagedFormatsTheWorkingTreeCopyAsGitChecksItOut(t *testing.T) {
+	root := t.TempDir()
+	writeWorkingTree(t, root, "<?php  echo 1;\r\n")
+
+	repo := newMockRepo(root, StagedFile{Path: phpPath, Mode: "100644", SHA: oldSHA}, "<?php  echo 1;\n")
+
+	keepsLineEnding := func(_ string, src []byte) ([]byte, error) {
+		if bytes.HasSuffix(src, []byte("\r\n")) {
+			return []byte("<?php echo 1;\r\n"), nil
+		}
+
+		return []byte(formattedPHP), nil
+	}
+
+	if _, err := FormatStaged(repo, keepsLineEnding, nil); err != nil {
+		t.Fatalf("FormatStaged: %v", err)
+	}
+
+	if got := readWorkingTree(t, root); got != "<?php echo 1;\r\n" {
+		t.Errorf("working tree = %q, want its CRLF line ending kept", got)
+	}
+}
+
+func TestFormatStagedRestoresTheWorkingTreeWhenStagingFails(t *testing.T) {
+	root := t.TempDir()
+	writeWorkingTree(t, root, stagedPHP)
+
+	repo := newMockRepo(root, StagedFile{Path: phpPath, Mode: "100644", SHA: oldSHA}, stagedPHP)
+	repo.workingTreeWriteErr = errors.New("hash-object failed")
+
+	res, err := FormatStaged(repo, formatPHP, nil)
+	if err != nil {
+		t.Fatalf("FormatStaged: %v", err)
+	}
+
+	if got := readWorkingTree(t, root); got != stagedPHP {
+		t.Errorf("working tree = %q, want it restored to %q", got, stagedPHP)
+	}
+
+	if len(res.Failed) != 1 || len(repo.staged) != 0 {
+		t.Errorf("Failed = %v, staged = %v, want one failure and nothing staged", res.Failed, repo.staged)
 	}
 }
 
@@ -274,7 +336,10 @@ func TestFormatStagedSkipsNonFormattable(t *testing.T) {
 }
 
 func TestFormatStagedRecordsFormatFailure(t *testing.T) {
-	repo := newMockRepo(t.TempDir(), StagedFile{Path: phpPath, Mode: "100644", SHA: oldSHA}, "<?php")
+	root := t.TempDir()
+	writeWorkingTree(t, root, "<?php")
+
+	repo := newMockRepo(root, StagedFile{Path: phpPath, Mode: "100644", SHA: oldSHA}, "<?php")
 
 	format := func(_ string, _ []byte) ([]byte, error) {
 		return nil, errors.New("parse error at line 1")

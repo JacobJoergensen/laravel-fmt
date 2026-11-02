@@ -5,9 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
@@ -35,7 +33,10 @@ type Repo interface {
 	// the way git would stage it, is the blob named sha.
 	WorkingTreeMatches(path, sha string) (bool, error)
 	ReadBlob(sha string) ([]byte, error)
+	// WriteBlob and WriteWorkingTreeBlob store a blob as git add would for
+	// path, through its clean and end-of-line filters.
 	WriteBlob(path string, content []byte) (string, error)
+	WriteWorkingTreeBlob(path string) (string, error)
 	// Stage points each entry's index path at its blob, in one index write.
 	Stage(entries []StagedFile) error
 	// Close stops the git processes the calls above started.
@@ -45,11 +46,10 @@ type Repo interface {
 // Each process starts on first use, so a commit with nothing to format never
 // starts the writer.
 type execRepo struct {
-	root    string
-	reader  *process
-	writer  *process
-	hasher  *process
-	blobDir string
+	root   string
+	reader *process
+	writer *process
+	hasher *process
 }
 
 // Open returns a Repo for the repository containing dir, or an error if dir
@@ -131,31 +131,24 @@ func (r *execRepo) ReadBlob(sha string) ([]byte, error) {
 	return content, nil
 }
 
-// hash-object cannot take several contents on stdin, so each passes through
-// a scratch file. --no-filters stores the bytes verbatim, so the index holds
-// exactly the formatter's output.
+// git rejects --path with --stdin-paths, so each call starts git. Only a
+// partially staged file comes here, which is rare.
 func (r *execRepo) WriteBlob(path string, content []byte) (string, error) {
-	if r.blobDir == "" {
-		dir, err := os.MkdirTemp("", "laravel-fmt-staged-")
-		if err != nil {
-			return "", fmt.Errorf("create blob scratch directory: %w", err)
-		}
-
-		r.blobDir = dir
+	out, err := runGitStdin(r.root, content, "hash-object", "-w", "--stdin", "--path="+path)
+	if err != nil {
+		return "", fmt.Errorf("write blob for %s: %w", path, err)
 	}
 
-	p, err := r.use(&r.writer, "hash-object", "-w", "--no-filters", "--stdin-paths")
+	return strings.TrimSpace(string(out)), nil
+}
+
+func (r *execRepo) WriteWorkingTreeBlob(path string) (string, error) {
+	p, err := r.use(&r.writer, "hash-object", "-w", "--stdin-paths")
 	if err != nil {
 		return "", err
 	}
 
-	// One file serves every blob: git has read it by the time it replies.
-	scratch := filepath.Join(r.blobDir, "blob")
-	if err := os.WriteFile(scratch, content, 0o600); err != nil {
-		return "", fmt.Errorf("write blob for %s: %w", path, err)
-	}
-
-	sha, err := p.request(quotePath(scratch))
+	sha, err := p.request(quotePath(path))
 	if err != nil {
 		return "", fmt.Errorf("write blob for %s: %w", path, drop(&r.writer, err))
 	}
@@ -205,12 +198,6 @@ func (r *execRepo) Close() error {
 	for _, p := range []*process{r.reader, r.writer, r.hasher} {
 		if p != nil {
 			errs = append(errs, p.close())
-		}
-	}
-
-	if r.blobDir != "" {
-		if err := os.RemoveAll(r.blobDir); err != nil {
-			errs = append(errs, fmt.Errorf("remove blob scratch directory: %w", err))
 		}
 	}
 

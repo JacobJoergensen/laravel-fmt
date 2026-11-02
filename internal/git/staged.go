@@ -2,6 +2,7 @@ package git
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -98,30 +99,12 @@ func formatStagedFile(repo Repo, format FormatFunc, f StagedFile, unstaged map[s
 		return "", err
 	}
 
-	out, err := format(f.Path, staged)
-	if err != nil {
-		return "", err
-	}
-
-	if bytes.Equal(out, staged) {
-		return "", nil
-	}
-
-	sha, err := repo.WriteBlob(f.Path, out)
-	if err != nil {
-		return "", err
-	}
-
 	if unstaged[f.Path] {
-		res.PartiallyStaged = append(res.PartiallyStaged, f.Path)
-
-		return sha, nil
+		return formatPartiallyStaged(repo, format, f, staged, res)
 	}
 
 	wtPath := filepath.Join(repo.Root(), filepath.FromSlash(f.Path))
 
-	// The working-tree bytes can differ from the blob (line-ending conversion),
-	// so the original a failed write restores is read from disk.
 	current, err := os.ReadFile(wtPath)
 	if err != nil {
 		return "", fmt.Errorf("read working tree: %w", err)
@@ -136,16 +119,54 @@ func formatStagedFile(repo Repo, format FormatFunc, f StagedFile, unstaged map[s
 	}
 
 	if edited {
-		res.PartiallyStaged = append(res.PartiallyStaged, f.Path)
+		return formatPartiallyStaged(repo, format, f, staged, res)
+	}
 
-		return sha, nil
+	// The file on disk is the blob as git checks it out, so formatting it and
+	// staging it as git add does matches formatting the file and adding it.
+	out, err := format(f.Path, current)
+	if err != nil {
+		return "", err
+	}
+
+	if bytes.Equal(out, current) {
+		return "", nil
 	}
 
 	if err := rewrite.Rewrite(wtPath, current, out); err != nil {
 		return "", fmt.Errorf("write working tree: %w", err)
 	}
 
+	sha, err := repo.WriteWorkingTreeBlob(f.Path)
+	if err != nil {
+		if restoreErr := rewrite.Rewrite(wtPath, out, current); restoreErr != nil {
+			err = errors.Join(err, fmt.Errorf("restore working tree: %w", restoreErr))
+		}
+
+		return "", err
+	}
+
 	res.Reformatted = append(res.Reformatted, f.Path)
+
+	return sha, nil
+}
+
+func formatPartiallyStaged(repo Repo, format FormatFunc, f StagedFile, staged []byte, res *Result) (string, error) {
+	out, err := format(f.Path, staged)
+	if err != nil {
+		return "", err
+	}
+
+	if bytes.Equal(out, staged) {
+		return "", nil
+	}
+
+	sha, err := repo.WriteBlob(f.Path, out)
+	if err != nil {
+		return "", err
+	}
+
+	res.PartiallyStaged = append(res.PartiallyStaged, f.Path)
 
 	return sha, nil
 }
