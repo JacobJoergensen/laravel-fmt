@@ -341,11 +341,13 @@ func TestFilesListsEachFileOnceWhenArgumentsOverlap(t *testing.T) {
 	cfg.Ignore = append(cfg.Ignore, "app/Ignored.php")
 
 	absUser := filepath.Join(root, "app", "Models", "User.php")
+	caseInsensitiveFS := exists(filepath.Join(root, "APP", "OTHER.PHP"))
 
 	cases := []struct {
-		name string
-		args []string
-		want []string
+		name            string
+		args            []string
+		want            []string
+		caseInsensitive bool
 	}{
 		{
 			name: "overlapping globs",
@@ -378,6 +380,12 @@ func TestFilesListsEachFileOnceWhenArgumentsOverlap(t *testing.T) {
 			want: []string{"app/Models/User.php"},
 		},
 		{
+			name:            "same file spelled in different case",
+			args:            []string{"app/Other.php", "APP/OTHER.PHP"},
+			want:            []string{"app/Other.php"},
+			caseInsensitive: true,
+		},
+		{
 			name: "directory and a glob inside it",
 			args: []string{"app", "app/**/*.php"},
 			want: []string{"app/Models/User.php", "app/Other.php"},
@@ -396,6 +404,10 @@ func TestFilesListsEachFileOnceWhenArgumentsOverlap(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.caseInsensitive && !caseInsensitiveFS {
+				t.Skip("file system is case-sensitive")
+			}
+
 			paths, err := Files(root, root, cfg, tc.args, nil)
 			if err != nil {
 				t.Fatalf("Files: %v", err)
@@ -1145,5 +1157,43 @@ func TestIgnoreFilterAnchorsTheRunAndHoldsFilesToTheirProject(t *testing.T) {
 		if got := mustSkip(t, skip, path); got != want {
 			t.Errorf("skip(%q) = %v, want %v", path, got, want)
 		}
+	}
+}
+
+func TestFilesTakesAnExistingBracketedPathAsNamed(t *testing.T) {
+	root := buildTree(t, map[string]string{
+		"pages/[id].blade.php":        "<div></div>",
+		"pages/i.blade.php":           "<div></div>",
+		"pages/[slug]/show.blade.php": "<div></div>",
+		"pages/s/show.blade.php":      "<div></div>",
+	})
+
+	t.Chdir(root)
+
+	tests := []struct {
+		name string
+		arg  string
+		want string
+	}{
+		{"file", "pages/[id].blade.php", "pages/[id].blade.php"},
+		{"pattern below a bracketed directory", "pages/[slug]/*.blade.php", "pages/[slug]/show.blade.php"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Files(root, root, config.Default(), []string{tt.arg}, nil)
+			if err != nil {
+				t.Fatalf("Files: %v", err)
+			}
+
+			wantPath, err := filepath.Abs(tt.want)
+			if err != nil {
+				t.Fatalf("resolve %s: %v", tt.want, err)
+			}
+
+			if want := []string{wantPath}; !slices.Equal(got, want) {
+				t.Fatalf("Files(%q) = %v, want %v", tt.arg, got, want)
+			}
+		})
 	}
 }

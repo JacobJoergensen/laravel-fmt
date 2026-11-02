@@ -147,12 +147,12 @@ func hasHiddenSegment(slashPath string) bool {
 func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf ProjectIgnore) ([]string, error) {
 	var out []string
 
-	seen := make(map[string]bool)
+	seen := make(map[string][]string)
 
 	walks := make(map[string][]string)
 
 	for _, arg := range args {
-		if isGlobPattern(arg) {
+		if isGlobArg(arg) {
 			base, segments, err := splitGlob(arg)
 			if err != nil {
 				return nil, err
@@ -211,17 +211,43 @@ func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf P
 	return out, nil
 }
 
-// Every path here is absolute and clean, so the path itself identifies the
-// file.
-func appendUnseen(out []string, seen map[string]bool, paths ...string) []string {
+// On a case-insensitive file system two spellings name one file, so paths
+// equal but for case are compared by identity.
+func appendUnseen(out []string, seen map[string][]string, paths ...string) []string {
 	for _, abs := range paths {
-		if !seen[abs] {
-			seen[abs] = true
-			out = append(out, abs)
+		key := strings.ToLower(abs)
+
+		isSame := func(earlier string) bool {
+			return sameFile(earlier, abs)
 		}
+
+		if slices.ContainsFunc(seen[key], isSame) {
+			continue
+		}
+
+		seen[key] = append(seen[key], abs)
+		out = append(out, abs)
 	}
 
 	return out
+}
+
+func sameFile(a, b string) bool {
+	if a == b {
+		return true
+	}
+
+	infoA, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+
+	infoB, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+
+	return os.SameFile(infoA, infoB)
 }
 
 // Windows shells do not expand globs, so laravel-fmt does, for the
@@ -230,9 +256,21 @@ func isGlobPattern(arg string) bool {
 	return strings.ContainsAny(arg, "*?[")
 }
 
+// A path that exists is taken as named, so a Folio page like [id].blade.php is
+// never read as a pattern.
+func isGlobArg(arg string) bool {
+	return isGlobPattern(arg) && !exists(arg)
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+
+	return err == nil
+}
+
 // GlobBase returns the absolute directory above the first segment of arg that
-// holds a glob character, or arg made absolute when it holds none. On Windows
-// \ is a separator there, not an escape.
+// holds a glob character and does not exist, or arg made absolute when there is
+// none. On Windows \ is a separator there, not an escape.
 func GlobBase(arg string) (string, error) {
 	base, _, err := globBaseAndSegments(arg)
 
@@ -247,7 +285,7 @@ func globBaseAndSegments(arg string) (string, []string, error) {
 
 	var segments []string
 
-	for isGlobPattern(base) {
+	for isGlobArg(base) {
 		segments = append(segments, filepath.Base(base))
 		base = filepath.Dir(base)
 	}

@@ -10,6 +10,8 @@
 * Fixed `laravel-fmt lsp` running out of memory on a corrupted message header
 * Fixed `laravel-fmt lsp` range formatting reaching past the selected lines when a range position is out of bounds
 * Fixed `laravel-fmt lsp` on macOS and Linux reading a folder named like `a:b` as a Windows drive
+* Fixed a named file or folder with brackets like a Folio `[id].blade.php` being read as a glob, which formatted other files instead
+* Fixed a file named twice in different case on Windows or macOS being formatted and counted twice
 
 ## Version 0.7.0 (2026-10-29)
 * Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON
