@@ -17,6 +17,8 @@
 * Fixed `.prettierignore` patterns missing a file whose name differs in case, which Prettier matches
 * Fixed `--staged` with "auto" line endings turning a CRLF working copy into LF under git's `core.autocrlf`
 * Fixed `--staged` storing CRLF in the commit when git's line-ending conversion would store LF
+* Fixed a project opened through a symlinked folder or junction formatting no files
+* Fixed `--since` and `--staged` in a project opened through a symlinked folder ignoring the `--config` file's `ignore` list
 
 ## Version 0.7.0 (2026-10-29)
 * Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON

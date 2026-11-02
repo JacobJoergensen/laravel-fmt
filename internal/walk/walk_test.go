@@ -840,9 +840,6 @@ func symlinkOutsideFile(t *testing.T, root, rel string) bool {
 	return os.Symlink(target, filepath.Join(root, filepath.FromSlash(rel))) == nil
 }
 
-// Windows falls back to a directory junction, which needs no privilege;
-// either way the link is not a regular file. mklink is a cmd builtin and
-// cannot be exec'd on its own.
 func linkOutside(t *testing.T, root, rel string) bool {
 	t.Helper()
 
@@ -850,14 +847,39 @@ func linkOutside(t *testing.T, root, rel string) bool {
 		return true
 	}
 
+	return linkDir(t, filepath.Join(root, filepath.FromSlash(rel)), t.TempDir())
+}
+
+// Windows falls back to a directory junction, which needs no privilege.
+// mklink is a cmd builtin and cannot be exec'd on its own.
+func linkDir(t *testing.T, link, target string) bool {
+	t.Helper()
+
+	if os.Symlink(target, link) == nil {
+		return true
+	}
+
 	if runtime.GOOS != "windows" {
 		return false
 	}
 
-	link := filepath.Join(root, filepath.FromSlash(rel))
-
 	//nolint:gosec // both paths are t.TempDir() output, not input
-	return exec.Command("cmd", "/c", "mklink", "/J", link, t.TempDir()).Run() == nil
+	return exec.Command("cmd", "/c", "mklink", "/J", link, target).Run() == nil
+}
+
+func TestFilesWalksAProjectOpenedThroughALinkedFolder(t *testing.T) {
+	root := buildTree(t, map[string]string{"app/User.php": "<?php"})
+	link := filepath.Join(t.TempDir(), "linked")
+
+	if !linkDir(t, link, root) {
+		t.Skip("this platform will not create a link without extra privileges")
+	}
+
+	got := mustFiles(t, link, config.Default())
+
+	if !containsRel(got, link, "app/User.php") {
+		t.Fatalf("app/User.php not found through the linked folder: %v", got)
+	}
 }
 
 func TestFilesSkipsLinksFoundByTraversal(t *testing.T) {

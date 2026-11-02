@@ -362,7 +362,14 @@ func walkTree(dir, ignoreRoot string, cfg ignoreRules, projectOf ProjectIgnore) 
 
 	var out []string
 
-	err := filepath.WalkDir(dir, func(abs string, d fs.DirEntry, walkErr error) error {
+	// WalkDir does not follow a link it starts at; a trailing separator makes
+	// the start resolve to the folder it links to.
+	start := dir
+	if !os.IsPathSeparator(start[len(start)-1]) {
+		start += string(filepath.Separator)
+	}
+
+	err := filepath.WalkDir(start, func(abs string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

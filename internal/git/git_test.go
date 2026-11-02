@@ -1,6 +1,12 @@
 package git
 
-import "testing"
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
 
 func TestParseRawKeepsRegularStagedBlobs(t *testing.T) {
 	out := []byte(
@@ -37,4 +43,56 @@ func TestSplitNULDropsEmptyTrailingRecord(t *testing.T) {
 	if splitNUL(nil) != nil {
 		t.Error("splitNUL(nil) should be nil")
 	}
+}
+
+func TestRootFromNamesTheRootThroughTheLinkItWasReachedBy(t *testing.T) {
+	toplevel := t.TempDir()
+	sub := filepath.Join(toplevel, "sub")
+
+	if err := os.Mkdir(sub, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	linked := filepath.Join(t.TempDir(), "linked")
+	linkedSub := filepath.Join(t.TempDir(), "linked")
+
+	if !linkDir(t, linked, toplevel) || !linkDir(t, linkedSub, sub) {
+		t.Skip("this platform will not create a link without extra privileges")
+	}
+
+	tests := []struct {
+		name string
+		dir  string
+		cdup string
+		want string
+	}{
+		{"at the root", linked, "", linked},
+		{"in a subfolder", filepath.Join(linked, "sub"), "../", linked},
+		{"link to a subfolder has no path to the root", linkedSub, "../", toplevel},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rootFrom(tt.dir, toplevel, tt.cdup); got != tt.want {
+				t.Fatalf("rootFrom(%s, %s) = %s, want %s", tt.dir, tt.cdup, got, tt.want)
+			}
+		})
+	}
+}
+
+// Windows falls back to a directory junction, which needs no privilege.
+// mklink is a cmd builtin and cannot be exec'd on its own.
+func linkDir(t *testing.T, link, target string) bool {
+	t.Helper()
+
+	if os.Symlink(target, link) == nil {
+		return true
+	}
+
+	if runtime.GOOS != "windows" {
+		return false
+	}
+
+	//nolint:gosec // both paths are t.TempDir() output, not input
+	return exec.Command("cmd", "/c", "mklink", "/J", link, target).Run() == nil
 }

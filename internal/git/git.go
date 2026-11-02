@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -55,12 +57,33 @@ type execRepo struct {
 // Open returns a Repo for the repository containing dir, or an error if dir
 // is not in a git work tree.
 func Open(dir string) (Repo, error) {
-	out, err := runGit(dir, "rev-parse", "--show-toplevel")
+	out, err := runGit(dir, "rev-parse", "--show-toplevel", "--show-cdup")
 	if err != nil {
 		return nil, err
 	}
 
-	return &execRepo{root: strings.TrimSpace(string(out))}, nil
+	toplevel, cdup, _ := strings.Cut(strings.TrimSuffix(string(out), "\n"), "\n")
+
+	return &execRepo{root: rootFrom(dir, toplevel, cdup)}, nil
+}
+
+// git resolves links in toplevel. Named from dir instead, the root shares a
+// base with --config and the paths the user typed.
+func rootFrom(dir, toplevel, cdup string) string {
+	root := filepath.Join(dir, cdup)
+
+	if sameDir(root, toplevel) {
+		return root
+	}
+
+	return toplevel
+}
+
+func sameDir(a, b string) bool {
+	infoA, errA := os.Stat(a)
+	infoB, errB := os.Stat(b)
+
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
 }
 
 func (r *execRepo) Root() string {
