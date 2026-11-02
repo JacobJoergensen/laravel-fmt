@@ -12,6 +12,7 @@
 * Fixed `laravel-fmt lsp` on macOS and Linux reading a folder named like `a:b` as a Windows drive
 * Fixed a named file or folder with brackets like a Folio `[id].blade.php` being read as a glob, which formatted other files instead
 * Fixed a file named twice in different case on Windows or macOS being formatted and counted twice
+* Fixed "auto" line endings turning a mostly LF file into CRLF when one line ended in CRLF
 
 ## Version 0.7.0 (2026-10-29)
 * Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON

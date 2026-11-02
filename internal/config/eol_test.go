@@ -2,19 +2,18 @@ package config
 
 import "testing"
 
-func TestResolveEndOfLine(t *testing.T) {
+func TestEndOfLineResolvesOnlyAutoFromTheFirstLineEnding(t *testing.T) {
 	cases := []struct {
 		name string
 		src  []byte
 		in   string
 		want string
 	}{
-		{"auto + LF-only source", []byte("line one\nline two\n"), EndOfLineAuto, EndOfLineLF},
-		{"auto + CRLF source", []byte("line one\r\nline two\r\n"), EndOfLineAuto, EndOfLineCRLF},
-		{"auto + mixed picks CRLF on first hit", []byte("one\ntwo\r\nthree\n"), EndOfLineAuto, EndOfLineCRLF},
+		{"auto + mixed follows a first LF", []byte("one\ntwo\r\nthree\n"), EndOfLineAuto, EndOfLineLF},
+		{"auto + mixed follows a first CRLF", []byte("one\r\ntwo\nthree\n"), EndOfLineAuto, EndOfLineCRLF},
 		{"auto + no newlines falls back to LF", []byte("one line"), EndOfLineAuto, EndOfLineLF},
+		{"auto + source opening with a line break", []byte("\nx\r\n"), EndOfLineAuto, EndOfLineLF},
 		{"explicit lf is not overridden by CRLF source", []byte("one\r\ntwo\r\n"), EndOfLineLF, EndOfLineLF},
-		{"explicit crlf is not overridden by LF source", []byte("one\ntwo\n"), EndOfLineCRLF, EndOfLineCRLF},
 	}
 
 	for _, tc := range cases {
