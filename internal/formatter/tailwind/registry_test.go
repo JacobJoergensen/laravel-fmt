@@ -2,23 +2,22 @@ package tailwind
 
 import "testing"
 
-// The tables are generated, so a regeneration that breaks one of these fails
-// here instead of misordering classes at sort time.
+// The tables are generated, so a regeneration that breaks what compareVariants
+// assumes of them fails here instead of misordering classes at sort time.
 func TestRegistryInvariants(t *testing.T) {
 	ensureRegistry()
 
-	if arbitraryVariantSlot >= variantMaskSlots {
-		t.Errorf("arbitraryVariantSlot %d does not fit a %d-slot variantMask; increase variantMaskWords",
-			arbitraryVariantSlot, variantMaskSlots)
-	}
+	minOrder := variantRegistry["min"].Order
 
-	for name := range defaultBreakpointWidths {
-		if _, ok := variantRegistry[name]; !ok {
-			t.Errorf("default breakpoint %q is missing from variantRegistry", name)
+	for name := range defaultBreakpoints {
+		entry := variantRegistry[name]
+
+		if entry.Kind != variantStatic || entry.Order != minOrder {
+			t.Errorf("breakpoint %q is %+v, want a static variant in the min group (order %d)", name, entry, minOrder)
 		}
 	}
 
-	if span := breakpointBlockEnd - breakpointBlockStart + 1; span != len(defaultBreakpointWidths) {
-		t.Errorf("default breakpoints span %d variant priorities, want %d contiguous ones", span, len(defaultBreakpointWidths))
+	if variantRegistry["@"].Order != variantRegistry["@min"].Order {
+		t.Errorf("@ and @min sit in groups %d and %d, want one", variantRegistry["@"].Order, variantRegistry["@min"].Order)
 	}
 }

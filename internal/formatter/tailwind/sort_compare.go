@@ -3,72 +3,34 @@ package tailwind
 import (
 	"cmp"
 	"math"
-	"strings"
 )
 
+// sortKey is what compileCandidates in compile.ts sorts a class by. Variants
+// holds a bit per variant, numbered by variantRanking.bits across the class list.
 type sortKey struct {
-	Unknown       bool
-	Variants      variantMask
-	ContainerRank int
-	Arbitrary     string
-	Order         []int
-	Count         int
-	Raw           string
+	Unknown  bool
+	Variants variantMask
+	Order    []int
+	Count    int
+	Raw      string
 }
 
-func buildSortKey(theme *Theme, token string) sortKey {
-	c := parseCandidate(theme, token)
-	cls := classify(theme, &c)
+func newSortKey(theme *Theme, c *candidate, token string) sortKey {
+	cls := classify(theme, c)
 
 	return sortKey{
-		Unknown:       cls.Unknown,
-		Variants:      variantBitmask(theme, c.Variants),
-		ContainerRank: containerRankOf(theme, c.Variants),
-		Arbitrary:     arbitraryVariantKey(c.Variants),
-		Order:         cls.Order,
-		Count:         cls.Count,
-		Raw:           token,
+		Unknown: cls.Unknown,
+		Order:   cls.Order,
+		Count:   cls.Count,
+		Raw:     token,
 	}
-}
-
-// arbitraryVariantKey joins a candidate's arbitrary-variant selectors. They all
-// share one priority slot, so the bitmask can't order them; this tie-breaks by
-// selector, grouping same-selector classes, matching prettier-plugin-tailwindcss.
-func arbitraryVariantKey(variants []variant) string {
-	var b strings.Builder
-
-	for _, v := range variants {
-		if v.Arbitrary {
-			b.WriteString(v.Root)
-			b.WriteByte(0)
-		}
-	}
-
-	return b.String()
-}
-
-func containerRankOf(theme *Theme, variants []variant) int {
-	rank := -1
-
-	for _, v := range variants {
-		if v.Container == "" {
-			continue
-		}
-
-		if r, ok := theme.containerRank(v.Container); ok && r > rank {
-			rank = r
-		}
-	}
-
-	return rank
 }
 
 // compareSortKeys ports the compileCandidates comparator in
 // tailwindcss/src/compile.ts, comparing in order: unknown first (as
-// prettier-plugin-tailwindcss does), variant bitset, container-query width,
-// arbitrary-variant selector, property-order tuple, declaration count
-// descending (so `truncate` sorts above a utility setting a subset of its
-// properties), then the raw string.
+// prettier-plugin-tailwindcss does), variant bitset, property-order tuple,
+// declaration count descending (so `truncate` sorts above a utility setting a
+// subset of its properties), then the class itself, numbers by value.
 func compareSortKeys(a, b sortKey) int {
 	if a.Unknown != b.Unknown {
 		if a.Unknown {
@@ -89,14 +51,6 @@ func compareSortKeys(a, b sortKey) int {
 		return c
 	}
 
-	if c := cmp.Compare(a.ContainerRank, b.ContainerRank); c != 0 {
-		return c
-	}
-
-	if c := cmp.Compare(a.Arbitrary, b.Arbitrary); c != 0 {
-		return c
-	}
-
 	if c := compareOrderTuples(a.Order, b.Order); c != 0 {
 		return c
 	}
@@ -105,7 +59,7 @@ func compareSortKeys(a, b sortKey) int {
 		return c
 	}
 
-	return cmp.Compare(a.Raw, b.Raw)
+	return naturalCompare(a.Raw, b.Raw)
 }
 
 // compareOrderTuples lex-compares two property-order tuples with the engine's +Inf

@@ -118,7 +118,7 @@ func SortPinned(theme *Theme, classes string, pinFirst, pinLast bool) string {
 
 // sortEntry pairs a token with its key so the sort permutes one slice, not three.
 //
-// The key stays behind a pointer on purpose. sortKey is 96 bytes, and a stable
+// The key stays behind a pointer on purpose. sortKey is 72 bytes, and a stable
 // sort moves and copies elements far more often than it builds them; inlining
 // the key into the element measured 12% slower than this shape even though it
 // allocates one slice fewer.
@@ -127,15 +127,32 @@ type sortEntry struct {
 	token string
 }
 
+// sortCanonical numbers the list's variants before it sorts, as the engine
+// numbers the variants it has seen: a variant's bit depends on the others.
 func sortCanonical(theme *Theme, tokens []string) {
 	ensureRegistry()
 
 	keys := make([]sortKey, len(tokens))
 	entries := make([]sortEntry, len(tokens))
 
+	var ranking variantRanking
+
 	for i, t := range tokens {
-		keys[i] = buildSortKey(theme, t)
+		c := parseCandidate(theme, t)
+		keys[i] = newSortKey(theme, &c, t)
 		entries[i] = sortEntry{key: &keys[i], token: t}
+
+		for k := range c.Variants {
+			ranking.add(i, &c.Variants[k])
+		}
+	}
+
+	if len(ranking.uses) > 0 {
+		bits := ranking.bits(theme)
+
+		for _, use := range ranking.uses {
+			keys[use.token].Variants = keys[use.token].Variants.with(bits[use.variant])
+		}
 	}
 
 	slices.SortStableFunc(entries, func(a, b sortEntry) int {

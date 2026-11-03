@@ -6,7 +6,7 @@
 <div class="p-1 @md:hover:flex">Hi</div>
 <div class="p-4 @2xl:grid">Hi</div>
 <div class="p-4 @[400px]:flex">Hi</div>
-<div class="p-4 group-@md:flex">Hi</div>
+<div class="group-@md:flex p-4">Hi</div>
 <div class="p-4 hover:@md:flex">Hi</div>
 <div class="p-4 md:flex">Hi</div>
 <div class="@container mb-0 p-4">Hi</div>

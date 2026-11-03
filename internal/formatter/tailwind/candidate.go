@@ -1,17 +1,21 @@
 package tailwind
 
 import (
+	"iter"
 	"slices"
 	"strings"
 )
 
 // candidate is a narrow port of tailwindcss/src/candidate.ts's Candidate,
-// holding only what the sort comparator needs. Parsing drops a trailing `!`, a
-// leading `-` and a `/modifier`, since the comparator reorders the original
-// class strings and never rebuilds them.
+// holding only what the sort comparator needs. Parsing drops a trailing `!`
+// and a `/modifier`, since the comparator reorders the original class strings
+// and never rebuilds them. A leading `-` stays: `-mt` is a root of its own,
+// ranked apart from `mt`. Fraction keeps the modifier for a class the engine
+// lists whole, such as `translate-x-2/3`.
 type candidate struct {
-	Variants []variant
+	Variants []classVariant
 	Base     string
+	Fraction string
 	Root     string
 	Value    string
 	// ArbitraryProperty is the CSS property of a `[prop:value]` candidate, empty for
@@ -22,16 +26,11 @@ type candidate struct {
 	ArbitraryProperty string
 }
 
-// variant is one entry in a class's variant chain. An arbitrary variant
-// (`[&>a:hover]:`) sets Arbitrary and keeps its selector in Root, which the
-// comparator orders by, since every arbitrary variant shares one priority
-// slot. A container-query variant (`@md`, `@2xl/sidebar`) sets Root to `@` and
-// its size in Container, which the comparator orders by width, since every
-// `@<size>` shares one slot too.
-type variant struct {
-	Root      string
-	Arbitrary bool
-	Container string
+// classVariant is a variant as written, the text variantRanking tells variants
+// apart by, with its parse.
+type classVariant struct {
+	Text    string
+	Variant variant
 }
 
 // parseCandidate turns a Tailwind class string into a candidate. It always returns a
@@ -73,20 +72,27 @@ func parseCandidate(theme *Theme, s string) candidate {
 		return c
 	}
 
-	for _, v := range variantParts {
-		c.Variants = append(c.Variants, parseVariant(theme, v))
+	for _, text := range variantParts {
+		// A variant the engine rejects leaves the whole class unknown.
+		v, ok := parseVariant(theme, text)
+		if !ok {
+			return candidate{}
+		}
+
+		c.Variants = append(c.Variants, classVariant{Text: text, Variant: v})
 	}
 
 	if len(base) > 0 && base[len(base)-1] == '!' {
 		base = base[:len(base)-1]
 	}
 
-	if len(base) > 0 && base[0] == '-' {
-		base = base[1:]
-	}
-
-	base, _ = splitModifier(base)
+	whole := base
+	base, modifier := splitModifier(base)
 	c.Base = base
+
+	if modifier != "" {
+		c.Fraction = whole
+	}
 
 	if len(base) > 0 && base[0] == '[' {
 		c.Root = base
@@ -124,86 +130,63 @@ func arbitraryPropertyName(base string) string {
 	return ""
 }
 
-func parseVariant(theme *Theme, s string) variant {
-	v := variant{}
+// segmentBracketAware splits s at sep outside `[]`, `()` and string literals.
+func segmentBracketAware(s string, sep byte) []string {
+	var parts []string
 
-	if len(s) > 0 && s[0] == '[' {
-		v.Arbitrary = true
-		// generatedVariantPriority checks Arbitrary before it reads Root, so
-		// the selector can sit there.
-		v.Root = s
-		return v
+	for part := range segments(s, sep) {
+		parts = append(parts, part)
 	}
 
-	// Container query `@<size>` / `@<size>/<name>`, where size is a known breakpoint,
-	// the default `--container-*` scale, or a project `@theme` size. The bracketed
-	// `@min-[…]` / `@max-[…]` forms and any unknown `@foo` carry no known size and
-	// fall through to the branches below, landing in the arbitrary slot.
-	if len(s) > 1 && s[0] == '@' && strings.IndexByte(s, '[') < 0 {
-		size := s[1:]
-		if slash := strings.IndexByte(size, '/'); slash >= 0 {
-			size = size[:slash]
-		}
-
-		if _, ok := theme.containerRank(size); ok {
-			v.Root = "@"
-			v.Container = size
-			return v
-		}
-	}
-
-	if i := strings.IndexByte(s, '['); i > 0 && strings.HasSuffix(s, "]") {
-		v.Root = strings.TrimSuffix(s[:i], "-")
-		return v
-	}
-
-	v.Root = s
-	return v
+	return parts
 }
 
-// segmentBracketAware splits s at sep outside `[]`, `()` and string literals.
+// segments yields what segmentBracketAware returns without building a slice.
 //
 // The escape skip is a body-side `i++`, so the loop has to stay C-style: a
 // range loop reassigns i and would silently drop the skip.
-func segmentBracketAware(s string, sep byte) []string {
-	var parts []string
-	depth := 0
-	inStr := byte(0)
-	start := 0
+func segments(s string, sep byte) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		depth := 0
+		inStr := byte(0)
+		start := 0
 
-	for i := 0; i < len(s); i++ {
-		c := s[i]
+		for i := 0; i < len(s); i++ {
+			c := s[i]
 
-		if inStr != 0 {
-			if c == '\\' && i+1 < len(s) {
-				i++
+			if inStr != 0 {
+				if c == '\\' && i+1 < len(s) {
+					i++
+					continue
+				}
+				if c == inStr {
+					inStr = 0
+				}
 				continue
 			}
-			if c == inStr {
-				inStr = 0
+
+			switch c {
+			case '"', '\'':
+				inStr = c
+			case '[', '(':
+				depth++
+			case ']', ')':
+				if depth > 0 {
+					depth--
+				}
+			case sep:
+				if depth == 0 {
+					if !yield(s[start:i]) {
+						return
+					}
+
+					start = i + 1
+				}
 			}
-			continue
 		}
 
-		switch c {
-		case '"', '\'':
-			inStr = c
-		case '[', '(':
-			depth++
-		case ']', ')':
-			if depth > 0 {
-				depth--
-			}
-		case sep:
-			if depth == 0 {
-				parts = append(parts, s[start:i])
-				start = i + 1
-			}
-		}
+		yield(s[start:])
 	}
-
-	parts = append(parts, s[start:])
-	return parts
 }
 
 func splitModifier(base string) (string, string) {

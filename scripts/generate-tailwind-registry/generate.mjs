@@ -32,10 +32,21 @@ async function main() {
   const utilityStems = buildUtilityStems(design)
   const numeric = syntheticNumericCandidates(design)
   const synthetic = [...numeric, ...syntheticArbitraryCandidates(design, numeric, utilityStems)]
-  const { rank, propertyRanks } = buildClassOrderRanks(design, propertyOrder, synthetic)
+  const arbitraryProbes = buildArbitraryProbes(design)
+  const { rank, propertyRanks } = buildClassOrderRanks(
+    design,
+    propertyOrder,
+    synthetic,
+    arbitraryProbes.map((p) => p.candidate),
+  )
 
   const utilityRegistry = buildUtilityRegistry(design, rank, propertyOrder, synthetic)
   const stemRegistry = buildStemRegistry(utilityRegistry, utilityStems)
+  const arbitraryOrders = buildArbitraryOrders(design, rank, propertyOrder, arbitraryProbes)
+
+  for (const entry of stemRegistry) {
+    entry.arbitrary = arbitraryOrders.get(entry.stem) ?? null
+  }
   const variantRegistry = buildVariantRegistry(design)
   const tailwindVersion = readTailwindVersion()
 
@@ -44,6 +55,8 @@ async function main() {
     utilityRegistry,
     stemRegistry,
     variantRegistry,
+    breakpoints: themeNamespace(design, '--breakpoint'),
+    containers: themeNamespace(design, '--container'),
     tailwindVersion,
   })
 
@@ -488,18 +501,153 @@ function syntheticArbitraryCandidates(design, numeric, utilityStems) {
   return out
 }
 
+// A utility picks the branch for an arbitrary value from the set of data types
+// the value matches (inferDataType in utils/infer-data-type.ts), so one sample
+// per set answers for every value with that set. infer.go computes the same set
+// in Go; a sample whose set an earlier one has adds nothing there, and a test
+// checks that the two agree.
+const arbitrarySamples = [
+  'var(--probe)',
+  '#000',
+  'calc(1px+2px)',
+  'clamp(1px,2vw,3px)',
+  '--spacing(2)',
+  '2',
+  '1.5',
+  '2px',
+  '50%',
+  '45deg',
+  '1/2',
+  'thin',
+  'medium',
+  'x-large',
+  'larger',
+  'serif',
+  'center',
+  'cover',
+  'auto',
+  'url(x)',
+  'linear-gradient(#000,#fff)',
+  '1px_2px',
+  'center_top',
+  '1px_50%',
+  '2_3',
+  '1_2_3',
+  '0_0_2px_#000',
+  'probe',
+  '2s',
+]
+
+// Tailwind's DataType names for `[type:…]` hints, then one it does not know.
+const arbitraryHintTypes = [
+  'color',
+  'length',
+  'percentage',
+  'ratio',
+  'number',
+  'integer',
+  'url',
+  'position',
+  'bg-size',
+  'line-width',
+  'image',
+  'family-name',
+  'generic-name',
+  'absolute-size',
+  'relative-size',
+  'angle',
+  'vector',
+  'probe',
+]
+
+// Probes per functional stem, in the index layout arbitraryProbeIndex in
+// infer.go reads: the samples, each bracketed hint, `(--var)`, then each hint
+// in parentheses.
+function buildArbitraryProbes(design) {
+  if (typeof design.utilities?.keys !== 'function') {
+    return []
+  }
+
+  const out = []
+
+  for (const stem of design.utilities.keys('functional')) {
+    const candidates = [
+      ...arbitrarySamples.map((sample) => `${stem}-[${sample}]`),
+      ...arbitraryHintTypes.map((type) => `${stem}-[${type}:var(--probe)]`),
+      `${stem}-(--probe)`,
+      ...arbitraryHintTypes.map((type) => `${stem}-(${type}:--probe)`),
+    ]
+
+    candidates.forEach((candidate, index) => out.push({ stem, index, candidate }))
+  }
+
+  return out
+}
+
+// Classes setting the same properties sort by name, so every value of one form
+// (`[…]` or `(…)`) and property tuple takes the earliest such probe's rank:
+// that places it against the stem's listed classes as the engine does
+// (`p-[3px]` after `p-4`). A stem whose probes land on one tuple per form
+// needs just those two ranks; any other carries one per probe, null where the
+// engine rejects the value.
+function buildArbitraryOrders(design, rank, propertyOrder, probes) {
+  const propertyToIndex = new Map(propertyOrder.map((p, i) => [p, i]))
+  const parenStart = arbitrarySamples.length + arbitraryHintTypes.length
+  const asts = design.candidatesToAst(probes.map((p) => p.candidate))
+  const byStem = new Map()
+
+  probes.forEach((probe, i) => {
+    const r = rank.get(probe.candidate)
+    const form = probe.index < parenStart ? '[' : '('
+    const tuple = collectPropertySort(asts[i] ?? [], propertyToIndex).order.join(',')
+    const key = r === undefined ? null : `${form}${tuple}`
+
+    let entries = byStem.get(probe.stem)
+
+    if (!entries) {
+      entries = []
+      byStem.set(probe.stem, entries)
+    }
+
+    entries.push({ key, rank: r })
+  })
+
+  const out = new Map()
+
+  for (const [stem, entries] of byStem) {
+    const earliest = new Map()
+
+    for (const { key, rank: r } of entries) {
+      if (key !== null && (!earliest.has(key) || r < earliest.get(key))) {
+        earliest.set(key, r)
+      }
+    }
+
+    const orders = entries.map(({ key }) => (key === null ? null : earliest.get(key)))
+    const uniform = entries.every(({ key }) => key !== null) && earliest.size === 2
+
+    out.set(stem, {
+      bracket: orders[0],
+      paren: orders[parenStart],
+      probes: uniform ? null : orders,
+    })
+  }
+
+  return out
+}
+
 // The engine's getClassOrder is the sort prettier-plugin-tailwindcss uses.
 // Rebuilding it from each utility's emitted properties diverged for utilities
 // whose slot is no visible declaration (container, space-*, divide-*). A class
 // it cannot order gets no rank, so it is Unknown in Go and sorts first, as
 // prettier does. One `[prop:0]` probe per property puts an arbitrary property
 // (`[grid-area:…]`) or a custom `@utility` on the same scale.
-function buildClassOrderRanks(design, propertyOrder, synthetic = []) {
+function buildClassOrderRanks(design, propertyOrder, synthetic = [], arbitrary = []) {
   const classNames = [...design.getClassList().map(([name]) => name), ...synthetic]
   const probeFor = (p) => `[${p}:0]`
   const probes = propertyOrder.map(probeFor)
 
-  const pairs = design.getClassOrder([...classNames, ...probes])
+  const pairs = design.getClassOrder([...classNames, ...probes, ...arbitrary])
   const order = new Map(pairs.map(([name, o]) => [name, o]))
 
   const ranked = pairs
@@ -819,34 +967,50 @@ function findLongestPrefixStem(name, stemSet) {
   return null
 }
 
-// Arbitrary variants (`[&>a:hover]:`) are left out: the Go runtime ranks each
-// one from its selector text.
+// Each variant root's kind and registration order, which Variants.compare in
+// variants.ts sorts by: roots registered as one group (`min` with `sm`…`2xl`)
+// share an order and are told apart by value. Only the breakpoint and container
+// groups compare values with a function of their own; variant.go ports those by
+// root, so a release that adds another fails here instead of misordering.
 function buildVariantRegistry(design) {
   const entries = []
 
   for (const [root, variant] of design.variants.entries()) {
-    if (variant.kind === 'arbitrary') {
-      continue
+    if (variant.kind !== 'arbitrary') {
+      entries.push({
+        root,
+        kind: variant.kind,
+        order: variant.order,
+        compounds: variant.compounds,
+        compoundsWith: variant.compoundsWith,
+      })
     }
-
-    entries.push({ root })
   }
 
-  entries.sort((a, b) => {
-    const av = design.parseVariant(a.root) ?? design.parseVariant(`${a.root}-`)
-    const bv = design.parseVariant(b.root) ?? design.parseVariant(`${b.root}-`)
+  const ported = new Set(['max', 'min', '@max', '@min', '@'].map((root) => design.variants.get(root).order))
+  const compared = [...design.variants.compareFns.keys()]
 
-    if (!av || !bv) {
-      return 0
+  if (compared.length !== ported.size || compared.some((order) => !ported.has(order))) {
+    throw new Error(`variant groups with a compare function changed: orders ${compared.join(', ')}`)
+  }
+
+  entries.sort((a, b) => a.order - b.order || (a.root < b.root ? -1 : 1))
+
+  return entries
+}
+
+// The default theme's values in a namespace, `--breakpoint-sm: 40rem` as
+// `sm: 40rem`, which the breakpoint and container variants compare.
+function themeNamespace(design, namespace) {
+  const out = []
+
+  for (const [key, value] of design.theme.namespace(namespace)) {
+    if (key !== null) {
+      out.push([key, value])
     }
+  }
 
-    return design.variants.compare(av, bv)
-  })
-
-  return entries.map((entry, index) => ({
-    root: entry.root,
-    priority: index,
-  }))
+  return out
 }
 
 function readTailwindVersion() {
@@ -897,6 +1061,8 @@ function renderGo({
   utilityRegistry,
   stemRegistry,
   variantRegistry,
+  breakpoints,
+  containers,
   tailwindVersion,
 }) {
   const lines = []
@@ -905,6 +1071,13 @@ function renderGo({
   lines.push(`// Source: Tailwind CSS v${tailwindVersion}`)
   lines.push('')
   lines.push('package tailwind')
+  lines.push('')
+
+  lines.push('// arbitrarySamples are the values ranked once per stem for')
+  lines.push('// stemEntry.ProbeOrders; arbitraryHintTypes the `[type:…]` hints after them.')
+  lines.push(`var arbitrarySamples = [...]string{${arbitrarySamples.map(quote).join(', ')}}`)
+  lines.push('')
+  lines.push(`var arbitraryHintTypes = [...]string{${arbitraryHintTypes.map(quote).join(', ')}}`)
   lines.push('')
 
   lines.push('// buildPropertyRanks maps each CSS property to its getClassOrder rank')
@@ -964,24 +1137,57 @@ function renderGo({
         fields.push(`SizeCount: ${s.sizeCount}`)
       }
 
+      const rankList = (r) => (r === null || r === undefined ? 'nil' : `{${r}}`)
+
+      if (s.arbitrary?.bracket != null) {
+        fields.push(`BracketOrder: []int{${s.arbitrary.bracket}}`)
+      }
+
+      if (s.arbitrary?.paren != null) {
+        fields.push(`ParenOrder: []int{${s.arbitrary.paren}}`)
+      }
+
+      if (s.arbitrary?.probes) {
+        fields.push(`ProbeOrders: [][]int{${s.arbitrary.probes.map(rankList).join(', ')}}`)
+      }
+
       return `m[${quote(s.stem)}] = stemEntry{${fields.join(', ')}}`
     },
   })
 
-  lines.push('// variantRegistry holds the sort priority for every static,')
-  lines.push('// functional, or compound variant root the v4 engine ships.')
-  lines.push('// Arbitrary variants are handled per-instance in the Go runtime.')
+  const kinds = { static: 'variantStatic', functional: 'variantFunctional', compound: 'variantCompound' }
+
+  lines.push('// variantRegistry holds the kind, registration order and compound flags of')
+  lines.push('// every variant root the v4 engine ships, which compareVariants sorts by.')
   lines.push('func buildVariantRegistry() map[string]variantEntry {')
   lines.push('\treturn map[string]variantEntry{')
 
   for (const v of variantRegistry) {
-    lines.push(`\t\t${quote(v.root)}: {Priority: ${v.priority}},`)
+    const fields = `Kind: ${kinds[v.kind]}, Order: ${v.order}, Compounds: ${v.compounds}, CompoundsWith: ${v.compoundsWith}`
+
+    lines.push(`\t\t${quote(v.root)}: {${fields}},`)
   }
 
   lines.push('\t}')
   lines.push('}')
+  lines.push('')
 
-  return lines.join('\n') + '\n'
+  const renderValues = (name, doc, values) => {
+    lines.push(doc)
+    lines.push(`var ${name} = map[string]string{`)
+
+    for (const [key, value] of values) {
+      lines.push(`\t${quote(key)}: ${quote(value)},`)
+    }
+
+    lines.push('}')
+    lines.push('')
+  }
+
+  renderValues('defaultBreakpoints', '// defaultBreakpoints is the default theme\'s `--breakpoint-*` namespace.', breakpoints)
+  renderValues('defaultContainers', '// defaultContainers is the default theme\'s `--container-*` namespace.', containers)
+
+  return lines.join('\n').trimEnd() + '\n'
 }
 
 function quote(s) {

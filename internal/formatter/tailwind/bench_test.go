@@ -89,3 +89,21 @@ func TestGenClassListsMixMatchesComment(t *testing.T) {
 		t.Errorf("%d%% of tokens carry a `/`, want near the measured 1%%", pct)
 	}
 }
+
+// Arbitrary values take the data-type path, which BenchmarkSort's real-world
+// mix reaches about once a list.
+func BenchmarkSortArbitrary(b *testing.B) {
+	list := "text-[14px] text-[#fff] border-[2px] border-[color:var(--x)] shadow-[0_0_2px_#000] " +
+		"bg-[url(x)] font-[500] p-[3px] w-(--x) -mt-[3px] text-[clamp(1rem,2vw,3rem)] ring-[thin]"
+
+	Sort(nil, list)
+
+	b.SetBytes(int64(len(list)))
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if Sort(nil, list) == "" {
+			b.Fatal("empty sort result")
+		}
+	}
+}

@@ -9,8 +9,6 @@ package tailwind
 //go:generate node ../../../scripts/generate-tailwind-registry/generate.mjs
 
 import (
-	"slices"
-	"strings"
 	"sync"
 )
 
@@ -22,21 +20,21 @@ type utilityEntry struct {
 // stemEntry is the per-stem fallback for a utility root. Order is the earliest
 // rank among the stem's most common shape of class (the default branch).
 // ColorOrder and SizeOrder are the earliest ranks of its color- and size-valued
-// classes, so on an ambiguous stem (`text`, `border`, `shadow`, `ring`, …) an
-// arbitrary value shaped like a color (`border-[#fff]`) or a length
-// (`border-[2px]`) picks the matching branch. Each is nil when the stem has no
-// class of that shape.
+// classes, which a project `@theme` token picks between (`text-brand`). Each is
+// nil when the stem has no class of that shape. BracketOrder and ParenOrder
+// rank an arbitrary `[…]` or `(…)` value; ProbeOrders, set only when the rank
+// depends on the value, holds one per arbitraryProbeIndex, nil where the engine
+// rejects the value.
 type stemEntry struct {
-	Order      []int
-	Count      int
-	ColorOrder []int
-	ColorCount int
-	SizeOrder  []int
-	SizeCount  int
-}
-
-type variantEntry struct {
-	Priority int
+	Order        []int
+	Count        int
+	ColorOrder   []int
+	ColorCount   int
+	SizeOrder    []int
+	SizeCount    int
+	BracketOrder []int
+	ParenOrder   []int
+	ProbeOrders  [][]int
 }
 
 // classification is the resolved sort key for a candidate. Unknown marks a candidate
@@ -49,18 +47,18 @@ type classification struct {
 }
 
 // The registry is built on the first sort, not at init, so a run that never
-// sorts a class list builds none of the ~24k-entry tables.
-// arbitraryVariantSlot is one past the highest generated variant priority,
-// the slot an arbitrary or unrecognized variant starts from.
+// sorts a class list builds none of the ~24k-entry tables. customVariantOrder
+// is the first order past the built-in variants, where Tailwind registers a
+// project's own; breakpointGroups maps each width-compared group's order to how
+// it compares.
 var (
-	registryOnce         sync.Once
-	propertyIndex        map[string]int
-	utilityRegistry      map[string]utilityEntry
-	stemRegistry         map[string]stemEntry
-	variantRegistry      map[string]variantEntry
-	arbitraryVariantSlot int
-	breakpointBlockStart int
-	breakpointBlockEnd   int
+	registryOnce       sync.Once
+	propertyIndex      map[string]int
+	utilityRegistry    map[string]utilityEntry
+	stemRegistry       map[string]stemEntry
+	variantRegistry    map[string]variantEntry
+	customVariantOrder int
+	breakpointGroups   map[int]breakpointGroup
 )
 
 // ensureRegistry builds the tables on the first call and is a no-op after.
@@ -75,34 +73,17 @@ func ensureRegistry() {
 
 		highest := 0
 		for _, entry := range variantRegistry {
-			highest = max(highest, entry.Priority)
+			highest = max(highest, entry.Order)
 		}
-		arbitraryVariantSlot = highest + 1
+		customVariantOrder = highest + 1
 
-		breakpointBlockStart, breakpointBlockEnd = computeBreakpointBlock()
+		breakpointGroups = map[int]breakpointGroup{
+			variantRegistry["max"].Order:  {Descending: true},
+			variantRegistry["min"].Order:  {},
+			variantRegistry["@max"].Order: {Containers: true, Descending: true},
+			variantRegistry["@min"].Order: {Containers: true},
+		}
 	})
-}
-
-// computeBreakpointBlock returns the lowest and highest variant priority the
-// default breakpoints occupy. variantPriority renumbers that block in place for
-// custom `--breakpoint-*` sizes, which keeps the order only while no other
-// variant sits inside it; TestRegistryInvariants holds the generated tables to
-// that.
-func computeBreakpointBlock() (int, int) {
-	lowest := -1
-	highest := -1
-
-	for name := range defaultBreakpointWidths {
-		priority := variantRegistry[name].Priority
-
-		if lowest == -1 || priority < lowest {
-			lowest = priority
-		}
-
-		highest = max(highest, priority)
-	}
-
-	return lowest, highest
 }
 
 // classify resolves a candidate in two passes: an EXACT match on c.Base against
@@ -114,6 +95,10 @@ func computeBreakpointBlock() (int, int) {
 func classify(theme *Theme, c *candidate) classification {
 	if c.Base == "" {
 		return classification{Unknown: true}
+	}
+
+	if entry, ok := utilityRegistry[c.Fraction]; ok && c.Fraction != "" {
+		return classification{Order: entry.Order, Count: entry.Count}
 	}
 
 	if entry, ok := utilityRegistry[c.Base]; ok {
@@ -147,6 +132,10 @@ func classify(theme *Theme, c *candidate) classification {
 
 	if c.Root != "" {
 		if entry, ok := stemRegistry[c.Root]; ok && theme.namedValueExists(c.Value) {
+			if isArbitraryValue(c.Value) {
+				return classifyArbitrary(&entry, c.Value)
+			}
+
 			order, count := selectStemBranch(theme, c.Root, &entry, c.Value)
 			return classification{Order: order, Count: count}
 		}
@@ -155,22 +144,56 @@ func classify(theme *Theme, c *candidate) classification {
 	return classification{Unknown: true}
 }
 
-// selectStemBranch picks the property tuple for a stem given the candidate's value.
-// An arbitrary value (`[…]`) is shape-inferred: color literal to the color branch,
-// length to the size branch, else default. A named value consults the project's
-// `@theme` tokens via Theme.branchFor. A branch that is nil falls through to default,
-// so a theme hint registered for an unambiguous stem is a no-op.
-func selectStemBranch(theme *Theme, stemName string, stem *stemEntry, value string) ([]int, int) {
-	if len(value) > 0 && value[0] == '[' {
-		if stem.ColorOrder != nil && bracketLooksLikeColor(value) {
-			return stem.ColorOrder, stem.ColorCount
-		}
-		if stem.SizeOrder != nil && bracketLooksLikeSize(value) {
-			return stem.SizeOrder, stem.SizeCount
-		}
-		return stem.Order, stem.Count
+func isArbitraryValue(value string) bool {
+	if len(value) < 2 {
+		return false
 	}
 
+	last := value[len(value)-1]
+
+	return (value[0] == '[' && last == ']') || (value[0] == '(' && last == ')')
+}
+
+// classifyArbitrary ranks a `[…]` or `(…)` value where the engine ranked a
+// value with the same data types. A value the engine rejects is Unknown, as
+// prettier-plugin-tailwindcss leaves it; one no sample covers takes the rank
+// of its form.
+func classifyArbitrary(stem *stemEntry, value string) classification {
+	fallback := stem.BracketOrder
+	if value[0] == '(' {
+		fallback = stem.ParenOrder
+	}
+
+	if fallback == nil {
+		fallback = stem.Order
+	}
+
+	if stem.ProbeOrders == nil {
+		return classification{Order: fallback, Count: 1}
+	}
+
+	index, found, invalid := arbitraryProbeIndex(value)
+
+	switch {
+	case invalid:
+		return classification{Unknown: true}
+	case !found:
+		return classification{Order: fallback, Count: 1}
+	}
+
+	order := stem.ProbeOrders[index]
+	if order == nil {
+		return classification{Unknown: true}
+	}
+
+	return classification{Order: order, Count: 1}
+}
+
+// selectStemBranch picks the property tuple for a stem given a named value: the
+// project's `@theme` tokens decide through Theme.branchFor. A branch that is nil
+// falls through to default, so a theme hint registered for an unambiguous stem
+// is a no-op.
+func selectStemBranch(theme *Theme, stemName string, stem *stemEntry, value string) ([]int, int) {
 	switch theme.branchFor(stemName, value) {
 	case branchSize:
 		if stem.SizeOrder != nil {
@@ -186,97 +209,24 @@ func selectStemBranch(theme *Theme, stemName string, stem *stemEntry, value stri
 	return stem.Order, stem.Count
 }
 
-// bracketLooksLikeColor reports whether a bracketed arbitrary value holds a CSS color
-// (a `#`-hex, a color function, or `var(--color…)`). It deliberately ignores a bare
-// `var(--token)` without the `color` prefix: that could be a width or a color, and
-// guessing wrong is worse than falling through to the default branch.
-func bracketLooksLikeColor(v string) bool {
-	inner := unwrapBracket(v)
-	if inner == "" {
-		return false
-	}
-	if inner[0] == '#' {
-		return true
-	}
-	for _, prefix := range colorFunctionPrefixes {
-		if strings.HasPrefix(inner, prefix) {
-			return true
-		}
-	}
-	return strings.HasPrefix(inner, "var(--color")
-}
-
-var colorFunctionPrefixes = []string{
-	"rgb(", "rgba(",
-	"hsl(", "hsla(",
-	"oklch(", "oklab(",
-	"lab(", "lch(",
-	"hwb(",
-	"color(",
-}
-
-// bracketLooksLikeSize reports whether a bracketed arbitrary value is a number plus a
-// CSS length/time unit. The unit is required: a bare `[2]` is not unambiguously a
-// length and falls through to the default branch.
-func bracketLooksLikeSize(v string) bool {
-	inner := unwrapBracket(v)
-	if inner == "" {
-		return false
-	}
-
-	i := 0
-	if inner[i] == '-' {
-		i++
-	}
-
-	digitStart := i
-	for i < len(inner) && inner[i] >= '0' && inner[i] <= '9' {
-		i++
-	}
-	if i < len(inner) && inner[i] == '.' {
-		i++
-		for i < len(inner) && inner[i] >= '0' && inner[i] <= '9' {
-			i++
-		}
-	}
-	if i == digitStart {
-		return false
-	}
-
-	unit := inner[i:]
-	return slices.Contains(sizeUnits, unit)
-}
-
-var sizeUnits = []string{
-	"px", "rem", "em",
-	"vw", "vh", "vmin", "vmax",
-	"%", "ch", "ex",
-	"pt", "pc", "in", "cm", "mm",
-	"fr",
-	"deg", "rad", "turn",
-	"s", "ms",
-}
-
-func unwrapBracket(v string) string {
-	if len(v) >= 2 && v[0] == '[' && v[len(v)-1] == ']' {
-		return v[1 : len(v)-1]
-	}
-	return v
-}
-
-// variantMaskWords is the number of 64-bit words in a variantMask; two span
-// priority slots 0..127. Bump it if a future Tailwind release pushes
-// arbitraryVariantSlot past 127; TestRegistryInvariants asserts the bound, so
-// the overflow fails loudly instead of a single uint64 silently aliasing high
-// slots.
+// variantMaskWords is the number of 64-bit words in a variantMask. Its bits
+// number the distinct variants of one class list, so two words hold 128 of
+// them; variantRanking.bits gives any past that the last bit.
 const variantMaskWords = 2
 
 const variantMaskSlots = variantMaskWords * 64
 
-// variantMask is a fixed-width bitset over variant priority slots, so the sort
-// allocates nothing per token. Comparing words from the most significant down
-// matches a numeric comparison of the whole set.
+// variantMask is a fixed-width bitset over the variants of a class list, the
+// bigint compileCandidates builds, so the sort allocates nothing per token.
+// Comparing words from the most significant down matches a numeric comparison
+// of the whole set.
 type variantMask [variantMaskWords]uint64
+
+func (m variantMask) with(bit int) variantMask {
+	m[bit/64] |= uint64(1) << (bit % 64)
+
+	return m
+}
 
 func (m variantMask) cmp(other variantMask) int {
 	for i := variantMaskWords - 1; i >= 0; i-- {
@@ -290,92 +240,4 @@ func (m variantMask) cmp(other variantMask) int {
 	}
 
 	return 0
-}
-
-// containerSizeRank orders the built-in container-query breakpoints by width. Every
-// `@<size>` variant shares the single `@` priority slot, so the bitmask cannot tell
-// `@sm` from `@xl`; the comparator breaks that tie with this rank. A project `@theme`
-// that declares `--container-*` sizes replaces it at registration with a merged
-// default+custom ranking, read through Theme.containerRank.
-var containerSizeRank = map[string]int{
-	"3xs": 0,
-	"2xs": 1,
-	"xs":  2,
-	"sm":  3,
-	"md":  4,
-	"lg":  5,
-	"xl":  6,
-	"2xl": 7,
-	"3xl": 8,
-	"4xl": 9,
-	"5xl": 10,
-	"6xl": 11,
-	"7xl": 12,
-}
-
-func variantBitmask(theme *Theme, variants []variant) variantMask {
-	var mask variantMask
-
-	for _, v := range variants {
-		p := variantPriority(theme, v)
-		mask[p/64] |= uint64(1) << (p % 64)
-	}
-
-	return mask
-}
-
-// variantPriority returns a variant's sort priority. Custom `--breakpoint-*` sizes
-// renumber the breakpoint block by width and shift every higher variant up: keeping
-// breakpoints on distinct width-ordered bits (not one shared slot) is what preserves
-// the engine's ordering in mixed chains, where a wider breakpoint's higher bit must
-// outweigh a narrower one combined with a pseudo-class. A `@custom-variant` takes a
-// slot past the generated maximum, and the arbitrary slot moves above the whole
-// custom-variant block, so named custom variants sort after built-ins but before
-// arbitrary ones. With no custom breakpoints or variants, output matches the
-// generated priorities exactly.
-func variantPriority(theme *Theme, v variant) int {
-	if rank, ok := theme.breakpointRank(v.Root); ok {
-		return breakpointBlockStart + rank
-	}
-
-	if idx, ok := theme.customVariantIndex(v.Root); ok {
-		return arbitraryVariantSlot + theme.breakpointShift() + idx
-	}
-
-	base := generatedVariantPriority(v)
-
-	if base == arbitraryVariantSlot {
-		// A functional `@custom-variant name-*` (e.g. `theme-midnight` via stem
-		// `theme`) is matched only here, after the generated registry reports the root
-		// unknown, so it can never capture a built-in like `group-hover`.
-		if idx, ok := theme.matchCustomVariantStem(v.Root); ok {
-			return arbitraryVariantSlot + theme.breakpointShift() + idx
-		}
-
-		return arbitraryVariantSlot + theme.breakpointShift() + theme.customVariantCount()
-	}
-
-	if base > breakpointBlockEnd {
-		return base + theme.breakpointShift()
-	}
-
-	return base
-}
-
-func generatedVariantPriority(v variant) int {
-	if v.Arbitrary {
-		return arbitraryVariantSlot
-	}
-
-	if entry, ok := variantRegistry[v.Root]; ok {
-		return entry.Priority
-	}
-
-	if i := strings.IndexByte(v.Root, '-'); i > 0 {
-		if entry, ok := variantRegistry[v.Root[:i]]; ok {
-			return entry.Priority
-		}
-	}
-
-	return arbitraryVariantSlot
 }

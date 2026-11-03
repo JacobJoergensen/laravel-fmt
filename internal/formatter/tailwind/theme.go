@@ -2,13 +2,11 @@ package tailwind
 
 import (
 	"bytes"
-	"cmp"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +16,7 @@ import (
 
 // ThemeToken is one `--<namespace>-<name>` declaration from a project's
 // `@theme` block. Only the container and breakpoint namespaces read Value,
-// since they rank by width.
+// the width their variants compare by.
 type ThemeToken struct {
 	Namespace string
 	Name      string
@@ -78,28 +76,23 @@ type Theme struct {
 	colorTokens        map[string]bool
 	tokenNames         map[string]bool
 	stemSpecificBranch map[stemTokenKey]branch
-	containerRanks     map[string]int
-	breakpointRanks    map[string]int
+	breakpoints        map[string]string
+	containers         map[string]string
 	customUtilities    map[string]utilityEntry
 	customUtilityStems map[string]utilityEntry
-	customVariants     map[string]int
-	customVariantStems map[string]int
+	customVariants     map[string]variantEntry
+	customVariantStems map[string]variantEntry
 	prefixes           []string
 }
 
-// newTheme builds a Theme from a project's tokens, `@utility` definitions,
-// `@custom-variant` names and prefixes. It fails when the custom breakpoints
-// and variants push a variant priority past the variantMask, a bound that
-// depends on the Theme and so is checked per Theme.
-func newTheme(tokens []ThemeToken, utilities []CustomUtility, variants []string, prefixes []string) (*Theme, error) {
+func newTheme(tokens []ThemeToken, utilities []CustomUtility, variants []CustomVariant, prefixes []string) *Theme {
 	ensureRegistry()
 
 	colors := make(map[string]bool, len(tokens))
 	names := make(map[string]bool, len(tokens))
 	stemSpecific := make(map[stemTokenKey]branch)
 
-	var customContainers map[string]float64
-	var customBreakpoints map[string]float64
+	var breakpoints, containers map[string]string
 
 	for _, t := range tokens {
 		names[t.Name] = true
@@ -111,22 +104,10 @@ func newTheme(tokens []ThemeToken, utilities []CustomUtility, variants []string,
 			stemSpecific[stemTokenKey{Stem: "text", Token: t.Name}] = branchSize
 		case "shadow":
 			stemSpecific[stemTokenKey{Stem: "shadow", Token: t.Name}] = branchSize
-		case "container":
-			if px, ok := parseThemeWidth(t.Value); ok {
-				if customContainers == nil {
-					customContainers = make(map[string]float64)
-				}
-
-				customContainers[t.Name] = px
-			}
 		case "breakpoint":
-			if px, ok := parseThemeWidth(t.Value); ok {
-				if customBreakpoints == nil {
-					customBreakpoints = make(map[string]float64)
-				}
-
-				customBreakpoints[t.Name] = px
-			}
+			breakpoints = withThemeValue(breakpoints, defaultBreakpoints, t)
+		case "container":
+			containers = withThemeValue(containers, defaultContainers, t)
 		}
 	}
 
@@ -150,32 +131,42 @@ func newTheme(tokens []ThemeToken, utilities []CustomUtility, variants []string,
 		}
 	}
 
-	var customVariants, customVariantStems map[string]int
-	variantOrder := 0
+	var customVariants, customVariantStems map[string]variantEntry
+	order := customVariantOrder
 
-	for _, name := range variants {
-		if stem, ok := functionalStem(name); ok {
+	for _, v := range variants {
+		if stem, ok := functionalStem(v.Name); ok {
 			if _, seen := customVariantStems[stem]; seen {
 				continue
 			}
 
 			if customVariantStems == nil {
-				customVariantStems = make(map[string]int)
+				customVariantStems = make(map[string]variantEntry)
 			}
 
-			customVariantStems[stem] = variantOrder
-			variantOrder++
-		} else if !strings.ContainsRune(name, '*') {
-			if _, seen := customVariants[name]; seen {
+			// A `name-*` variant has no one selector to read, so it may
+			// compound with anything.
+			customVariantStems[stem] = variantEntry{
+				Kind:      variantFunctional,
+				Order:     order,
+				Compounds: compoundsAtRules | compoundsStyleRules,
+			}
+			order++
+		} else if !strings.ContainsRune(v.Name, '*') {
+			if _, seen := customVariants[v.Name]; seen {
 				continue
 			}
 
 			if customVariants == nil {
-				customVariants = make(map[string]int)
+				customVariants = make(map[string]variantEntry)
 			}
 
-			customVariants[name] = variantOrder
-			variantOrder++
+			customVariants[v.Name] = variantEntry{
+				Kind:      variantStatic,
+				Order:     order,
+				Compounds: compoundsForSelectors(v.Selectors...),
+			}
+			order++
 		}
 	}
 
@@ -183,8 +174,8 @@ func newTheme(tokens []ThemeToken, utilities []CustomUtility, variants []string,
 		colorTokens:        colors,
 		tokenNames:         names,
 		stemSpecificBranch: stemSpecific,
-		containerRanks:     rankByWidth(defaultContainerWidths, customContainers),
-		breakpointRanks:    rankByWidth(defaultBreakpointWidths, customBreakpoints),
+		breakpoints:        breakpoints,
+		containers:         containers,
 		customUtilities:    customUtilities,
 		customUtilityStems: customUtilityStems,
 		customVariants:     customVariants,
@@ -192,17 +183,29 @@ func newTheme(tokens []ThemeToken, utilities []CustomUtility, variants []string,
 		prefixes:           prefixes,
 	}
 
-	// The highest slot a sort can reach is the one past the custom variants,
-	// where an unknown variant lands.
-	if highest := arbitraryVariantSlot + theme.breakpointShift() + theme.customVariantCount(); highest >= variantMaskSlots {
-		return nil, fmt.Errorf(
-			"%d custom variants and breakpoints, more than the %d the sorter supports",
-			theme.breakpointShift()+theme.customVariantCount(),
-			variantMaskSlots-arbitraryVariantSlot-1,
-		)
+	return theme
+}
+
+// withThemeValue applies one `--breakpoint-*` or `--container-*` token over the
+// defaults, copying them the first time so a project with none shares them. As
+// in Tailwind's theme, `initial` removes the name, or with `*` all of them.
+func withThemeValue(values, defaults map[string]string, t ThemeToken) map[string]string {
+	if values == nil {
+		values = maps.Clone(defaults)
 	}
 
-	return theme, nil
+	value := strings.TrimSpace(t.Value)
+
+	switch {
+	case value != "initial":
+		values[t.Name] = value
+	case t.Name == "*":
+		clear(values)
+	default:
+		delete(values, t.Name)
+	}
+
+	return values
 }
 
 func functionalStem(name string) (string, bool) {
@@ -234,103 +237,6 @@ func buildCustomUtilityEntry(properties []string) utilityEntry {
 	}
 
 	return utilityEntry{Order: order, Count: len(properties)}
-}
-
-// rankByWidth merges a default width table with a project's custom sizes and ranks
-// every name by width, smallest first, so a custom size slots in among the defaults;
-// a custom value for a default name overrides that width, and equal widths fall back
-// to an alphabetical tie-break for determinism. Returns nil when there are no custom
-// sizes, so a project without that customization keeps the generated ranking and sees
-// byte-identical output.
-func rankByWidth(defaults, custom map[string]float64) map[string]int {
-	if len(custom) == 0 {
-		return nil
-	}
-
-	merged := make(map[string]float64, len(defaults)+len(custom))
-
-	maps.Copy(merged, defaults)
-
-	maps.Copy(merged, custom)
-
-	names := make([]string, 0, len(merged))
-	for name := range merged {
-		names = append(names, name)
-	}
-
-	slices.SortFunc(names, func(a, b string) int {
-		if c := cmp.Compare(merged[a], merged[b]); c != 0 {
-			return c
-		}
-
-		return cmp.Compare(a, b)
-	})
-
-	ranks := make(map[string]int, len(names))
-	for i, name := range names {
-		ranks[name] = i
-	}
-
-	return ranks
-}
-
-// parseThemeWidth converts a `--container-*` / `--breakpoint-*` value to a
-// comparable pixel width, `rem`/`em` at the 16px default and `px` 1:1; only
-// relative order matters. calc(), var(), unitless and unknown-unit values
-// return false, and the size is left out of the ranking rather than
-// mis-ranked.
-func parseThemeWidth(value string) (float64, bool) {
-	value = strings.TrimSpace(value)
-
-	i := 0
-	if i < len(value) && (value[i] == '-' || value[i] == '+') {
-		i++
-	}
-
-	start := i
-	for i < len(value) && ((value[i] >= '0' && value[i] <= '9') || value[i] == '.') {
-		i++
-	}
-
-	if i == start {
-		return 0, false
-	}
-
-	num, err := strconv.ParseFloat(value[:i], 64)
-	if err != nil {
-		return 0, false
-	}
-
-	switch strings.TrimSpace(value[i:]) {
-	case "rem", "em":
-		return num * 16, true
-	case "px":
-		return num, true
-	}
-
-	return 0, false
-}
-
-func (t *Theme) containerRank(size string) (int, bool) {
-	if t != nil && t.containerRanks != nil {
-		rank, ok := t.containerRanks[size]
-
-		return rank, ok
-	}
-
-	rank, ok := containerSizeRank[size]
-
-	return rank, ok
-}
-
-func (t *Theme) breakpointRank(size string) (int, bool) {
-	if t == nil || t.breakpointRanks == nil {
-		return 0, false
-	}
-
-	rank, ok := t.breakpointRanks[size]
-
-	return rank, ok
 }
 
 func (t *Theme) customUtility(name string) (utilityEntry, bool) {
@@ -376,32 +282,6 @@ func (t *Theme) matchCustomUtilityStem(base string) (utilityEntry, bool) {
 	return longestHyphenPrefix(t.customUtilityStems, base)
 }
 
-func (t *Theme) customVariantIndex(name string) (int, bool) {
-	if t == nil || t.customVariants == nil {
-		return 0, false
-	}
-
-	idx, ok := t.customVariants[name]
-
-	return idx, ok
-}
-
-func (t *Theme) matchCustomVariantStem(root string) (int, bool) {
-	if t == nil || t.customVariantStems == nil {
-		return 0, false
-	}
-
-	return longestHyphenPrefix(t.customVariantStems, root)
-}
-
-func (t *Theme) customVariantCount() int {
-	if t == nil {
-		return 0
-	}
-
-	return len(t.customVariants) + len(t.customVariantStems)
-}
-
 // classPrefixes returns the class prefixes the project's bundles use. Nil means
 // no bundle sets one, which is the overwhelmingly common case and the caller's
 // fast path: parsing then never looks at a prefix at all.
@@ -419,42 +299,83 @@ func requiresPrefix(prefixes []string) bool {
 	return len(prefixes) > 0 && !slices.Contains(prefixes, "")
 }
 
-func (t *Theme) breakpointShift() int {
-	if t == nil || t.breakpointRanks == nil {
-		return 0
+func (t *Theme) breakpoint(name string) (string, bool) {
+	values := defaultBreakpoints
+	if t != nil && t.breakpoints != nil {
+		values = t.breakpoints
 	}
 
-	return len(t.breakpointRanks) - len(defaultBreakpointWidths)
+	value, ok := values[name]
+
+	return value, ok
 }
 
-// defaultContainerWidths is the v4 default `--container-*` scale in pixels (rem × 16),
-// merged with custom sizes by rankByWidth. TestContainerDefaultsMatchRank guards it
-// against drift from containerSizeRank's ordering.
-var defaultContainerWidths = map[string]float64{
-	"3xs": 256,
-	"2xs": 288,
-	"xs":  320,
-	"sm":  384,
-	"md":  448,
-	"lg":  512,
-	"xl":  576,
-	"2xl": 672,
-	"3xl": 768,
-	"4xl": 896,
-	"5xl": 1024,
-	"6xl": 1152,
-	"7xl": 1280,
+func (t *Theme) container(name string) (string, bool) {
+	values := defaultContainers
+	if t != nil && t.containers != nil {
+		values = t.containers
+	}
+
+	value, ok := values[name]
+
+	return value, ok
 }
 
-// defaultBreakpointWidths is the v4 default `--breakpoint-*` scale in pixels (rem ×
-// 16), merged with custom sizes by rankByWidth. TestBreakpointDefaultsMatchRegistry
-// guards it against drift from the generated breakpoint variant priorities.
-var defaultBreakpointWidths = map[string]float64{
-	"sm":  640,
-	"md":  768,
-	"lg":  1024,
-	"xl":  1280,
-	"2xl": 1536,
+func (t *Theme) removedBreakpoint(name string) bool {
+	_, isDefault := defaultBreakpoints[name]
+	_, kept := t.breakpoint(name)
+
+	return isDefault && !kept
+}
+
+func (t *Theme) hasVariant(root string) bool {
+	_, ok := t.variantEntry(root)
+
+	return ok
+}
+
+// variantEntry returns how Tailwind registers root. Breakpoints come from the
+// theme, one static variant in the `min-*` group per `--breakpoint-*`, so `md`
+// is no variant once a project resets the namespace. Any other built-in wins
+// over a project's own, so `group-*` cannot take `group-hover`, and a project's
+// `@custom-variant`s follow every built-in in the order the stylesheet
+// declares them.
+func (t *Theme) variantEntry(root string) (variantEntry, bool) {
+	if _, breakpoint := defaultBreakpoints[root]; !breakpoint {
+		if entry, ok := variantRegistry[root]; ok {
+			return entry, true
+		}
+	}
+
+	if _, ok := t.breakpoint(root); ok {
+		group := variantRegistry["min"]
+
+		return variantEntry{Kind: variantStatic, Order: group.Order, Compounds: group.Compounds}, true
+	}
+
+	if t == nil {
+		return variantEntry{}, false
+	}
+
+	if entry, ok := t.customVariants[root]; ok {
+		return entry, true
+	}
+
+	if entry, ok := t.customVariantStems[root]; ok {
+		return entry, true
+	}
+
+	return variantEntry{}, false
+}
+
+// unknownVariantOrder places a variant no registration covers after the
+// project's own.
+func (t *Theme) unknownVariantOrder() int {
+	if t == nil {
+		return customVariantOrder
+	}
+
+	return customVariantOrder + len(t.customVariants) + len(t.customVariantStems)
 }
 
 // LoadTheme reads each CSS entry point and builds one Theme from the tokens,
@@ -492,10 +413,7 @@ func LoadTheme(paths ...string) (*Theme, error) {
 		src = append(append(src, expanded...), '\n')
 	}
 
-	theme, err := newTheme(ExtractTheme(src), ExtractUtilities(src), ExtractCustomVariants(src), ExtractPrefixes(src))
-	if err != nil {
-		return nil, err
-	}
+	theme := newTheme(ExtractTheme(src), ExtractUtilities(src), ExtractCustomVariants(src), ExtractPrefixes(src))
 
 	themeCache.Lock()
 	themeCache.entries[key] = &cachedTheme{theme: theme, stamps: stamps}
@@ -944,13 +862,20 @@ func ExtractUtilities(src []byte) []CustomUtility {
 	return out
 }
 
-// ExtractCustomVariants returns the name of every top-level `@custom-variant` in src,
-// in source order. Parse errors are non-fatal: it walks whatever CST the parser
+// CustomVariant is one `@custom-variant`: its name and the selectors Tailwind
+// reads its compounds from.
+type CustomVariant struct {
+	Name      string
+	Selectors []string
+}
+
+// ExtractCustomVariants returns every top-level `@custom-variant` in src, in
+// source order. Parse errors are non-fatal: it walks whatever CST the parser
 // recovered.
-func ExtractCustomVariants(src []byte) []string {
+func ExtractCustomVariants(src []byte) []CustomVariant {
 	file, _ := css.Parse(src)
 
-	var out []string
+	var out []CustomVariant
 
 	for _, n := range file.Nodes {
 		atRule, ok := n.(*css.AtRule)
@@ -965,10 +890,53 @@ func ExtractCustomVariants(src []byte) []string {
 			continue
 		}
 
-		out = append(out, name)
+		out = append(out, CustomVariant{Name: name, Selectors: customVariantSelectors(atRule, name)})
 	}
 
 	return out
+}
+
+// customVariantSelectors collects them as index.ts does: the shorthand's list,
+// `(&:hover, &:focus)`, or the body's through bodySelectors.
+func customVariantSelectors(atRule *css.AtRule, name string) []string {
+	if atRule.Block {
+		return bodySelectors(atRule.Children, nil)
+	}
+
+	list := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(atRule.Prelude), []byte(name)))
+
+	if len(list) < 2 || list[0] != '(' || list[len(list)-1] != ')' {
+		return nil
+	}
+
+	var selectors []string
+
+	for selector := range segments(string(list[1:len(list)-1]), ',') {
+		selectors = append(selectors, strings.TrimSpace(selector))
+	}
+
+	return selectors
+}
+
+// bodySelectors walks a variant body as fromAst in variants.ts does.
+func bodySelectors(nodes []css.Node, selectors []string) []string {
+	for _, n := range nodes {
+		switch node := n.(type) {
+		case *css.Rule:
+			selectors = append(selectors, string(bytes.TrimSpace(node.Selector)))
+			selectors = bodySelectors(node.Children, selectors)
+		case *css.AtRule:
+			name := string(node.Name)
+
+			if name != "slot" && name != "variant" {
+				selectors = append(selectors, "@"+name+" "+string(bytes.TrimSpace(node.Prelude)))
+			}
+
+			selectors = bodySelectors(node.Children, selectors)
+		}
+	}
+
+	return selectors
 }
 
 func leadingVariantName(prelude []byte) string {

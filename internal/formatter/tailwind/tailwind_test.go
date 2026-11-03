@@ -121,6 +121,7 @@ func TestSortAmbiguousPrefixNamedValues(t *testing.T) {
 	}
 }
 
+// Every want is what Tailwind v4.3.4's getClassOrder gives.
 func TestSortArbitraryValueShapeDisambiguation(t *testing.T) {
 	cases := []struct {
 		name string
@@ -130,6 +131,24 @@ func TestSortArbitraryValueShapeDisambiguation(t *testing.T) {
 		{"border length vs color", "p-4 border-[2px] border-[#fff]", "border-[2px] border-[#fff] p-4"},
 		{"text length vs color", "text-[#fff] p-4 text-[14px]", "p-4 text-[14px] text-[#fff]"},
 		{"shadow length vs color", "shadow-[#fff] p-4 shadow-[10px]", "p-4 shadow-[10px] shadow-[#fff]"},
+		{"unit added in v4.3.4 is a length", "text-[#fff] p-4 text-[10dvmin]", "p-4 text-[10dvmin] text-[#fff]"},
+		{"math function is a length", "text-[#fff] p-4 text-[clamp(1rem,2vw,3rem)]", "p-4 text-[clamp(1rem,2vw,3rem)] text-[#fff]"},
+		{"spacing function is a length", "border-[#fff] p-4 border-[--spacing(2)]", "border-[--spacing(2)] border-[#fff] p-4"},
+		{"exponent number is a length", "text-[#fff] p-4 text-[1e1px]", "p-4 text-[1e1px] text-[#fff]"},
+		{"text takes a time as a color", "text-[#fff] p-4 text-[2s]", "p-4 text-[#fff] text-[2s]"},
+		{"shadow takes a time as a shadow", "shadow-[#fff] p-4 shadow-[2s]", "p-4 shadow-[2s] shadow-[#fff]"},
+		{"shadow takes a shadow list as a shadow", "shadow-[#fff] p-4 shadow-[0_0_2px_#000]", "p-4 shadow-[0_0_2px_#000] shadow-[#fff]"},
+		{"border takes a bare number as a width", "border-[#fff] p-4 border-[2]", "border-[2] border-[#fff] p-4"},
+		{"border takes a percentage as a color", "border-[#fff] p-4 border-[50%]", "border-[#fff] border-[50%] p-4"},
+		{"border takes a width keyword as a width", "border-[#fff] p-4 border-[thin]", "border-[thin] border-[#fff] p-4"},
+		{"text takes a relative size as a size", "text-[#fff] p-4 text-[larger]", "p-4 text-[larger] text-[#fff]"},
+		{"a type hint decides the branch", "text-[#fff] p-4 text-[length:var(--x)]", "p-4 text-[length:var(--x)] text-[#fff]"},
+		{"a type hint in parentheses decides the branch", "border-[#fff] p-4 border-(length:--x)", "border-(length:--x) border-[#fff] p-4"},
+		{"bg takes a url as an image", "bg-cover bg-[url(x)] bg-red-500", "bg-red-500 bg-[url(x)] bg-cover"},
+		{"font takes a number as a weight", "font-bold font-[500] font-[Inter]", "font-[Inter] font-[500] font-bold"},
+		{"a value the utility takes sorts by its rank", "inset-0 -bg-linear-[45deg]", "inset-0 -bg-linear-[45deg]"},
+		{"a value the utility rejects is unknown", "inset-0 -bg-linear-[#000]", "-bg-linear-[#000] inset-0"},
+		{"an empty type hint is unknown", "inset-0 text-[:x]", "text-[:x] inset-0"},
 	}
 
 	for _, tc := range cases {
@@ -138,6 +157,78 @@ func TestSortArbitraryValueShapeDisambiguation(t *testing.T) {
 
 			if got != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Classes setting the same properties sort by name, so `[` after a digit puts
+// `p-[3px]` after `p-4`, and `(` before one puts `w-(--x)` ahead of `w-0`.
+func TestSortPlacesArbitraryValuesAmongNamedOnes(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"p-4 p-[3px] p-1", "p-1 p-4 p-[3px]"},
+		{"w-0 w-(--x) w-[10px]", "w-(--x) w-0 w-[10px]"},
+	}
+
+	for _, tc := range cases {
+		if got := Sort(nil, tc.in); got != tc.want {
+			t.Errorf("Sort(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSortRanksNegativeAndFractionClassesAsTheirOwn(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"translate-x-2/3 translate-x-2.5", "translate-x-2.5 translate-x-2/3"},
+		{"mt-2 -mt-[3px] mt-[3px]", "-mt-[3px] mt-2 mt-[3px]"},
+	}
+
+	for _, tc := range cases {
+		if got := Sort(nil, tc.in); got != tc.want {
+			t.Errorf("Sort(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// Every want is what Tailwind v4.3.4's getClassOrder gives.
+func TestSortOrdersVariantsAsTheEngineDoes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"min widths join the named breakpoints", "min-[50rem]:flex sm:flex min-[30rem]:flex", "min-[30rem]:flex sm:flex min-[50rem]:flex"},
+		{"decimal widths compare as numbers", "min-[40.5rem]:flex min-[40.25rem]:flex", "min-[40.25rem]:flex min-[40.5rem]:flex"},
+		{"widths group by unit first", "min-[30rem]:flex min-[500px]:flex", "min-[500px]:flex min-[30rem]:flex"},
+		{"max widths sort widest first", "max-[30rem]:flex max-sm:flex", "max-sm:flex max-[30rem]:flex"},
+		{"container widths join the named sizes", "@min-[40rem]:flex @min-[9rem]:flex @md:flex", "@min-[9rem]:flex @md:flex @min-[40rem]:flex"},
+		{"container max widths sort widest first", "@max-sm:flex @max-[50rem]:flex", "@max-[50rem]:flex @max-sm:flex"},
+		{"a variant value decides before the utility", "data-[b]:p-4 data-[a]:m-4", "data-[a]:m-4 data-[b]:p-4"},
+		{"named values precede arbitrary ones", "aria-[busy=true]:flex aria-checked:flex", "aria-checked:flex aria-[busy=true]:flex"},
+		{"a compound variant compares its inner one", "group-focus:flex group-hover:flex", "group-hover:flex group-focus:flex"},
+		{"a compound modifier sorts after none", "group-hover/item:flex group-hover:flex", "group-hover:flex group-hover/item:flex"},
+		{"numbers in a class compare by value", "w-[10px] w-[9px]", "w-[9px] w-[10px]"},
+		{"a static variant with a value is unknown", "p-4 hover-foo:text-sm", "hover-foo:text-sm p-4"},
+		{"a compound variant without one is unknown", "p-4 group:text-sm", "group:text-sm p-4"},
+		{"a compound variant cannot wrap an at-rule", "p-4 group-md:text-sm", "group-md:text-sm p-4"},
+		{"a compound variant cannot wrap a pseudo-element", "p-4 group-[&::after]:text-sm", "group-[&::after]:text-sm p-4"},
+		{"not wraps an at-rule", "p-4 not-md:text-sm", "p-4 not-md:text-sm"},
+		{"group cannot wrap a relative selector", "p-4 group-[>img]:text-sm", "group-[>img]:text-sm p-4"},
+		{"has wraps a relative selector", "p-4 has-[>img]:text-sm", "p-4 has-[>img]:text-sm"},
+		{"a breakpoint with no width is unknown", "p-4 max-foo:text-sm", "max-foo:text-sm p-4"},
+		{"a container modifier keeps the width", "p-4 @lg/main:text-sm", "p-4 @lg/main:text-sm"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Sort(nil, tc.in); got != tc.want {
+				t.Fatalf("Sort(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}
@@ -280,7 +371,7 @@ func TestSortIsIdempotent(t *testing.T) {
 	}
 }
 
-// The fixture-level variant tests never reach priority slot 64, so a swapped
+// No class list in the other tests holds 64 distinct variants, so a swapped
 // word order would pass them.
 func TestVariantMaskCmp(t *testing.T) {
 	tests := []struct {
@@ -304,19 +395,6 @@ func TestVariantMaskCmp(t *testing.T) {
 	}
 }
 
-func TestRegistryFitsVariantMask(t *testing.T) {
-	highest := 0
-	for _, entry := range buildVariantRegistry() {
-		highest = max(highest, entry.Priority)
-	}
-
-	slot := highest + 1 // mirrors arbitraryVariantSlot
-
-	if slot >= variantMaskWords*64 {
-		t.Fatalf("arbitrary variant slot %d exceeds variantMask capacity %d; increase variantMaskWords", slot, variantMaskWords*64)
-	}
-}
-
 // The registry is reset so the goroutines race its first build, and the two
 // themes disagree about `text-brand` (a color in one, a font size in the
 // other), so a goroutine that saw the wrong theme sorts differently.
@@ -329,7 +407,8 @@ func TestSortConcurrentAcrossThemes(t *testing.T) {
 	stemRegistry = nil
 	variantRegistry = nil
 	propertyIndex = nil
-	arbitraryVariantSlot = 0
+	customVariantOrder = 0
+	breakpointGroups = nil
 
 	const goroutines = 16
 	const iterations = 50
@@ -361,15 +440,10 @@ func TestSortConcurrentAcrossThemes(t *testing.T) {
 	}
 }
 
-func mustTheme(t *testing.T, tokens []ThemeToken, utilities []CustomUtility, variants, prefixes []string) *Theme {
+func mustTheme(t *testing.T, tokens []ThemeToken, utilities []CustomUtility, variants []CustomVariant, prefixes []string) *Theme {
 	t.Helper()
 
-	theme, err := newTheme(tokens, utilities, variants, prefixes)
-	if err != nil {
-		t.Fatalf("newTheme: %v", err)
-	}
-
-	return theme
+	return newTheme(tokens, utilities, variants, prefixes)
 }
 
 func TestSortPinnedHoldsBoundaryToken(t *testing.T) {

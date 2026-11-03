@@ -2,6 +2,7 @@
 
 ## Unreleased
 * Added a `laravel-fmt/format` request to `laravel-fmt lsp` that formats the text it is sent, so editor plugins do not have to open the file
+* Improved Tailwind sorting to accept any number of `@custom-variant`s and custom breakpoints in a stylesheet
 * Optimized `laravel-fmt lsp` to look up a file's config once when an editor asks for its line ending
 * Fixed `laravel-fmt lsp` converting the line endings of a file it could not format or was not given
 * Fixed `laravel-fmt lsp` exiting on a message that is not valid JSON
@@ -28,6 +29,13 @@
 * Fixed `.gitignore` and `ignore` patterns on macOS missing an accented file name stored in its other Unicode spelling, including in `--stdin-filepath` and `laravel-fmt lsp`
 * Fixed an accented file name on macOS reaching the GitLab report in a spelling GitLab could not find
 * Fixed a file named twice through a symlinked folder or junction being formatted and counted twice
+* Fixed arbitrary Tailwind values like `text-[10dvh]`, `shadow-[0_0_2px_#000]` or `font-[500]` sorting by the wrong property
+* Fixed arbitrary Tailwind values like `p-[3px]` sorting ahead of named ones like `p-4`
+* Fixed negative and fraction Tailwind classes like `-mt-2` or `translate-x-2/3` sorting as their positive or whole form
+* Fixed Tailwind variants like `min-[50rem]`, `@min-[9rem]`, `data-[a]` or `group-hover` sorting in another order than Tailwind's
+* Fixed custom Tailwind breakpoints in `px` sorting by width, where Tailwind sorts them before every `rem` one
+* Fixed Tailwind classes like `w-[10px]` sorting ahead of `w-[9px]`, which Tailwind compares by number
+* Fixed a Tailwind class with a variant Tailwind rejects, like `hover-foo:flex`, `group-md:flex` or a breakpoint the theme removed, being sorted instead of left at the front
 
 ## Version 0.7.0 (2026-10-29)
 * Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON

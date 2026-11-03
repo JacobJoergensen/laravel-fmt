@@ -2,7 +2,6 @@ package tailwind
 
 import (
 	"bytes"
-	"cmp"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -205,28 +204,6 @@ func TestLoadThemeMissingPathErrors(t *testing.T) {
 	}
 }
 
-func TestContainerDefaultsMatchRank(t *testing.T) {
-	if len(defaultContainerWidths) != len(containerSizeRank) {
-		t.Fatalf("defaultContainerWidths has %d entries, containerSizeRank has %d",
-			len(defaultContainerWidths), len(containerSizeRank))
-	}
-
-	names := make([]string, 0, len(defaultContainerWidths))
-	for name := range defaultContainerWidths {
-		names = append(names, name)
-	}
-
-	slices.SortFunc(names, func(a, b string) int {
-		return cmp.Compare(defaultContainerWidths[a], defaultContainerWidths[b])
-	})
-
-	for i, name := range names {
-		if containerSizeRank[name] != i {
-			t.Fatalf("container %q: width order %d != containerSizeRank %d", name, i, containerSizeRank[name])
-		}
-	}
-}
-
 func TestSortCustomContainerSizesByWidth(t *testing.T) {
 	theme := mustTheme(t, []ThemeToken{
 		{Namespace: "container", Name: "tiny", Value: "10rem"},
@@ -272,59 +249,6 @@ func TestSortContainerUnchangedWithoutCustomSizes(t *testing.T) {
 	}
 }
 
-func TestParseThemeWidth(t *testing.T) {
-	tests := []struct {
-		value  string
-		want   float64
-		wantOK bool
-	}{
-		{"10rem", 160, true},
-		{"1.5rem", 24, true},
-		{"768px", 768, true},
-		{"20em", 320, true},
-		{" 32rem ", 512, true},
-		{"calc(100% - 2rem)", 0, false},
-		{"var(--x)", 0, false},
-		{"100", 0, false},
-		{"", 0, false},
-		{"rem", 0, false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.value, func(t *testing.T) {
-			got, ok := parseThemeWidth(tc.value)
-
-			if ok != tc.wantOK || got != tc.want {
-				t.Fatalf("parseThemeWidth(%q) = (%v, %v), want (%v, %v)",
-					tc.value, got, ok, tc.want, tc.wantOK)
-			}
-		})
-	}
-}
-
-func TestBreakpointDefaultsMatchRegistry(t *testing.T) {
-	ensureRegistry()
-
-	names := make([]string, 0, len(defaultBreakpointWidths))
-	for name := range defaultBreakpointWidths {
-		names = append(names, name)
-	}
-
-	slices.SortFunc(names, func(a, b string) int {
-		return cmp.Compare(defaultBreakpointWidths[a], defaultBreakpointWidths[b])
-	})
-
-	for i := 1; i < len(names); i++ {
-		prev := variantRegistry[names[i-1]].Priority
-		cur := variantRegistry[names[i]].Priority
-
-		if cur != prev+1 {
-			t.Fatalf("breakpoint %q priority %d is not one above %q priority %d; width order and generated order have drifted",
-				names[i], cur, names[i-1], prev)
-		}
-	}
-}
-
 func TestSortCustomBreakpointSizesByWidth(t *testing.T) {
 	theme := mustTheme(t, []ThemeToken{
 		{Namespace: "breakpoint", Name: "xs", Value: "20rem"},
@@ -350,6 +274,38 @@ func TestSortCustomBreakpointOverridesDefaultWidth(t *testing.T) {
 
 	got := Sort(theme, "sm:flex md:flex")
 	want := "md:flex sm:flex"
+
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// compareBreakpoints groups widths by unit before it compares numbers, so a
+// `px` breakpoint sorts before every default `rem` one, as the engine does.
+func TestSortCustomBreakpointsGroupByUnit(t *testing.T) {
+	theme := mustTheme(t, []ThemeToken{
+		{Namespace: "breakpoint", Name: "3xl", Value: "1920px"},
+	}, nil, nil, nil)
+
+	got := Sort(theme, "2xl:flex sm:flex 3xl:flex")
+	want := "3xl:flex sm:flex 2xl:flex"
+
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// `--breakpoint-*: initial` empties the namespace, so `md` is no variant and its
+// class is unknown, as the engine leaves it.
+func TestSortBreakpointResetRemovesTheDefaults(t *testing.T) {
+	theme := mustTheme(t, []ThemeToken{
+		{Namespace: "breakpoint", Name: "*", Value: "initial"},
+		{Namespace: "breakpoint", Name: "tablet", Value: "40rem"},
+		{Namespace: "breakpoint", Name: "desktop", Value: "64rem"},
+	}, nil, nil, nil)
+
+	got := Sort(theme, "p-4 md:text-sm desktop:flex tablet:flex")
+	want := "md:text-sm p-4 tablet:flex desktop:flex"
 
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
@@ -461,13 +417,38 @@ func TestExtractCustomVariants(t *testing.T) {
   }
 }
 
+@custom-variant hocus (&:hover, &:focus);
+
 @custom-variant sidebar-* (&:where([data-sidebar="*"]));`)
 
 	got := ExtractCustomVariants(src)
-	want := []string{"pointer-fine", "theme-midnight", "sidebar-*"}
+	want := []CustomVariant{
+		{Name: "pointer-fine", Selectors: []string{"@media (pointer: fine)"}},
+		{Name: "theme-midnight", Selectors: []string{`&:where([data-theme="midnight"] *)`}},
+		{Name: "hocus", Selectors: []string{"&:hover", "&:focus"}},
+		{Name: "sidebar-*", Selectors: []string{`&:where([data-sidebar="*"])`}},
+	}
 
-	if !slices.Equal(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
+	if !slices.EqualFunc(got, want, func(a, b CustomVariant) bool {
+		return a.Name == b.Name && slices.Equal(a.Selectors, b.Selectors)
+	}) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+// Tailwind reads a custom variant's compounds from its selectors, so one that
+// is an at-rule like `@media print` cannot sit inside `group-`.
+func TestSortCustomVariantCompoundsByItsSelectors(t *testing.T) {
+	theme := mustTheme(t, nil, nil, []CustomVariant{
+		{Name: "theme-a", Selectors: []string{"&:where(.a *)"}},
+		{Name: "printish", Selectors: []string{"@media print"}},
+	}, nil)
+
+	got := Sort(theme, "p-4 group-theme-a:text-sm group-printish:text-sm")
+	want := "group-printish:text-sm p-4 group-theme-a:text-sm"
+
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
@@ -506,7 +487,7 @@ func TestExtractPrefixes(t *testing.T) {
 }
 
 func TestSortCustomVariantOrder(t *testing.T) {
-	theme := mustTheme(t, nil, nil, []string{"theme-a", "theme-b"}, nil)
+	theme := mustTheme(t, nil, nil, []CustomVariant{{Name: "theme-a"}, {Name: "theme-b"}}, nil)
 
 	got := Sort(theme, "[&_p]:flex theme-b:flex dark:flex theme-a:flex flex")
 	want := "flex dark:flex theme-a:flex theme-b:flex [&_p]:flex"
@@ -553,7 +534,7 @@ func TestSortFunctionalUtility(t *testing.T) {
 }
 
 func TestSortFunctionalCustomVariant(t *testing.T) {
-	theme := mustTheme(t, nil, nil, []string{"theme-*"}, nil)
+	theme := mustTheme(t, nil, nil, []CustomVariant{{Name: "theme-*"}}, nil)
 
 	got := Sort(theme, "[&_p]:flex theme-dawn:flex dark:flex theme-midnight:flex flex")
 	want := "flex dark:flex theme-dawn:flex theme-midnight:flex [&_p]:flex"
@@ -568,7 +549,7 @@ func TestSortFunctionalCustomVariant(t *testing.T) {
 }
 
 func TestSortFunctionalDoesNotHijackBuiltin(t *testing.T) {
-	theme := mustTheme(t, nil, nil, []string{"group-*"}, nil)
+	theme := mustTheme(t, nil, nil, []CustomVariant{{Name: "group-*"}}, nil)
 
 	got := Sort(theme, "dark:flex group-hover:flex flex")
 	want := "flex group-hover:flex dark:flex"
@@ -905,30 +886,6 @@ func TestLoadThemeKeepsEachProjectsTheme(t *testing.T) {
 
 	if again := loadApp(t, app); again != first {
 		t.Fatal("loading another project's stylesheets evicted this one's theme")
-	}
-}
-
-func TestNewThemeRejectsMoreVariantsThanTheMaskHolds(t *testing.T) {
-	mustTheme(t, nil, nil, []string{"small"}, nil)
-
-	variants := make([]string, 0, variantMaskSlots)
-	for i := range variantMaskSlots - arbitraryVariantSlot {
-		variants = append(variants, fmt.Sprintf("v%d", i))
-	}
-
-	if _, err := newTheme(nil, nil, variants, nil); err == nil {
-		t.Fatalf("newTheme accepted %d custom variants, which overflow the variant mask", len(variants))
-	}
-
-	// One fewer fits, and its unknown-variant slot is the mask's last bit.
-	fits := variants[:len(variants)-1]
-	theme := mustTheme(t, nil, nil, fits, nil)
-
-	input := "unknown:flex " + fits[len(fits)-1] + ":flex"
-	want := fits[len(fits)-1] + ":flex unknown:flex"
-
-	if got := Sort(theme, input); got != want {
-		t.Fatalf("Sort = %q, want %q", got, want)
 	}
 }
 
