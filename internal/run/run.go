@@ -64,11 +64,12 @@ func Format(opts *Options, streams Streams) error {
 
 	start := time.Now()
 
-	workDir, err := os.Getwd()
+	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("resolve working directory: %w", err)
 	}
 
+	workDir := walk.Precompose(cwd)
 	r := &runner{opts: *opts, streams: streams, workDir: workDir, start: start}
 
 	// Config is searched from what is being formatted, not where the process

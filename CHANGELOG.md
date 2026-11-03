@@ -24,6 +24,9 @@
 * Fixed Pint `notName` braces like `*.{stub,tpl}.php` and plain regexes like `/Models/` in `notName` or `notPath` being ignored
 * Fixed `--diff` run from a subfolder of a Laravel app writing `../` paths that `git apply` rejects; paths are now relative to the app root
 * Fixed a path typed in another case on Windows or macOS keeping that case in the output and the GitLab report, where GitLab could not find the file
+* Fixed an accented file name on macOS being formatted twice when named in both of its Unicode spellings
+* Fixed `.gitignore` and `ignore` patterns on macOS missing an accented file name stored in its other Unicode spelling, including in `--stdin-filepath` and `laravel-fmt lsp`
+* Fixed an accented file name on macOS reaching the GitLab report in a spelling GitLab could not find
 
 ## Version 0.7.0 (2026-10-29)
 * Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON

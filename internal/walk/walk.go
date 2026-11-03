@@ -8,8 +8,11 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
@@ -117,6 +120,7 @@ func IgnoresFile(anchor string, cfg *config.File, file string) (bool, error) {
 		return false, fmt.Errorf("resolve %s: %w", file, err)
 	}
 
+	absPath = Precompose(absPath)
 	dir := filepath.Dir(absPath)
 	prefix := ignorePrefix(anchor, dir)
 	set := &ignoreSet{cfg: compileRules(cfg, anchor)}
@@ -266,7 +270,7 @@ func onDiskCase(path string) string {
 		dir += sep + names[i]
 	}
 
-	return prefix + strings.Join(names, sep)
+	return Precompose(prefix + strings.Join(names, sep))
 }
 
 // A spelling that differs only in case counts only if it is the same file, so
@@ -283,13 +287,39 @@ func listedName(dir, name string) (string, bool) {
 		}
 	}
 
+	composed := composedName(name)
+
 	for _, entry := range entries {
-		if strings.EqualFold(entry.Name(), name) && sameFile(filepath.Join(dir, name), filepath.Join(dir, entry.Name())) {
-			return entry.Name(), true
+		listed := entry.Name()
+
+		if strings.EqualFold(composedName(listed), composed) && sameFile(filepath.Join(dir, name), filepath.Join(dir, listed)) {
+			return listed, true
 		}
 	}
 
 	return "", false
+}
+
+// git precomposes the names it reads only on macOS (core.precomposeunicode),
+// and only a volume that opens a name in either form can take the composed one.
+var precomposeNames = runtime.GOOS == "darwin"
+
+// Precompose returns path in Unicode NFC on macOS, the form git records there.
+func Precompose(path string) string {
+	composed := composedName(path)
+	if composed == path || !sameFile(composed, path) {
+		return path
+	}
+
+	return composed
+}
+
+func composedName(name string) string {
+	if !precomposeNames {
+		return name
+	}
+
+	return norm.NFC.String(name)
 }
 
 func sameFile(a, b string) bool {
@@ -435,6 +465,10 @@ func walkTree(dir, ignoreRoot string, cfg ignoreRules, projectOf ProjectIgnore) 
 		}
 
 		rel := relSlash(dir, abs)
+
+		if composed := Precompose(abs); composed != abs {
+			abs, rel = composed, composedName(rel)
+		}
 
 		if d.IsDir() {
 			if rel == "." {

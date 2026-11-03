@@ -1243,3 +1243,113 @@ func TestFilesSpellsANamedPathAsItsDirectoryListsIt(t *testing.T) {
 		})
 	}
 }
+
+func TestFilesTakesBothUnicodeFormsOfANameAsOne(t *testing.T) {
+	const composed, decomposed = "café.php", "café.php"
+
+	tests := []struct {
+		name  string
+		files map[string]string
+		args  []string
+		want  string
+	}{
+		{
+			name:  "a file named in both forms is listed once, composed",
+			files: map[string]string{"app/" + decomposed: "<?php"},
+			args:  []string{"app/" + composed, "app/" + decomposed},
+			want:  "app/" + composed,
+		},
+		{
+			name: "a composed pattern ignores a decomposed name",
+			files: map[string]string{
+				".gitignore":        composed + "\n",
+				"app/" + decomposed: "<?php",
+				"app/b.php":         "<?php",
+			},
+			want: "app/b.php",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := buildTree(t, tt.files)
+			t.Chdir(root)
+
+			if !precomposeNames || !exists(filepath.Join("app", composed)) {
+				t.Skip("the file system keeps both forms as separate names")
+			}
+
+			got, err := Files(root, root, config.Default(), tt.args, nil)
+			if err != nil {
+				t.Fatalf("Files: %v", err)
+			}
+
+			want := filepath.Join(root, filepath.FromSlash(tt.want))
+
+			if !slices.Equal(got, []string{want}) {
+				t.Fatalf("Files = %q, want [%q]", got, want)
+			}
+		})
+	}
+}
+
+func TestFilesKeepsTheStoredFormOnAVolumeThatTellsTheFormsApart(t *testing.T) {
+	const composed, decomposed = "café.php", "café.php"
+
+	root := buildTree(t, map[string]string{"app/" + decomposed: "<?php"})
+	t.Chdir(root)
+
+	if exists(filepath.Join("app", composed)) {
+		t.Skip("the file system opens a name in either form")
+	}
+
+	previous := precomposeNames
+	precomposeNames = true
+
+	t.Cleanup(func() { precomposeNames = previous })
+
+	want := filepath.Join(root, "app", decomposed)
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"walked", nil},
+		{"named as stored", []string{filepath.Join("app", decomposed)}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Files(root, root, config.Default(), tt.args, nil)
+			if err != nil {
+				t.Fatalf("Files: %v", err)
+			}
+
+			if !slices.Equal(got, []string{want}) {
+				t.Fatalf("Files = %q, want [%q]", got, want)
+			}
+		})
+	}
+}
+
+func TestIgnoresFileMatchesAComposedPatternToADecomposedName(t *testing.T) {
+	const composed, decomposed = "café.php", "café.php"
+
+	root := buildTree(t, map[string]string{
+		".gitignore":        composed + "\n",
+		"app/" + decomposed: "<?php",
+	})
+
+	if !precomposeNames || !exists(filepath.Join(root, "app", composed)) {
+		t.Skip("the file system keeps both forms as separate names")
+	}
+
+	ignored, err := IgnoresFile(root, config.Default(), filepath.Join(root, "app", decomposed))
+	if err != nil {
+		t.Fatalf("IgnoresFile: %v", err)
+	}
+
+	if !ignored {
+		t.Fatal("IgnoresFile = false, want the decomposed name ignored")
+	}
+}
