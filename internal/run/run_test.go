@@ -5,9 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/JacobJoergensen/laravel-fmt/internal/detector"
 	"github.com/JacobJoergensen/laravel-fmt/internal/terminal"
 	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
 )
@@ -214,5 +216,67 @@ func TestStdinPathNoFileCanHaveFormatsAsAnyOther(t *testing.T) {
 				t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 			}
 		})
+	}
+}
+
+func TestDiffHeadersNameFilesFromWhereThePatchApplies(t *testing.T) {
+	tests := []struct {
+		name  string
+		dir   string
+		paths []string
+		want  string
+	}{
+		{"a walk from a subfolder covers the app root", "sub", nil, "--- a/app/a.php"},
+		{"a named path stays relative to where it was named", "app", []string{"a.php"}, "--- a/a.php"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writeProject(t, map[string]string{
+				"artisan":       "",
+				"composer.json": `{"require":{"laravel/framework":"^12.0"}}`,
+				"app/a.php":     "<?php\n$a=1;\n",
+				"sub/keep.txt":  "",
+			})
+			t.Chdir(tt.dir)
+
+			var stdout bytes.Buffer
+
+			err := Format(&Options{Diff: true, Paths: tt.paths}, Streams{Out: &stdout, Err: &bytes.Buffer{}})
+			if !errors.Is(err, ErrDrift) {
+				t.Fatalf("Format(--diff) = %v, want ErrDrift", err)
+			}
+
+			var headers []string
+
+			for line := range strings.SplitSeq(stdout.String(), "\n") {
+				if strings.HasPrefix(line, "--- ") {
+					headers = append(headers, line)
+				}
+			}
+
+			if !slices.Contains(headers, tt.want) {
+				t.Fatalf("headers %q, want %q among them", headers, tt.want)
+			}
+
+			for _, header := range headers {
+				if strings.Contains(header, "../") {
+					t.Fatalf("header %q climbs out of the directory", header)
+				}
+			}
+		})
+	}
+}
+
+// --since lists files from the git root, but its patch applies where the walk's
+// does: a git root above the app would name each file from a folder git apply
+// does not run in.
+func TestSinceDiffIsRelativeToTheAppRoot(t *testing.T) {
+	appRoot := filepath.Join(t.TempDir(), "web")
+	r := &runner{opts: Options{Since: new("HEAD")}, workDir: filepath.Join(appRoot, "app")}
+
+	got := r.diffBase(detector.Context{Laravel: &detector.Laravel{Root: appRoot}})
+	if got != appRoot {
+		t.Fatalf("diffBase = %q, want the app root %q", got, appRoot)
 	}
 }

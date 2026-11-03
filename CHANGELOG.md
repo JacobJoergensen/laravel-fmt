@@ -22,6 +22,8 @@
 * Fixed a Pint `notName` like `legacy*` skipping every file in a folder it matches, which Pint still formats
 * Fixed a Pint `notPath` like `tests/Fixtures` missing `tests/FixturesTest.php`, which Pint matches as part of the path
 * Fixed Pint `notName` braces like `*.{stub,tpl}.php` and plain regexes like `/Models/` in `notName` or `notPath` being ignored
+* Fixed `--diff` run from a subfolder of a Laravel app writing `../` paths that `git apply` rejects; paths are now relative to the app root
+* Fixed a path typed in another case on Windows or macOS keeping that case in the output and the GitLab report, where GitLab could not find the file
 
 ## Version 0.7.0 (2026-10-29)
 * Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON

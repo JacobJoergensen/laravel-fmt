@@ -110,7 +110,7 @@ func Format(opts *Options, streams Streams) error {
 		return err
 	}
 
-	return r.batch(files, projects)
+	return r.batch(files, r.diffBase(ctx), projects)
 }
 
 func (r *runner) outPalette() terminal.Palette {
@@ -132,7 +132,7 @@ type fileResultOrErr struct {
 	err error
 }
 
-func (r *runner) batch(files []string, projects *detector.Resolver) error {
+func (r *runner) batch(files []string, base string, projects *detector.Resolver) error {
 	failed := 0
 
 	var changed []ci.Change
@@ -180,7 +180,8 @@ func (r *runner) batch(files []string, projects *detector.Resolver) error {
 			// the file headers name each file, and the summary goes to stderr.
 			// A patch that did not reach its reader fails the file, or a
 			// truncated one would pass for ordinary drift.
-			patch := diff.Unified(filepath.ToSlash(shown), string(res.res.src), string(res.res.formatted), r.outPalette())
+			header := filepath.ToSlash(displayPath(base, path))
+			patch := diff.Unified(header, string(res.res.src), string(res.res.formatted), r.outPalette())
 			if _, err := io.WriteString(r.streams.Out, patch); err != nil {
 				fail(fmt.Errorf("write diff: %w", err))
 
@@ -348,15 +349,29 @@ func (r *runner) selectFiles(ctx detector.Context, cfg *config.File, projects *d
 		return r.changedFiles(cfg, projects)
 	}
 
-	root := r.workDir
-
-	if ctx.Laravel != nil {
-		root = ctx.Laravel.Root
-	}
-
+	root := r.appRoot(ctx)
 	ignoreRoot := walk.IgnoreRoot(root, r.ignoreAnchor(ctx))
 
 	return walk.Files(root, ignoreRoot, cfg, r.opts.Paths, r.projectIgnore(projects))
+}
+
+func (r *runner) appRoot(ctx detector.Context) string {
+	if ctx.Laravel != nil {
+		return ctx.Laravel.Root
+	}
+
+	return r.workDir
+}
+
+// diffBase is the directory --diff headers are relative to, and so where git
+// apply has to run: git prefixes them with its own subfolder and rejects a
+// path that climbs out. Named paths stay relative to where they were named.
+func (r *runner) diffBase(ctx detector.Context) string {
+	if len(r.opts.Paths) > 0 {
+		return r.workDir
+	}
+
+	return r.appRoot(ctx)
 }
 
 // Ignore rules apply as they do to --staged, since git, not the user, named

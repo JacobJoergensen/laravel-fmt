@@ -152,6 +152,8 @@ func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf P
 	walks := make(map[string][]string)
 
 	for _, arg := range args {
+		arg = onDiskCase(arg)
+
 		if isGlobArg(arg) {
 			base, segments, err := splitGlob(arg)
 			if err != nil {
@@ -230,6 +232,64 @@ func appendUnseen(out []string, seen map[string][]string, paths ...string) []str
 	}
 
 	return out
+}
+
+// onDiskCase spells each name in path as its directory lists it, so a path
+// typed in another case is reported as stored. It keeps the rest as typed
+// from the first name it cannot find, such as a glob segment.
+func onDiskCase(path string) string {
+	volume := filepath.VolumeName(path)
+	prefix, dir, rest := "", ".", path[len(volume):]
+
+	if filepath.IsAbs(path) {
+		prefix = path[:len(volume)+1]
+		dir, rest = prefix, rest[1:]
+	} else if volume != "" {
+		return path
+	}
+
+	sep := string(filepath.Separator)
+	names := strings.Split(filepath.ToSlash(rest), "/")
+
+	// Joined without cleaning, so a .. after a symlink resolves as the file
+	// system resolves it.
+	for i, name := range names {
+		if name != "" && name != "." && name != ".." {
+			spelled, ok := listedName(dir, name)
+			if !ok {
+				break
+			}
+
+			names[i] = spelled
+		}
+
+		dir += sep + names[i]
+	}
+
+	return prefix + strings.Join(names, sep)
+}
+
+// A spelling that differs only in case counts only if it is the same file, so
+// a case-sensitive file system never swaps one file for another.
+func listedName(dir, name string) (string, bool) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", false
+	}
+
+	for _, entry := range entries {
+		if entry.Name() == name {
+			return name, true
+		}
+	}
+
+	for _, entry := range entries {
+		if strings.EqualFold(entry.Name(), name) && sameFile(filepath.Join(dir, name), filepath.Join(dir, entry.Name())) {
+			return entry.Name(), true
+		}
+	}
+
+	return "", false
 }
 
 func sameFile(a, b string) bool {

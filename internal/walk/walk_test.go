@@ -1219,3 +1219,27 @@ func TestFilesTakesAnExistingBracketedPathAsNamed(t *testing.T) {
 		})
 	}
 }
+
+func TestFilesSpellsANamedPathAsItsDirectoryListsIt(t *testing.T) {
+	root := buildTree(t, map[string]string{"app/a.php": "<?php"})
+	t.Chdir(root)
+
+	if !exists("APP/A.PHP") {
+		t.Skip("case-sensitive file system")
+	}
+
+	want := filepath.Join(root, "app", "a.php")
+
+	for _, arg := range []string{"APP/A.PHP", "APP", "APP/*.php"} {
+		t.Run(arg, func(t *testing.T) {
+			got, err := Files(root, root, config.Default(), []string{arg}, nil)
+			if err != nil {
+				t.Fatalf("Files: %v", err)
+			}
+
+			if !slices.Equal(got, []string{want}) {
+				t.Fatalf("Files(%q) = %v, want [%s]", arg, got, want)
+			}
+		})
+	}
+}
