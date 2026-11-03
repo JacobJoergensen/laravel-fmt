@@ -13,6 +13,7 @@ func TestEndOfLineResolvesOnlyAutoFromTheFirstLineEnding(t *testing.T) {
 		{"auto + mixed follows a first CRLF", []byte("one\r\ntwo\nthree\n"), EndOfLineAuto, EndOfLineCRLF},
 		{"auto + no newlines falls back to LF", []byte("one line"), EndOfLineAuto, EndOfLineLF},
 		{"auto + source opening with a line break", []byte("\nx\r\n"), EndOfLineAuto, EndOfLineLF},
+		{"auto + a CR-only file resolves to LF", []byte("one\rtwo\r"), EndOfLineAuto, EndOfLineLF},
 		{"explicit lf is not overridden by CRLF source", []byte("one\r\ntwo\r\n"), EndOfLineLF, EndOfLineLF},
 	}
 

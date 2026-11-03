@@ -567,3 +567,14 @@ func TestEditorConfigIndentSetsExplicit(t *testing.T) {
 		t.Fatalf("IndentWidth = %d, want 2", cfg.IndentWidth)
 	}
 }
+
+func TestEditorConfigLeavesCREndOfLineToTheNextSource(t *testing.T) {
+	cfg := config.Default()
+	cfg.EndOfLine = ""
+
+	applyEditorConfigSection(cfg, EditorConfigSection{EndOfLine: "cr"}, map[string]bool{})
+
+	if cfg.EndOfLine != "" {
+		t.Fatalf("EndOfLine = %q, want it left unset", cfg.EndOfLine)
+	}
+}

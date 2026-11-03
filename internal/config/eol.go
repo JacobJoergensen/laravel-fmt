@@ -2,8 +2,7 @@ package config
 
 import "bytes"
 
-// ResolveEndOfLine settles an "auto" end of line from the first line ending in
-// src, so a stray CRLF in an LF file does not convert the rest.
+// ResolveEndOfLine settles "auto" from the first LF in src, or LF without one.
 func ResolveEndOfLine(src []byte, cfg *File) {
 	if cfg.EndOfLine != EndOfLineAuto {
 		return
