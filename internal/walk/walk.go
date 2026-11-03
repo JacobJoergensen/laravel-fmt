@@ -179,7 +179,7 @@ func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf P
 				return nil, err
 			}
 
-			out = appendUnseen(out, seen, matched...)
+			out = appendUnseen(out, seen, base, matched...)
 
 			continue
 		}
@@ -200,7 +200,7 @@ func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf P
 				return nil, err
 			}
 
-			out = appendUnseen(out, seen, more...)
+			out = appendUnseen(out, seen, abs, more...)
 
 			continue
 		}
@@ -211,17 +211,25 @@ func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf P
 
 		// An explicitly named file bypasses the ignore matcher; only
 		// tool-assembled sets (the walk, globs, --staged) respect ignore.
-		out = appendUnseen(out, seen, abs)
+		out = appendUnseen(out, seen, abs, abs)
 	}
 
 	return out, nil
 }
 
-// On a case-insensitive file system two spellings name one file, so paths
-// equal but for case are compared by identity.
-func appendUnseen(out []string, seen map[string][]string, paths ...string) []string {
+// Paths under base, the argument they came from, are keyed by where its links
+// lead, so a file named through a linked folder and its target is listed once.
+// The walk follows no link below base, so resolving base alone is exact; a base
+// that does not resolve keys as typed. On a case-insensitive file system two
+// spellings name one file, so keys equal but for case are compared by identity.
+func appendUnseen(out []string, seen map[string][]string, base string, paths ...string) []string {
+	resolved, err := resolveLinks(base)
+	if err != nil {
+		resolved = base
+	}
+
 	for _, abs := range paths {
-		key := strings.ToLower(abs)
+		key := strings.ToLower(resolved + strings.TrimPrefix(abs, base))
 
 		isSame := func(earlier string) bool {
 			return sameFile(earlier, abs)

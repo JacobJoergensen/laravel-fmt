@@ -27,6 +27,7 @@
 * Fixed an accented file name on macOS being formatted twice when named in both of its Unicode spellings
 * Fixed `.gitignore` and `ignore` patterns on macOS missing an accented file name stored in its other Unicode spelling, including in `--stdin-filepath` and `laravel-fmt lsp`
 * Fixed an accented file name on macOS reaching the GitLab report in a spelling GitLab could not find
+* Fixed a file named twice through a symlinked folder or junction being formatted and counted twice
 
 ## Version 0.7.0 (2026-10-29)
 * Improved JSON in a `<script>` with type `application/ld+json`, `application/json`, `importmap` or `speculationrules` to be formatted like any other JSON

@@ -1353,3 +1353,36 @@ func TestIgnoresFileMatchesAComposedPatternToADecomposedName(t *testing.T) {
 		t.Fatal("IgnoresFile = false, want the decomposed name ignored")
 	}
 }
+
+func TestFilesListsAFileReachedThroughALinkedFolderOnce(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"a folder and its link", []string{"app", "link"}},
+		{"a file and the same file through the link", []string{"app/a.php", "link/a.php"}},
+		{"a walk and a file named through the link", []string{".", "link/a.php"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := buildTree(t, map[string]string{"app/a.php": "<?php"})
+			t.Chdir(root)
+
+			if err := os.Symlink(filepath.Join(root, "app"), "link"); err != nil {
+				t.Skipf("symlinks unavailable: %v", err)
+			}
+
+			got, err := Files(root, root, config.Default(), tt.args, nil)
+			if err != nil {
+				t.Fatalf("Files: %v", err)
+			}
+
+			want := filepath.Join(root, "app", "a.php")
+
+			if !slices.Equal(got, []string{want}) {
+				t.Fatalf("Files(%q) = %q, want [%q]", tt.args, got, want)
+			}
+		})
+	}
+}
