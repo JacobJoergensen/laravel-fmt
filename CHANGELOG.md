@@ -1,8 +1,10 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.8.0 (2026-11-03)
 * Added a `laravel-fmt/format` request to `laravel-fmt lsp` that formats the text it is sent, so editor plugins do not have to open the file
-* Improved Tailwind sorting to accept any number of `@custom-variant`s and custom breakpoints in a stylesheet
+* Improved Tailwind sorting to follow Tailwind 4.3.4 and accept any number of `@custom-variant`s and custom breakpoints in a stylesheet
 * Optimized `laravel-fmt lsp` to look up a file's config once when an editor asks for its line ending
 * Fixed `laravel-fmt lsp` converting the line endings of a file it could not format or was not given
 * Fixed `laravel-fmt lsp` exiting on a message that is not valid JSON
@@ -13,22 +15,22 @@
 * Fixed `laravel-fmt lsp` on macOS and Linux reading a folder named like `a:b` as a Windows drive
 * Fixed a named file or folder with brackets like a Folio `[id].blade.php` being read as a glob, which formatted other files instead
 * Fixed a file named twice in different case on Windows or macOS being formatted and counted twice
-* Fixed "auto" line endings turning a mostly LF file into CRLF when one line ended in CRLF
 * Fixed `.gitignore` and `ignore` patterns on Windows and macOS missing a file whose name differs in case
 * Fixed `.prettierignore` patterns missing a file whose name differs in case, which Prettier matches
-* Fixed `--staged` with "auto" line endings turning a CRLF working copy into LF under git's `core.autocrlf`
-* Fixed `--staged` storing CRLF in the commit when git's line-ending conversion would store LF
+* Fixed a path typed in another case on Windows or macOS keeping that case in the output and the GitLab report, where GitLab could not find the file
+* Fixed an accented file name on macOS being formatted twice when named in both of its Unicode spellings
+* Fixed `.gitignore` and `ignore` patterns on macOS missing an accented file name stored in its other Unicode spelling
+* Fixed an accented file name on macOS reaching the GitLab report in a spelling GitLab could not find
 * Fixed a project opened through a symlinked folder or junction formatting no files
 * Fixed `--since` and `--staged` in a project opened through a symlinked folder ignoring the `--config` file's `ignore` list
+* Fixed a file named twice through a symlinked folder or junction being formatted and counted twice
+* Fixed `--diff` run from a subfolder of a Laravel app writing `../` paths that `git apply` rejects
+* Fixed "auto" line endings turning a mostly LF file into CRLF when one line ended in CRLF
+* Fixed `--staged` with "auto" line endings turning a CRLF working copy into LF under git's `core.autocrlf`
+* Fixed `--staged` storing CRLF in the commit when git's line-ending conversion would store LF
 * Fixed a Pint `notName` like `legacy*` skipping every file in a folder it matches, which Pint still formats
 * Fixed a Pint `notPath` like `tests/Fixtures` missing `tests/FixturesTest.php`, which Pint matches as part of the path
 * Fixed Pint `notName` braces like `*.{stub,tpl}.php` and plain regexes like `/Models/` in `notName` or `notPath` being ignored
-* Fixed `--diff` run from a subfolder of a Laravel app writing `../` paths that `git apply` rejects; paths are now relative to the app root
-* Fixed a path typed in another case on Windows or macOS keeping that case in the output and the GitLab report, where GitLab could not find the file
-* Fixed an accented file name on macOS being formatted twice when named in both of its Unicode spellings
-* Fixed `.gitignore` and `ignore` patterns on macOS missing an accented file name stored in its other Unicode spelling, including in `--stdin-filepath` and `laravel-fmt lsp`
-* Fixed an accented file name on macOS reaching the GitLab report in a spelling GitLab could not find
-* Fixed a file named twice through a symlinked folder or junction being formatted and counted twice
 * Fixed arbitrary Tailwind values like `text-[10dvh]`, `shadow-[0_0_2px_#000]` or `font-[500]` sorting by the wrong property
 * Fixed arbitrary Tailwind values like `p-[3px]` sorting ahead of named ones like `p-4`
 * Fixed negative and fraction Tailwind classes like `-mt-2` or `translate-x-2/3` sorting as their positive or whole form
