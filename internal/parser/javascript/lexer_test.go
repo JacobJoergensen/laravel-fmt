@@ -1,12 +1,10 @@
-package alpine
+package javascript
 
 import (
 	"bytes"
 	"testing"
 )
 
-// corpus is shared by the round-trip, idempotence, and token-preservation
-// properties; every entry must lex and normalize cleanly.
 var corpus = []string{
 	"{ open: false }",
 	"{open:false,toggle(){this.open=!this.open}}",
@@ -46,29 +44,29 @@ func TestLexTokenRoundTrip(t *testing.T) {
 	for _, src := range corpus {
 		t.Run(src, func(t *testing.T) {
 			input := []byte(src)
-			toks, ok := lex(input)
+			toks, ok := Lex(input)
 
 			if !ok {
-				t.Fatalf("lex(%q) failed; corpus entries must lex", src)
+				t.Fatalf("Lex(%q) failed; corpus entries must lex", src)
 			}
 
 			rebuilt := make([]byte, 0, len(input))
 			pos := 0
 
 			for _, tok := range toks {
-				if tok.start < pos || tok.end <= tok.start || tok.end > len(input) {
-					t.Fatalf("token span [%d, %d) out of order at byte %d", tok.start, tok.end, pos)
+				if tok.Start < pos || tok.End <= tok.Start || tok.End > len(input) {
+					t.Fatalf("token span [%d, %d) out of order at byte %d", tok.Start, tok.End, pos)
 				}
 
-				for _, c := range input[pos:tok.start] {
+				for _, c := range input[pos:tok.Start] {
 					if !isSpace(c) {
 						t.Fatalf("non-whitespace byte %q dropped between tokens", c)
 					}
 				}
 
-				rebuilt = append(rebuilt, input[pos:tok.start]...)
-				rebuilt = append(rebuilt, input[tok.start:tok.end]...)
-				pos = tok.end
+				rebuilt = append(rebuilt, input[pos:tok.Start]...)
+				rebuilt = append(rebuilt, input[tok.Start:tok.End]...)
+				pos = tok.End
 			}
 
 			for _, c := range input[pos:] {
@@ -88,24 +86,46 @@ func TestLexTokenRoundTrip(t *testing.T) {
 
 func TestLexKeepsTemplatesAtomic(t *testing.T) {
 	src := []byte("`a ${ f({ b: '}' }) } c`")
-	toks, ok := lex(src)
+	toks, ok := Lex(src)
 
 	if !ok {
 		t.Fatal("lex failed on nested template")
 	}
 
-	if len(toks) != 1 || toks[0].kind != kindTemplate {
+	if len(toks) != 1 || toks[0].Kind != KindTemplate {
 		t.Fatalf("got %d tokens, want one template token", len(toks))
 	}
 
-	if toks[0].start != 0 || toks[0].end != len(src) {
-		t.Fatalf("template span [%d, %d), want the whole input", toks[0].start, toks[0].end)
+	if toks[0].Start != 0 || toks[0].End != len(src) {
+		t.Fatalf("template span [%d, %d), want the whole input", toks[0].Start, toks[0].End)
 	}
 }
 
-func TestLexRefusesAmbiguousSlashAfterBrace(t *testing.T) {
-	if _, ok := lex([]byte("{} /re/.test(s)")); ok {
-		t.Fatal("lex accepted a slash after }, which is ambiguous")
+func TestLexRefusesWhatItCannotRead(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"unterminated string", "'open"},
+		{"unterminated template", "`a ${open"},
+		{"unterminated block comment", "a /* b"},
+		{"unterminated regex", "x = /ab"},
+		{"exponent without a digit", "x = 1e+"},
+		{"slash after brace", "{} /re/.test(s)"},
+		// A `)` closing a control-flow head is followed by a regex, not a
+		// division: spacing `if (b) /b/.test(b)` would change it from true to
+		// false.
+		{"slash after paren", "if (b) /b/.test(b)"},
+		{"unknown byte", "a # b"},
+		{"identifier glued to number", "2px"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if toks, ok := Lex([]byte(tc.src)); ok {
+				t.Fatalf("Lex(%q) = %d tokens, want refusal", tc.src, len(toks))
+			}
+		})
 	}
 }
 
@@ -119,6 +139,7 @@ func TestMultilineLiterals(t *testing.T) {
 		{"one-line literals are not reported", "const a = `x`; const b = 'y';", 0, true},
 		{"multi-line template", "const a = `x\n  y`;", 1, true},
 		{"backslash-continued string", "const a = 'x\\\n  y';", 1, true},
+		{"backslash-continued string over a CRLF", "const a = 'x\\\r\n  y';", 1, true},
 		{"template with a nested template", "const a = `${`in\n`}`;", 1, true},
 		{"line comment is not a literal", "// `not\nconst a = 1;", 0, true},
 		{"ambiguous slash refuses", "const a = (b) / 2;", 0, false},

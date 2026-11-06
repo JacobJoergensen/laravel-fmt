@@ -1,11 +1,12 @@
-// Package alpine canonicalizes the whitespace between the JavaScript tokens
-// of Alpine.js attribute values; string, template, regex, and comment
-// contents are atomic and never altered.
-package alpine
+// Package javascript lays out JavaScript in templates by changing only the
+// whitespace between its tokens.
+package javascript
 
 import (
 	"bytes"
 	"unicode/utf8"
+
+	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/javascript"
 )
 
 var jsAttrNames = []string{
@@ -13,18 +14,15 @@ var jsAttrNames = []string{
 	"x-modelable", "x-effect", "x-if", "x-id", "x-for",
 }
 
-// Normalize returns value with canonical spacing between its JavaScript
-// tokens. Token bytes are kept verbatim and the result is re-lexed to prove
-// the token stream survived, so a fused or split token cannot be emitted.
-// ok is false when the value must stay verbatim instead: it is empty or
-// multi-line, may hold Blade or HTML-entity syntax, or does not tokenize
-// with confidence.
+// Normalize returns value with canonical spacing between its JavaScript tokens,
+// line breaks kept where they stand and the token stream proved unchanged, or
+// false when it must stay verbatim.
 func Normalize(value []byte, spaceAfterNot bool) ([]byte, bool) {
 	if !normalizable(value) {
 		return nil, false
 	}
 
-	toks, ok := lex(value)
+	toks, ok := parser.Lex(value)
 
 	if !ok || len(toks) == 0 {
 		return nil, false
@@ -43,18 +41,24 @@ func Normalize(value []byte, spaceAfterNot bool) ([]byte, bool) {
 // template literal. A value that does not tokenize is assumed to when it
 // holds a backtick.
 func BreaksInTemplate(value []byte) bool {
-	toks, ok := lex(value)
+	toks, ok := parser.Lex(value)
 	if !ok {
 		return bytes.IndexByte(value, '`') >= 0
 	}
 
 	for _, t := range toks {
-		if t.kind == kindTemplate && bytes.ContainsAny(value[t.start:t.end], "\n\r") {
+		if t.Kind == parser.KindTemplate && bytes.ContainsAny(value[t.Start:t.End], "\n\r") {
 			return true
 		}
 	}
 
 	return false
+}
+
+// IsAlpineBinding reports whether a `:name` value on a non-component tag is
+// JavaScript, not PHP written there by mistake, whose `->` spacing would split.
+func IsAlpineBinding(value []byte) bool {
+	return !bytes.Contains(value, []byte("->")) && !bytes.Contains(value, []byte("::"))
 }
 
 // IsAlpineJSAttr reports whether the attribute name carries a JavaScript
@@ -92,21 +96,26 @@ func IsAlpineJSAttr(name []byte) bool {
 }
 
 // normalizable rejects values the lexer must not see: `@` (Blade directives and
-// escaped echoes), HTML-entity-shaped sequences (the source may mean
-// `&amp;&amp;`, which only the browser decodes), and every ECMAScript whitespace
-// character isSpace does not handle.
+// escaped echoes), `{{` and `{!!` (a Blade comment stays in the value, where
+// spacing its braces apart would end it), HTML-entity-shaped sequences (the
+// source may mean `&amp;&amp;`, which only the browser decodes), and every
+// ECMAScript whitespace character isSpace does not handle.
 //
 // Non-ASCII whitespace, \v and \f would glue onto an adjacent identifier:
 // isSpace knows only space, tab, LF and CR, while isIdentStart admits every
 // byte from 0x80. A keyword carrying one stops being that keyword, and
-// sameTokens cannot notice, since it re-lexes with the same lexer. LF and CR
-// are refused because layout and ASI stay the author's.
+// sameTokens cannot notice, since it re-lexes with the same lexer. A CR is
+// refused: render keeps only gaps that hold an LF.
 func normalizable(value []byte) bool {
 	// ECMA-262 Annex B makes `<!--` a single-line comment opener. The lexer
 	// reads it as `<`, `!` and `--`, and spacing those apart turns `a<!--b`
 	// (`a`, the rest commented out) into `a < !--b`, which decrements b. The
-	// other half, `-->`, needs a line terminator first, which is refused below.
-	if bytes.Contains(value, []byte("<!--")) {
+	// other half, `-->`, opens one at the start of a line.
+	if bytes.Contains(value, []byte("<!--")) || bytes.Contains(value, []byte("-->")) {
+		return false
+	}
+
+	if bytes.Contains(value, []byte("{{")) || bytes.Contains(value, []byte("{!!")) {
 		return false
 	}
 
@@ -125,7 +134,7 @@ func normalizable(value []byte) bool {
 			}
 
 			i += n - 1
-		case c != ' ' && c != '\t' && jsWhitespace(rune(c)):
+		case c != ' ' && c != '\t' && c != '\n' && jsWhitespace(rune(c)):
 			return false
 		}
 	}
@@ -167,8 +176,8 @@ func isEntityStart(rest []byte) bool {
 	return i > start && i < len(rest) && rest[i] == ';'
 }
 
-func sameTokens(src []byte, toks []token, out []byte) bool {
-	outToks, ok := lex(out)
+func sameTokens(src []byte, toks []parser.Token, out []byte) bool {
+	outToks, ok := parser.Lex(out)
 
 	if !ok || len(outToks) != len(toks) {
 		return false
@@ -177,7 +186,7 @@ func sameTokens(src []byte, toks []token, out []byte) bool {
 	for i, t := range toks {
 		o := outToks[i]
 
-		if o.kind != t.kind || !bytes.Equal(src[t.start:t.end], out[o.start:o.end]) {
+		if o.Kind != t.Kind || !bytes.Equal(src[t.Start:t.End], out[o.Start:o.End]) {
 			return false
 		}
 	}
@@ -186,7 +195,7 @@ func sameTokens(src []byte, toks []token, out []byte) bool {
 }
 
 func isAlnum(c byte) bool {
-	return isDigit(c) || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
 func equalFold(b []byte, s string) bool {

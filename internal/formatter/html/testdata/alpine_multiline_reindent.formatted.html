@@ -1,0 +1,23 @@
+<div
+    x-data="{
+        items: [],
+        init() {
+            fetch('/items').then((r) => {
+                this.items = r
+            })
+        },
+    }"
+>
+    <button
+        x-on:click="
+            open = ! open
+            $dispatch('toggled')
+        "
+    >Toggle</button>
+    <span
+        x-data="{
+        note: `first
+    second`,
+}"
+    ></span>
+</div>

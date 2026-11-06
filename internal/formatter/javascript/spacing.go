@@ -1,4 +1,10 @@
-package alpine
+package javascript
+
+import (
+	"bytes"
+
+	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/javascript"
+)
 
 type tokenClass struct {
 	prefixUnary bool
@@ -20,31 +26,53 @@ var parenSpaceKeywords = map[string]bool{
 	"if": true, "in": true, "instanceof": true, "new": true, "of": true,
 	"return": true, "switch": true, "throw": true, "typeof": true,
 	"void": true, "while": true, "yield": true,
+	"const": true, "let": true, "var": true,
 }
 
 type normalizer struct {
 	src           []byte
-	toks          []token
+	toks          []parser.Token
 	classes       []tokenClass
 	spaceAfterNot bool
 }
 
-func render(src []byte, toks []token, spaceAfterNot bool) []byte {
+func render(src []byte, toks []parser.Token, spaceAfterNot bool) []byte {
 	n := &normalizer{src: src, toks: toks, classes: classify(src, toks), spaceAfterNot: spaceAfterNot}
 	out := make([]byte, 0, len(src))
 
+	if lead := src[:toks[0].Start]; bytes.IndexByte(lead, '\n') >= 0 {
+		out = append(out, lead...)
+	}
+
+	// A `;` starting a line guards it against ASI joining it to the line above
+	// (`;[a, b] = pair`), so it stays glued to what it guards.
+	lineStart := true
+
 	for i, t := range toks {
-		if i > 0 && n.gap(i-1, i) {
-			out = append(out, ' ')
+		if i > 0 {
+			gap := src[toks[i-1].End:t.Start]
+			guard := lineStart && n.is(i-1, ";")
+			lineStart = bytes.IndexByte(gap, '\n') >= 0
+
+			switch {
+			case lineStart:
+				out = append(out, gap...)
+			case !guard && n.gap(i-1, i):
+				out = append(out, ' ')
+			}
 		}
 
-		out = append(out, src[t.start:t.end]...)
+		out = append(out, src[t.Start:t.End]...)
+	}
+
+	if tail := src[toks[len(toks)-1].End:]; bytes.IndexByte(tail, '\n') >= 0 {
+		out = append(out, tail...)
 	}
 
 	return out
 }
 
-func classify(src []byte, toks []token) []tokenClass {
+func classify(src []byte, toks []parser.Token) []tokenClass {
 	classes := make([]tokenClass, len(toks))
 
 	// Open `?` positions are remembered with their bracket depth so the
@@ -56,12 +84,12 @@ func classify(src []byte, toks []token) []tokenClass {
 	prev := -1
 
 	for i, t := range toks {
-		if t.kind == kindComment {
+		if t.Kind == parser.KindComment {
 			continue
 		}
 
-		if t.kind == kindPunct {
-			switch string(src[t.start:t.end]) {
+		if t.Kind == parser.KindPunct {
+			switch string(src[t.Start:t.End]) {
 			case "(", "[", "{":
 				depth++
 			case ")", "]", "}":
@@ -79,7 +107,7 @@ func classify(src []byte, toks []token) []tokenClass {
 					ternaryOpens = ternaryOpens[:len(ternaryOpens)-1]
 				}
 			case "+", "-", "!", "~", "++", "--":
-				text := string(src[t.start:t.end])
+				text := string(src[t.Start:t.End])
 				prefix := text == "!" || text == "~" ||
 					prev < 0 || !operandEnd(src, toks, classes, prev)
 
@@ -98,16 +126,16 @@ func classify(src []byte, toks []token) []tokenClass {
 	return classes
 }
 
-func operandEnd(src []byte, toks []token, classes []tokenClass, i int) bool {
+func operandEnd(src []byte, toks []parser.Token, classes []tokenClass, i int) bool {
 	t := toks[i]
 
-	switch t.kind {
-	case kindNumber, kindString, kindTemplate, kindRegex:
+	switch t.Kind {
+	case parser.KindNumber, parser.KindString, parser.KindTemplate, parser.KindRegex:
 		return true
-	case kindIdent:
-		return !nonOperandKeywords[string(src[t.start:t.end])]
-	case kindPunct:
-		switch string(src[t.start:t.end]) {
+	case parser.KindIdent:
+		return !nonOperandKeywords[string(src[t.Start:t.End])]
+	case parser.KindPunct:
+		switch string(src[t.Start:t.End]) {
 		case ")", "]", "}":
 			return true
 		}
@@ -121,11 +149,14 @@ func operandEnd(src []byte, toks []token, classes []tokenClass, i int) bool {
 // gap reports whether one space separates token b from token a before it.
 // The cases overlap, so their order decides the spacing.
 func (n *normalizer) gap(a, b int) bool {
-	if n.toks[a].kind == kindComment || n.toks[b].kind == kindComment {
+	if n.toks[a].Kind == parser.KindComment || n.toks[b].Kind == parser.KindComment {
 		return true
 	}
 
 	switch {
+	case n.is(a, "--") && n.src[n.toks[b].Start] == '>':
+		// Glued, `-->` starts an HTML-like comment at the start of a line.
+		return true
 	case n.is(a, "{") && n.is(b, "}"):
 		return false
 	case n.is(b, ")"), n.is(b, "]"):
@@ -164,32 +195,38 @@ func (n *normalizer) gap(a, b int) bool {
 		// requires the space, so `i in[...]` makes the loop render nothing.
 		t := n.toks[a]
 
-		return t.kind == kindIdent && parenSpaceKeywords[string(n.src[t.start:t.end])]
+		return t.Kind == parser.KindIdent && parenSpaceKeywords[string(n.src[t.Start:t.End])]
 	default:
 		return true
 	}
 }
 
 func (n *normalizer) is(i int, s string) bool {
-	t := n.toks[i]
+	return isPunctText(n.src, n.toks[i], s)
+}
 
-	return t.kind == kindPunct && string(n.src[t.start:t.end]) == s
+func isPunctText(src []byte, t parser.Token, s string) bool {
+	return t.Kind == parser.KindPunct && string(src[t.Start:t.End]) == s
 }
 
 func (n *normalizer) fuses(a, b int) bool {
-	ca := n.src[n.toks[a].start]
+	ca := n.src[n.toks[a].Start]
 
-	return (ca == '+' || ca == '-') && n.src[n.toks[b].start] == ca
+	return (ca == '+' || ca == '-') && n.src[n.toks[b].Start] == ca
 }
 
 func (n *normalizer) binary(i int) bool {
-	t := n.toks[i]
+	return isBinary(n.src, n.toks, n.classes, i)
+}
 
-	if t.kind != kindPunct {
+func isBinary(src []byte, toks []parser.Token, classes []tokenClass, i int) bool {
+	t := toks[i]
+
+	if t.Kind != parser.KindPunct {
 		return false
 	}
 
-	switch string(n.src[t.start:t.end]) {
+	switch string(src[t.Start:t.End]) {
 	case "=", "+=", "-=", "*=", "/=", "%=", "**=", "<<=", ">>=", ">>>=",
 		"&=", "|=", "^=", "&&=", "||=", "??=", "=>",
 		"==", "!=", "===", "!==", "<", ">", "<=", ">=",
@@ -197,7 +234,7 @@ func (n *normalizer) binary(i int) bool {
 		"%", "&", "|", "^", "*", "/":
 		return true
 	case "+", "-":
-		return !n.classes[i].prefixUnary
+		return !classes[i].prefixUnary
 	default:
 		return false
 	}

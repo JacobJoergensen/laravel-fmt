@@ -1553,7 +1553,7 @@ func TestFormatKeepsUnquotedAttrValues(t *testing.T) {
 
 // A `:`-bound value on a plain element is Alpine's x-bind shorthand, so it is
 // JavaScript and has to come back unchanged.
-func TestFormatKeepsNonPhpBoundValues(t *testing.T) {
+func TestFormatBindingsOnPlainTagsAreJavaScriptNotPHP(t *testing.T) {
 	cases := []struct {
 		name string
 		src  string
@@ -1570,7 +1570,9 @@ func TestFormatKeepsNonPhpBoundValues(t *testing.T) {
 		{"juxtaposition", "<div :f=\"foo() bar()\">E</div>\n", "<div :f=\"foo() bar()\">E</div>\n"},
 		// JS that also parses as PHP: `TRUE` is an undefined name in JS, not true.
 		{"php-shaped constants", "<div :hidden=\"TRUE\" :a=\"NULL\">G</div>\n", "<div :hidden=\"TRUE\" :a=\"NULL\">G</div>\n"},
-		{"php-shaped spacing", "<div :class=\"a?'x':'y'\">H</div>\n", "<div :class=\"a?'x':'y'\">H</div>\n"},
+		{"php-shaped spacing gets alpine spacing", "<div :class=\"a?'x':'y'\">H</div>\n", "<div :class=\"a ? 'x' : 'y'\">H</div>\n"},
+		{"php in a plain tag binding stays verbatim", "<div :draggable=\"$this->trash?'a':'b'\">J</div>\n", "<div :draggable=\"$this->trash?'a':'b'\">J</div>\n"},
+		{"php static call in a plain tag binding stays verbatim", "<div :x=\"Status::open?'a':'b'\">K</div>\n", "<div :x=\"Status::open?'a':'b'\">K</div>\n"},
 		{
 			"author-broken ternary keeps its lines",
 			"<div>\n    <button\n        :class=\"a\n            ? 'x'\n            : 'y'\"\n    >I</button>\n</div>\n",

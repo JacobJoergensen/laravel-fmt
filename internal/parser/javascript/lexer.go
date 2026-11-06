@@ -1,23 +1,26 @@
-package alpine
+// Package javascript tokenizes JavaScript embedded in templates.
+package javascript
 
 import "bytes"
 
-type kind uint8
+// Kind is the class of a Token.
+type Kind uint8
 
 const (
-	kindIdent kind = iota
-	kindNumber
-	kindString
-	kindTemplate
-	kindRegex
-	kindComment
-	kindPunct
+	KindIdent Kind = iota
+	KindNumber
+	KindString
+	KindTemplate
+	KindRegex
+	KindComment
+	KindPunct
 )
 
-type token struct {
-	kind  kind
-	start int
-	end   int
+// Token is one token: Kind and the [Start, End) byte range in the source.
+type Token struct {
+	Kind  Kind
+	Start int
+	End   int
 }
 
 // regexKeywords are identifiers after which a `/` opens a regular expression
@@ -31,16 +34,14 @@ var regexKeywords = map[string]bool{
 type lexer struct {
 	src  []byte
 	off  int
-	toks []token
+	toks []Token
 	prev int
 	ok   bool
 }
 
-// lex scans src into a token stream. Whitespace between tokens is not
-// recorded: every non-whitespace byte belongs to exactly one token, so the
-// stream plus the original gaps reproduces src byte-identical. ok is false
-// when any construct cannot be tokenized with confidence.
-func lex(src []byte) ([]token, bool) {
+// Lex tokenizes src, every non-whitespace byte in exactly one token, or reports
+// false when a construct cannot be read with confidence.
+func Lex(src []byte) ([]Token, bool) {
 	l := &lexer{src: src, prev: -1, ok: true}
 
 	for l.ok {
@@ -60,24 +61,22 @@ func lex(src []byte) ([]token, bool) {
 	return l.toks, true
 }
 
-// MultilineLiterals returns the byte spans of the string and template literals
-// in JavaScript source that run across a line break, so the whitespace starting
-// each of their inner lines is part of the value. ok is false when src cannot be
-// tokenized with confidence (an ambiguous `/`, an unterminated construct, a byte
-// JavaScript does not allow), in which case nothing about its literals is known.
+// MultilineLiterals returns the spans of the string and template literals that
+// cross a line break, where line-starting whitespace is content, or false when
+// src does not lex.
 func MultilineLiterals(src []byte) (spans [][2]int, ok bool) {
-	toks, ok := lex(src)
+	toks, ok := Lex(src)
 	if !ok {
 		return nil, false
 	}
 
 	for _, t := range toks {
-		if t.kind != kindString && t.kind != kindTemplate {
+		if t.Kind != KindString && t.Kind != KindTemplate {
 			continue
 		}
 
-		if bytes.ContainsAny(src[t.start:t.end], "\n\r") {
-			spans = append(spans, [2]int{t.start, t.end})
+		if bytes.ContainsAny(src[t.Start:t.End], "\n\r") {
+			spans = append(spans, [2]int{t.Start, t.End})
 		}
 	}
 
@@ -109,10 +108,10 @@ func (l *lexer) scanToken() {
 	}
 }
 
-func (l *lexer) emit(k kind, start int) {
-	l.toks = append(l.toks, token{kind: k, start: start, end: l.off})
+func (l *lexer) emit(k Kind, start int) {
+	l.toks = append(l.toks, Token{Kind: k, Start: start, End: l.off})
 
-	if k != kindComment {
+	if k != KindComment {
 		l.prev = len(l.toks) - 1
 	}
 }
@@ -128,7 +127,7 @@ func (l *lexer) scanIdent() {
 		l.off++
 	}
 
-	l.emit(kindIdent, start)
+	l.emit(KindIdent, start)
 }
 
 func (l *lexer) scanNumber() {
@@ -174,7 +173,7 @@ func (l *lexer) scanNumber() {
 		return
 	}
 
-	l.emit(kindNumber, start)
+	l.emit(KindNumber, start)
 }
 
 func (l *lexer) scanDigits(valid func(byte) bool) {
@@ -191,6 +190,12 @@ func (l *lexer) scanString() {
 	for l.off < len(l.src) {
 		switch c := l.src[l.off]; c {
 		case '\\':
+			// A backslash before a CRLF continues the string past the whole
+			// line break, as it does past an LF.
+			if bytes.HasPrefix(l.src[l.off+1:], []byte("\r\n")) {
+				l.off++
+			}
+
 			l.off += 2
 		case '\n', '\r':
 			l.fail()
@@ -198,7 +203,7 @@ func (l *lexer) scanString() {
 			return
 		case quote:
 			l.off++
-			l.emit(kindString, start)
+			l.emit(KindString, start)
 
 			return
 		default:
@@ -219,7 +224,7 @@ func (l *lexer) scanTemplate() {
 			l.off += 2
 		case l.src[l.off] == '`':
 			l.off++
-			l.emit(kindTemplate, start)
+			l.emit(KindTemplate, start)
 
 			return
 		case l.src[l.off] == '$' && l.off+1 < len(l.src) && l.src[l.off+1] == '{':
@@ -264,8 +269,8 @@ func (l *lexer) skipTemplateExpr() {
 
 		l.scanToken()
 
-		if n := len(l.toks); n > mark && l.toks[n-1].kind == kindPunct {
-			switch l.src[l.toks[n-1].start] {
+		if n := len(l.toks); n > mark && l.toks[n-1].Kind == KindPunct {
+			switch l.src[l.toks[n-1].Start] {
 			case '{':
 				depth++
 			case '}':
@@ -322,15 +327,15 @@ func (l *lexer) regexPosition() regexPos {
 
 	t := l.toks[l.prev]
 
-	switch t.kind {
-	case kindIdent:
-		if regexKeywords[string(l.src[t.start:t.end])] {
+	switch t.Kind {
+	case KindIdent:
+		if regexKeywords[string(l.src[t.Start:t.End])] {
 			return regexYes
 		}
 
 		return regexNo
-	case kindPunct:
-		switch string(l.src[t.start:t.end]) {
+	case KindPunct:
+		switch string(l.src[t.Start:t.End]) {
 		case "]", "++", "--":
 			return regexNo
 		case ")", "}":
@@ -376,7 +381,7 @@ func (l *lexer) scanRegex() {
 					l.off++
 				}
 
-				l.emit(kindRegex, start)
+				l.emit(KindRegex, start)
 
 				return
 			}
@@ -395,7 +400,7 @@ func (l *lexer) scanLineComment() {
 		l.off++
 	}
 
-	l.emit(kindComment, start)
+	l.emit(KindComment, start)
 }
 
 func (l *lexer) scanBlockComment() {
@@ -405,7 +410,7 @@ func (l *lexer) scanBlockComment() {
 	for l.off+1 < len(l.src) {
 		if l.src[l.off] == '*' && l.src[l.off+1] == '/' {
 			l.off += 2
-			l.emit(kindComment, start)
+			l.emit(KindComment, start)
 
 			return
 		}
@@ -427,7 +432,7 @@ func (l *lexer) scanPunct() {
 
 	start := l.off
 	l.off += n
-	l.emit(kindPunct, start)
+	l.emit(KindPunct, start)
 }
 
 func punctLen(src []byte, i int) int {

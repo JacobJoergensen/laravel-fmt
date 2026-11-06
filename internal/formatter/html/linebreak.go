@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
-	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/alpine"
+	jsfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/javascript"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/html"
 )
 
@@ -116,18 +116,27 @@ func NormalizeLineBreaksIn(b []byte, base int, php []parser.Span) []byte {
 	return bytes.Join(splitHTMLLines(b, base, php), []byte("\n"))
 }
 
-// EmitMultilineAttrValue writes a value that spans lines. Line-trailing
-// whitespace is kept, since an attribute value is a string. Only a value whose
-// whitespace does not render is re-homed under its tag, each line keeping its
-// indent relative to the attribute; any other value is written as authored,
-// since moving its lines would change the string.
-func EmitMultilineAttrValue(w *formatter.Writer, src []byte, a *parser.Attr) {
+// EmitMultilineAttrValue writes a value that spans lines, moving its lines only
+// where its whitespace does not render.
+func EmitMultilineAttrValue(w *formatter.Writer, src []byte, a *parser.Attr, spaceAfterNot bool) {
 	value := NormalizeLineBreaks(a.Value)
 
 	if !ValueReflows(a) {
 		w.WithoutIndent(func() { formatter.EmitVerbatimStrippingKeepTrailing(w, value, 0) })
 
 		return
+	}
+
+	if !a.Bound && jsfmt.IsAlpineJSAttr(a.Name) {
+		if spaced, ok := jsfmt.Normalize(value, spaceAfterNot); ok {
+			value = spaced
+		}
+
+		if levels, ok := jsfmt.LineDepths(value); ok {
+			emitAtLevels(w, value, levels)
+
+			return
+		}
 	}
 
 	attrIndent := formatter.NaturalIndentBefore(src, a.Start.Offset)
@@ -147,6 +156,29 @@ func EmitMultilineAttrValue(w *formatter.Writer, src []byte, a *parser.Attr) {
 	}
 
 	formatter.EmitVerbatimStrippingKeepTrailing(w, value, attrIndent)
+}
+
+func emitAtLevels(w *formatter.Writer, value []byte, levels []int) {
+	for i, line := range bytes.Split(value, []byte("\n")) {
+		if i > 0 {
+			w.Newline()
+			line = bytes.TrimLeft(line, " \t")
+		}
+
+		if len(line) == 0 {
+			continue
+		}
+
+		for range levels[i] {
+			w.Indent()
+		}
+
+		w.WriteBytes(line)
+
+		for range levels[i] {
+			w.Dedent()
+		}
+	}
 }
 
 func isBlankLine(line []byte) bool {
@@ -172,9 +204,9 @@ func uniformStrip(value []byte, natural int) int {
 // ValueReflows reports whether whitespace in a's value does not render.
 func ValueReflows(a *parser.Attr) bool {
 	name := a.Name
-	js := a.Bound || alpine.IsAlpineJSAttr(name) || hasPrefixFold(name, "x-")
+	js := a.Bound || jsfmt.IsAlpineJSAttr(name) || hasPrefixFold(name, "x-")
 
-	if js && alpine.BreaksInTemplate(a.Value) {
+	if js && jsfmt.BreaksInTemplate(a.Value) {
 		return false
 	}
 

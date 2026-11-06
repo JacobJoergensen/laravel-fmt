@@ -5,8 +5,8 @@ import (
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
-	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/alpine"
 	cssfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/css"
+	jsfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/javascript"
 	jsonfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/json"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/tailwind"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/html"
@@ -258,7 +258,7 @@ func emitAttr(w *formatter.Writer, src []byte, a *parser.Attr, cfg *config.File)
 	if HasLineBreak(a.Value) {
 		quote = formatter.AttrQuote(quote, a.Value, cfg)
 		w.Write(string(quote))
-		EmitMultilineAttrValue(w, src, a)
+		EmitMultilineAttrValue(w, src, a, cfg.PHP.NotOperatorSpace)
 		w.Write(string(quote))
 
 		return
@@ -270,8 +270,8 @@ func emitAttr(w *formatter.Writer, src []byte, a *parser.Attr, cfg *config.File)
 		value = []byte(tailwind.Sort(cfg.TailwindTheme, string(classes)))
 	}
 
-	if !a.Bound && alpine.IsAlpineJSAttr(a.Name) {
-		if out, ok := alpine.Normalize(value, cfg.PHP.NotOperatorSpace); ok {
+	if (!a.Bound && jsfmt.IsAlpineJSAttr(a.Name)) || (a.Bound && jsfmt.IsAlpineBinding(value)) {
+		if out, ok := jsfmt.Normalize(value, cfg.PHP.NotOperatorSpace); ok {
 			value = out
 		}
 	}

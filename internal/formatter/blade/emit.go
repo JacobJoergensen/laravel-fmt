@@ -7,8 +7,8 @@ import (
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
-	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/alpine"
 	htmlfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/html"
+	jsfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/javascript"
 	phpfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/php"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/tailwind"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/blade"
@@ -1890,7 +1890,7 @@ func (e *emitter) emitAttr(a *htmlparser.Attr, component bool) {
 		case component:
 			formatter.EmitVerbatimRebasedKeepTrailing(e.w, e.src, a.ValueStart, a.ValueStart+len(a.Value), a.Start.Offset)
 		default:
-			htmlfmt.EmitMultilineAttrValue(e.w, e.src, a)
+			htmlfmt.EmitMultilineAttrValue(e.w, e.src, a, e.cfg.PHP.NotOperatorSpace)
 		}
 
 		e.w.Write(string(quote))
@@ -1903,8 +1903,8 @@ func (e *emitter) emitAttr(a *htmlparser.Attr, component bool) {
 		value = sortClassSegment(e.cfg.TailwindTheme, value, false, false)
 	}
 
-	if !a.Bound && alpine.IsAlpineJSAttr(a.Name) {
-		if out, ok := alpine.Normalize(value, e.cfg.PHP.NotOperatorSpace); ok {
+	if (!a.Bound && jsfmt.IsAlpineJSAttr(a.Name)) || (a.Bound && !component && jsfmt.IsAlpineBinding(value)) {
+		if out, ok := jsfmt.Normalize(value, e.cfg.PHP.NotOperatorSpace); ok {
 			value = out
 		}
 	}
@@ -2027,6 +2027,10 @@ func (e *emitter) emitAttrParts(a *htmlparser.Attr, sortClasses, compilesToPHP b
 		return
 	}
 
+	if rehome && !compilesToPHP && !a.Bound && jsfmt.IsAlpineJSAttr(a.Name) && e.emitAlpinePartsAtDepth(a.Parts) {
+		return
+	}
+
 	naturalIndent := 0
 	if rehome {
 		naturalIndent = attrPartsStrip(a.Parts, formatter.NaturalIndentBefore(e.src, a.Start.Offset), compilesToPHP)
@@ -2071,6 +2075,93 @@ func (e *emitter) emitAttrParts(a *htmlparser.Attr, sortClasses, compilesToPHP b
 			e.emitInlineEcho(pp)
 		}
 	}
+}
+
+// echoStandIn takes an escaped echo's place while depths are measured: its
+// output encodes quotes, so it cannot open a string.
+const echoStandIn = "_"
+
+// emitAlpinePartsAtDepth reports false, having written nothing, when the value
+// holds a raw echo, whose unescaped output may open a string, or does not
+// measure.
+func (e *emitter) emitAlpinePartsAtDepth(parts []htmlparser.Node) bool {
+	var js []byte
+
+	for _, p := range parts {
+		switch pp := p.(type) {
+		case *htmlparser.Text:
+			js = append(js, htmlfmt.NormalizeLineBreaks(pp.Text)...)
+		case *parser.EchoNode:
+			js = append(js, echoStandIn...)
+		default:
+			return false
+		}
+	}
+
+	levels, ok := jsfmt.LineDepths(js)
+	if !ok {
+		return false
+	}
+
+	lines := bytes.Split(js, []byte("\n"))
+	line := 0
+	applied := 0
+
+	for _, p := range parts {
+		t, ok := p.(*htmlparser.Text)
+		if !ok {
+			e.emitInlineEcho(p)
+
+			continue
+		}
+
+		text := htmlfmt.NormalizeLineBreaks(t.Text)
+
+		for {
+			nl := bytes.IndexByte(text, '\n')
+			if nl < 0 {
+				// The tail abuts an echo or the closing quote, where a space is part
+				// of the value.
+				if len(text) > 0 {
+					e.w.WriteBytes(text)
+				}
+
+				break
+			}
+
+			if segment := bytes.TrimRight(text[:nl], " \t"); len(segment) > 0 {
+				e.w.WriteBytes(segment)
+			}
+
+			line++
+
+			// Only the closing quote can land on a blank line, and it belongs at
+			// the attribute.
+			level := levels[line]
+			if len(bytes.TrimLeft(lines[line], " \t")) == 0 {
+				level = 0
+			}
+
+			for range applied {
+				e.w.Dedent()
+			}
+
+			e.w.Newline()
+
+			for range level {
+				e.w.Indent()
+			}
+
+			applied = level
+			text = bytes.TrimLeft(text[nl+1:], " \t")
+		}
+	}
+
+	for range applied {
+		e.w.Dedent()
+	}
+
+	return true
 }
 
 // attrPartsStrip returns the indent a multi-line value's continuation lines lose:

@@ -1,10 +1,47 @@
-package alpine
+package javascript
 
 import (
 	"bytes"
 	"fmt"
 	"testing"
+
+	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/javascript"
 )
+
+var corpus = []string{
+	"{ open: false }",
+	"{open:false,toggle(){this.open=!this.open}}",
+	"dropdown(true)",
+	"open = !open",
+	"count++",
+	"--count",
+	"items.filter(i => i.active).map(i => i.id)",
+	"{ get isOpen() { return this.open }, set value(v) { this.v = v } }",
+	"`Hello ${name} (${count})`",
+	"{ msg: `a ${x ? 'y' : 'z'} b` }",
+	"/^a[/b]+$/i.test(value)",
+	"total / count / 2",
+	"await fetch('/api/items')",
+	"x = 0xFF_AA + 1_000n - .5e-2",
+	"a?.b?.[c] ?? d",
+	"open = false; $dispatch('closed'); count += 1",
+	"x ? a : b ? c : d",
+	"x ? { a: 1 } : { b: 2 }",
+	"{ [key]: value, ...rest }",
+	"!visible && items.length > 0",
+	"tab === 'home' || tab === 'profile'",
+	"new Date(2026, 0, 1).getTime()",
+	"typeof value === 'string'",
+	"s.replace(/\\s+/g, ' ')",
+	"run(a, /* keep */ b)",
+	"for (let i = 0; i < 10; i++) { step(i) }",
+	"msg = 'it\\'s here'",
+	"name = \"say \\\"hi\\\"\"",
+	"(item, index) in items",
+	"setTimeout(() => ({ done: true }), 50)",
+	"a + +b - -c",
+	"flags = mask & ~dirty | seen ^ bit",
+}
 
 func TestNormalizeCanonicalSpacing(t *testing.T) {
 	cases := []struct {
@@ -43,6 +80,11 @@ func TestNormalizeCanonicalSpacing(t *testing.T) {
 			"a ??= b; c **= 2; d === e; f !== g; h &&= i; j ||= k; l <<= 1; m >>= 2; n >>>= 3; o >>> p; s %= 2; t ^= 1; u &= 1; v |= 1; w <= x; y >= z",
 		},
 		{"question dot before a digit is a ternary", "x=a?.5:1", "x = a ? .5 : 1"},
+		{"declaration keyword before a bracket", "for (const [k,v] of e) {}", "for (const [k, v] of e) {}"},
+		{"decrement before a greater-than stays apart", "-- >b", "-- > b"},
+		{"ASI guard starting a line stays glued", "a=b\n;[c,d]=e", "a = b\n;[c, d] = e"},
+		{"line breaks and their indentation kept", "{\n    open:false,\n        close(){}\n}", "{\n    open: false,\n        close() {}\n}"},
+		{"value opening and closing with a line break", "\n  a=1\n  b=2\n", "\n  a = 1\n  b = 2\n"},
 	}
 
 	for _, c := range cases {
@@ -121,10 +163,10 @@ func TestNormalizePreservesTokenStream(t *testing.T) {
 	for _, src := range corpus {
 		t.Run(src, func(t *testing.T) {
 			input := []byte(src)
-			before, ok := lex(input)
+			before, ok := parser.Lex(input)
 
 			if !ok {
-				t.Fatalf("lex(%q) failed", src)
+				t.Fatalf("Lex(%q) failed", src)
 			}
 
 			out, ok := Normalize(input, true)
@@ -133,7 +175,7 @@ func TestNormalizePreservesTokenStream(t *testing.T) {
 				t.Fatalf("Normalize(%q) refused", src)
 			}
 
-			after, ok := lex(out)
+			after, ok := parser.Lex(out)
 
 			if !ok {
 				t.Fatalf("output %q does not lex", out)
@@ -146,8 +188,8 @@ func TestNormalizePreservesTokenStream(t *testing.T) {
 			for i, b := range before {
 				a := after[i]
 
-				if a.kind != b.kind || !bytes.Equal(input[b.start:b.end], out[a.start:a.end]) {
-					t.Fatalf("token %d changed from %q to %q", i, input[b.start:b.end], out[a.start:a.end])
+				if a.Kind != b.Kind || !bytes.Equal(input[b.Start:b.End], out[a.Start:a.End]) {
+					t.Fatalf("token %d changed from %q to %q", i, input[b.Start:b.End], out[a.Start:a.End])
 				}
 			}
 		})
@@ -159,23 +201,13 @@ func TestNormalizeRefusesUnsafeValues(t *testing.T) {
 		name string
 		in   string
 	}{
-		{"multi-line value", "{\n open: false }"},
 		{"blade directive", "toasterHub(@js($toasts))"},
 		{"escaped blade echo", "@{{ count }}"},
+		{"blade comment", "a = 1 {{-- why --}}"},
+		{"raw blade echo", "{ a: {!! $a !!} }"},
 		{"named html entity", "a &amp;&amp; b"},
 		{"numeric html entity", "x &#39; y"},
-		{"unterminated string", "'open"},
-		{"unterminated template", "`a ${open"},
-		{"unterminated block comment", "a /* b"},
-		{"unterminated regex", "x = /ab"},
-		{"exponent without a digit", "x = 1e+"},
-		{"slash after brace", "{} /re/.test(s)"},
-		// A `)` closing a control-flow head is followed by a regex, not a
-		// division: spacing `if (b) /b/.test(b)` would change it from true to
-		// false.
-		{"slash after paren", "if (b) /b/.test(b)"},
-		{"unknown byte", "a # b"},
-		{"identifier glued to number", "2px"},
+		{"value that does not lex", "'open"},
 		{"empty value", ""},
 	}
 
@@ -277,7 +309,7 @@ func TestNormalizeStillRunsOnASCIIWhitespace(t *testing.T) {
 func TestNormalizeRefusesHTMLLikeComment(t *testing.T) {
 	// `a < !--b` is deliberately absent: with the space it holds no `<!--` at all
 	// and really is a comparison against a decrement, so normalizing it is correct.
-	for _, in := range []string{"a<!--b", "x<!-- rest", "count<!--", "a<!--"} {
+	for _, in := range []string{"a<!--b", "x<!-- rest", "count<!--", "a<!--", "a\n--> rest"} {
 		if out, ok := Normalize([]byte(in), true); ok {
 			t.Errorf("Normalize(%q) = %q, want refusal", in, out)
 		}

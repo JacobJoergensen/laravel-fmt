@@ -4,8 +4,9 @@ import (
 	"bytes"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
-	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/alpine"
+	jsfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/javascript"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/html"
+	jsparser "github.com/JacobJoergensen/laravel-fmt/internal/parser/javascript"
 )
 
 // scriptTypes are the `type` values whose body is JavaScript or JSON, where the
@@ -66,10 +67,14 @@ func isShiftableScript(el *parser.Element) bool {
 	return true
 }
 
-// emitShiftedScript lays a script body out one level under its tag, keeping
-// its relative indentation, and reports whether it did. A line that starts
-// inside a multi-line JavaScript or PHP literal is part of that value, so it
-// keeps its source column.
+// valueDirectives are the Blade directives that print a single value in place,
+// as an echo does, so a script holding them still nests by its brackets alone.
+var valueDirectives = map[string]bool{
+	"json": true, "js": true, "entangle": true, "this": true, "lang": true, "choice": true,
+}
+
+// A line that starts inside a multi-line JavaScript or PHP literal is part of
+// that value, so it keeps its source column.
 func emitShiftedScript(w *formatter.Writer, raw []byte, base int, php, phpLiterals []parser.Span) bool {
 	raw = loneCRAsLF(raw, base, php)
 
@@ -80,7 +85,7 @@ func emitShiftedScript(w *formatter.Writer, raw []byte, base int, php, phpLitera
 		return false
 	}
 
-	frozen, ok := scriptFrozenSpans(raw, base, php, phpLiterals)
+	masked, frozen, ok := scriptFrozenSpans(raw, base, php, phpLiterals)
 	if !ok {
 		return false
 	}
@@ -108,10 +113,11 @@ func emitShiftedScript(w *formatter.Writer, raw []byte, base int, php, phpLitera
 	}
 
 	common := commonRawIndent(shifted)
+	levels, measured := scriptLevels(raw, masked, lines, frozen, base, php)
 
 	w.Indent()
 
-	for _, l := range lines {
+	for i, l := range lines {
 		// A CR ending a line is a CRLF's, or one in PHP the verbatim path drops.
 		line := bytes.TrimRight(raw[l[0]:l[1]], "\r")
 
@@ -124,12 +130,30 @@ func emitShiftedScript(w *formatter.Writer, raw []byte, base int, php, phpLitera
 		}
 
 		body := line[dropIndent(line, common):]
+		if measured {
+			body = bytes.TrimLeft(line, " \t")
+		}
+
 		if !insideSpan(l[1], frozen) {
 			body = bytes.TrimRight(body, " \t\r")
 		}
 
-		if len(body) > 0 {
-			w.WriteBytes(body)
+		if len(body) == 0 {
+			continue
+		}
+
+		if measured {
+			for range levels[i] {
+				w.Indent()
+			}
+		}
+
+		w.WriteBytes(body)
+
+		if measured {
+			for range levels[i] {
+				w.Dedent()
+			}
 		}
 	}
 
@@ -137,6 +161,62 @@ func emitShiftedScript(w *formatter.Writer, raw []byte, base int, php, phpLitera
 	w.Newline()
 
 	return true
+}
+
+// scriptLevels reports false when the body keeps its relative layout: a line
+// starts inside a literal, a Blade construct spans lines, or a directive other
+// than a value one nests it by Blade's blocks.
+func scriptLevels(raw, masked []byte, lines, frozen [][2]int, base int, php []parser.Span) ([]int, bool) {
+	if len(frozen) > 0 || hasNestingDirective(raw) {
+		return nil, false
+	}
+
+	for _, s := range php {
+		start, end := s.Start.Offset-base, s.End.Offset-base
+		if start >= 0 && end <= len(raw) && bytes.ContainsAny(raw[start:end], "\n\r") {
+			return nil, false
+		}
+	}
+
+	body := make([]byte, 0, lines[len(lines)-1][1]-lines[0][0])
+
+	for i, l := range lines {
+		if i > 0 {
+			body = append(body, '\n')
+		}
+
+		body = append(body, bytes.TrimRight(masked[l[0]:l[1]], "\r")...)
+	}
+
+	return jsfmt.BlockDepths(body)
+}
+
+// hasNestingDirective reports whether raw holds an `@` that is not one of
+// valueDirectives: a block directive, a directive's closer, or an `@` in a
+// comment or string, which a byte scan cannot tell apart.
+func hasNestingDirective(raw []byte) bool {
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '@' {
+			continue
+		}
+
+		end := i + 1
+		for end < len(raw) && isASCIILetter(raw[end]) {
+			end++
+		}
+
+		if !valueDirectives[string(raw[i+1:end])] {
+			return true
+		}
+
+		i = end - 1
+	}
+
+	return false
+}
+
+func isASCIILetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
 // scriptFrozenSpans returns the ranges of raw whose line starts must not move:
@@ -147,7 +227,7 @@ func emitShiftedScript(w *formatter.Writer, raw []byte, base int, php, phpLitera
 // recorded span, and in JavaScript the byte only ever sits inside a literal or
 // comment or starts a decorator, where an identifier byte in its place moves no
 // literal boundary.
-func scriptFrozenSpans(raw []byte, base int, php, phpLiterals []parser.Span) ([][2]int, bool) {
+func scriptFrozenSpans(raw []byte, base int, php, phpLiterals []parser.Span) ([]byte, [][2]int, bool) {
 	masked := raw
 	if len(php) > 0 || bytes.IndexByte(raw, '@') >= 0 {
 		masked = bytes.ReplaceAll(raw, []byte("@"), []byte("_"))
@@ -175,12 +255,12 @@ func scriptFrozenSpans(raw []byte, base int, php, phpLiterals []parser.Span) ([]
 		}
 	}
 
-	literals, ok := alpine.MultilineLiterals(masked)
+	literals, ok := jsparser.MultilineLiterals(masked)
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
 
-	return append(frozen, literals...), true
+	return masked, append(frozen, literals...), true
 }
 
 // scriptLines returns the [start, end) offsets of raw's lines split at LF; a

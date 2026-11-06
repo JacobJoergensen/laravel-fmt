@@ -4,7 +4,7 @@
     x-data="{
         open: false,
         toggle() {
-            this.open = !this.open
+            this.open = ! this.open
         }
     }"
 >

@@ -1,10 +1,10 @@
 <div>
     <div
-        x-on:drop.prevent="
+        x-mask:dynamic="
         dragOver = false
         $wire.moveItem(sourceKey, '{{ $dateKey }}')
     "
-        x-on:dragstart="
+        x-mask:static="
         $event.dataTransfer.effectAllowed = 'move'
         $event.dataTransfer.dropEffect = 'move'
     "
