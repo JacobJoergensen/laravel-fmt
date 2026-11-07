@@ -8,7 +8,7 @@
     "generate": "node generate.mjs"
   },
   "dependencies": {
-    "@tailwindcss/node": "^4.3.4",
-    "tailwindcss": "^4.3.4"
+    "@tailwindcss/node": "^4.3.5",
+    "tailwindcss": "^4.3.5"
   }
 }

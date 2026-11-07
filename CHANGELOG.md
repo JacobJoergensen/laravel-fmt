@@ -4,13 +4,14 @@
 * Improved multi-line Alpine attribute values to be spaced like single-line ones and indented by their bracket nesting
 * Improved `<script>` bodies without Blade blocks like `@if` to be indented by their bracket nesting
 * Improved `:` bindings like `:class` on plain HTML tags to be spaced like their `x-bind:` form
+* Updated Tailwind to 4.3.5
 * Fixed a Blade comment in an Alpine attribute being spaced apart
 * Fixed `const`, `let` and `var` losing their space before `[` in Alpine attributes
 * Fixed `-- >` in an Alpine attribute being joined into `-->`
 * Fixed a `<script>` in a CRLF file with a backslash-continued string moving one level on the second format
 
 ## Version 0.8.0 (2026-11-03)
-* Added a `laravel-fmt/format`   request to `laravel-fmt lsp` that formats the text it is sent, so editor plugins do not have to open the file
+* Added a `laravel-fmt/format` request to `laravel-fmt lsp` that formats the text it is sent, so editor plugins do not have to open the file
 * Improved Tailwind sorting to follow Tailwind 4.3.4 and accept any number of `@custom-variant`s and custom breakpoints in a stylesheet
 * Optimized `laravel-fmt lsp` to look up a file's config once when an editor asks for its line ending
 * Fixed `laravel-fmt lsp` converting the line endings of a file it could not format or was not given
