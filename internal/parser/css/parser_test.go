@@ -116,6 +116,37 @@ func TestSelectorDeclarationDisambiguation(t *testing.T) {
 	}
 }
 
+func TestCustomPropertyValueHoldsBlocks(t *testing.T) {
+	cases := []struct {
+		name  string
+		src   string
+		value string
+	}{
+		{"a block as the whole value", "a { --x: {{success-high}}; color: red; }", "{{success-high}}"},
+		{"blocks inside a function", "a { --x: light-dark({{a}}, {{b}}); color: red; }", "light-dark({{a}}, {{b}})"},
+		{"a semicolon inside a block", "a { --x: { b: c; d: e }; color: red; }", "{ b: c; d: e }"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			file, errs := Parse([]byte(tc.src))
+			if len(errs) > 0 {
+				t.Fatalf("Parse(%q) errors: %v", tc.src, errs)
+			}
+
+			rule, ok := file.Nodes[0].(*Rule)
+			if !ok || len(rule.Children) != 2 {
+				t.Fatalf("Parse(%q) = %#v, want one rule holding two declarations", tc.src, file.Nodes[0])
+			}
+
+			decl, ok := rule.Children[0].(*Declaration)
+			if !ok || string(decl.Value) != tc.value {
+				t.Fatalf("first child = %#v, want a declaration with value %q", rule.Children[0], tc.value)
+			}
+		})
+	}
+}
+
 func TestImportantFlagRecognizedOnTrailingKeyword(t *testing.T) {
 	cases := []struct {
 		name      string

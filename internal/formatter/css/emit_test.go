@@ -137,6 +137,8 @@ func TestValueSpacing(t *testing.T) {
 		{"aspect-ratio slash preserved", "a{aspect-ratio:16/9}", "aspect-ratio: 16/9", "16 / 9"},
 		{"url slash preserved", "a{background:url(a/b.png)}", "url(a/b.png)", "a / b"},
 		{"custom property identifier preserved", "a{color:var(--accent-color)}", "var(--accent-color)", ""},
+		{"empty fallback stays tight", "a{filter:var(--tw-blur,) var(--tw-brightness,)}", "var(--tw-blur,) var(--tw-brightness,)", ", )"},
+		{"space before a closing paren dropped", "a{width:calc(1px + 2px )}", "calc(1px + 2px)", " )"},
 		{"calc comment kept whole", "a{width:calc(100% - /* gutter */ 2rem)}", "calc(100% - /* gutter */ 2rem)", "/ * gutter"},
 		{"clamp comment kept whole", "a{font-size:clamp(1rem, /* fluid */ 2vw, 3rem)}", "clamp(1rem, /* fluid */ 2vw, 3rem)", "* /"},
 		{"unspaced comment in math kept whole", "a{width:max(/*x*/0)}", "max(/*x*/0)", "/ *"},
@@ -188,6 +190,12 @@ func TestAtRulePreludeSpacing(t *testing.T) {
 		{"layer list comma spaced", "@layer a,b;", "@layer a, b", ""},
 		{"form feed is whitespace", "@media screen\fand\f(min-width:100px){a{x:1}}", "screen and (min-width: 100px)", ""},
 		{"import url comma not spaced", "@import url(a,b.css);", "url(a,b.css)", "a, b"},
+		{
+			"apply kept as written without Tailwind",
+			".a{@apply shadow-[0_1px_2px_rgba(0,0,0,0.1)] before:content-[''] p-4}",
+			"@apply shadow-[0_1px_2px_rgba(0,0,0,0.1)] before:content-[''] p-4;",
+			"",
+		},
 	}
 
 	for _, tc := range cases {

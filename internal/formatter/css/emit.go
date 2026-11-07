@@ -225,9 +225,15 @@ func emitAtRule(w *formatter.Writer, src []byte, a *parser.AtRule, cfg *config.F
 	if len(a.Prelude) > 0 {
 		prelude = trimCSSSpace(a.Prelude)
 
-		if cfg.Tailwind && bytes.EqualFold(a.Name, []byte("apply")) {
-			prelude = []byte(tailwind.Sort(cfg.TailwindTheme, string(prelude)))
-		} else if !bytes.EqualFold(a.Name, []byte("charset")) {
+		switch {
+		case bytes.EqualFold(a.Name, []byte("apply")):
+			// A class list, also where no v4 stylesheet was found (v3): a space
+			// after a comma splits `shadow-[0_1px_rgba(0,0,0,0.1)]` into classes
+			// Tailwind rejects, and a quote rewrite renames `content-['']`.
+			if cfg.Tailwind {
+				prelude = []byte(tailwind.Sort(cfg.TailwindTheme, string(prelude)))
+			}
+		case !bytes.EqualFold(a.Name, []byte("charset")):
 			// @charset is spec-locked to double quotes, so it is left untouched.
 			prelude = normalizeQuotes(prelude, formatter.MarkupQuoteTarget(cfg))
 			prelude = normalizePrelude(prelude, preludeHasFeatureColons(a.Name))
@@ -687,7 +693,9 @@ func normalizeValue(b []byte) []byte {
 			mathStack = append(mathStack, math)
 			out.WriteByte(c)
 		case c == ')':
-			flush()
+			// Whitespace before a `)` means nothing, and after a comma it would
+			// turn the empty fallback `var(--a,)` into `var(--a, )`.
+			pendingSpace = false
 
 			if len(mathStack) > 0 {
 				mathStack = mathStack[:len(mathStack)-1]

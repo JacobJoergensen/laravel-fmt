@@ -1,0 +1,3 @@
+.report{--x:{{success-high}};--y:light-dark({{a}},{{b}});--z:{ b: c; d: e };color:red;
+
+&:hover{color:blue}}

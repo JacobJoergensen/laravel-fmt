@@ -85,7 +85,9 @@ func (p *cssParser) parseNodes(inBlock bool) []Node {
 			continue
 		}
 
-		if p.peekTerminator() == '{' {
+		// A custom property's value may hold a {} block, so its `{` does not
+		// make it a rule: no selector starts with `--name:`.
+		if !p.startsCustomProperty() && p.peekTerminator() == '{' {
 			nodes = append(nodes, p.parseRule())
 		} else {
 			nodes = append(nodes, p.parseDeclaration())
@@ -235,7 +237,15 @@ func (p *cssParser) parseDeclaration() Node {
 	p.Advance()
 	decl.Colon = Span{Start: colonStart, End: p.Pos}
 
-	valStart, valEnd, val := p.readRangeUntil(";}")
+	var valStart, valEnd Position
+	var val []byte
+
+	if bytes.HasPrefix(prop, []byte("--")) {
+		valStart, valEnd, val = p.readCustomPropertyValue()
+	} else {
+		valStart, valEnd, val = p.readRangeUntil(";}")
+	}
+
 	decl.ValueStart = valStart
 	decl.ValueEnd = valEnd
 	decl.Value = val
@@ -268,12 +278,21 @@ func (p *cssParser) parseDeclaration() Node {
 // don't trigger a stop. Leading and trailing whitespace are excluded from the
 // returned range.
 func (p *cssParser) readRangeUntil(stops string) (Position, Position, []byte) {
+	return p.readRange(stops, false)
+}
+
+func (p *cssParser) readCustomPropertyValue() (Position, Position, []byte) {
+	return p.readRange(";}", true)
+}
+
+func (p *cssParser) readRange(stops string, blocks bool) (Position, Position, []byte) {
 	p.skipWhitespace()
 
 	start := p.Pos
 	lastNonWS := p.Pos
 	paren := 0
 	bracket := 0
+	brace := 0
 
 	for !p.Eof() {
 		c := p.Peek()
@@ -281,15 +300,23 @@ func (p *cssParser) readRangeUntil(stops string) (Position, Position, []byte) {
 		// A } (outside a string or comment) is always a block terminator, so it
 		// ends the range even inside an unbalanced (/[; a stray bracket can't
 		// swallow the rest of the file. The imbalance is diagnosed after the loop.
-		if c == '}' {
+		if c == '}' && brace == 0 {
 			break
 		}
 
-		if paren == 0 && bracket == 0 && strings.IndexByte(stops, c) >= 0 {
+		if paren == 0 && bracket == 0 && brace == 0 && strings.IndexByte(stops, c) >= 0 {
 			break
 		}
 
 		switch {
+		case blocks && c == '{':
+			brace++
+			p.Advance()
+			lastNonWS = p.Pos
+		case c == '}':
+			brace--
+			p.Advance()
+			lastNonWS = p.Pos
 		case c == '\\':
 			// A CSS escape is two code points, so the escaped one is content
 			// and not syntax: `.a\}` names a class `a}` rather than closing a
@@ -337,11 +364,36 @@ func (p *cssParser) readRangeUntil(stops string) (Position, Position, []byte) {
 		}
 	}
 
-	if paren > 0 || bracket > 0 {
+	if paren > 0 || bracket > 0 || brace > 0 {
 		p.addError(start, "unbalanced brackets")
 	}
 
 	return start, lastNonWS, p.Src[start.Offset:lastNonWS.Offset]
+}
+
+func (p *cssParser) startsCustomProperty() bool {
+	off := p.Pos.Offset
+	src := p.Src
+
+	if !bytes.HasPrefix(src[off:], []byte("--")) {
+		return false
+	}
+
+	off += len("--")
+
+	for off < len(src) && !IsSpaceByte(src[off]) && strings.IndexByte(":;{}", src[off]) < 0 {
+		if src[off] == '\\' {
+			off++
+		}
+
+		off++
+	}
+
+	for off < len(src) && IsSpaceByte(src[off]) {
+		off++
+	}
+
+	return off < len(src) && src[off] == ':'
 }
 
 func (p *cssParser) peekTerminator() byte {

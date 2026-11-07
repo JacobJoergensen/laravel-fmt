@@ -14,6 +14,9 @@
 * Fixed Tailwind sorting placing theme values like `bg-brand` before the built-in ones
 * Fixed a `<script>` in a CRLF file with a backslash-continued string moving one level on the second format
 * Fixed the error for a file that cannot be written saying `open` twice
+* Fixed `@apply` in a stylesheet without Tailwind v4 getting spaces after commas, which split classes like `shadow-[0_1px_rgba(0,0,0,0.1)]`
+* Fixed a custom property whose value holds `{}`, such as `--x: {{a}}`, failing to parse
+* Fixed an empty fallback like `var(--tw-blur,)` getting a space before its `)`
 
 ## Version 0.8.0 (2026-11-03)
 * Added a `laravel-fmt/format` request to `laravel-fmt lsp` that formats the text it is sent, so editor plugins do not have to open the file
