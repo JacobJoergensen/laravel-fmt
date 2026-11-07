@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -78,6 +79,23 @@ func TestRewriteReplacesTheContent(t *testing.T) {
 				t.Fatalf("file holds %q, want %q", got, tc.formatted)
 			}
 		})
+	}
+}
+
+func TestRewriteNamesAFileItCannotOpenOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.php")
+
+	err := Rewrite(path, nil, []byte("<?php\n"))
+	if err == nil {
+		t.Fatal("Rewrite of a missing file succeeded")
+	}
+
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("error %v does not wrap os.ErrNotExist", err)
+	}
+
+	if want := "open " + path + ": "; !strings.HasPrefix(err.Error(), want) || strings.Count(err.Error(), "open") != 1 {
+		t.Fatalf("error = %q, want one %q before the cause", err, want)
 	}
 }
 

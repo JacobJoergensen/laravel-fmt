@@ -26,7 +26,13 @@ type file interface {
 func Rewrite(path string, orig, formatted []byte) error {
 	f, err := os.OpenFile(path, os.O_WRONLY, 0)
 	if err != nil {
-		return fmt.Errorf("open: %w", err)
+		// The PathError already reads `open <path>`; wrapping it whole repeats both.
+		cause := err
+		if pathErr, ok := errors.AsType[*os.PathError](err); ok {
+			cause = pathErr.Err
+		}
+
+		return fmt.Errorf("open %s: %w", path, cause)
 	}
 
 	return rewrite(f, orig, formatted)

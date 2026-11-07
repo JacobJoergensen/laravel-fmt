@@ -13,6 +13,7 @@
 * Fixed Tailwind sorting moving `!p-3` and older utilities like `break-words` to the front
 * Fixed Tailwind sorting placing theme values like `bg-brand` before the built-in ones
 * Fixed a `<script>` in a CRLF file with a backslash-continued string moving one level on the second format
+* Fixed the error for a file that cannot be written saying `open` twice
 
 ## Version 0.8.0 (2026-11-03)
 * Added a `laravel-fmt/format` request to `laravel-fmt lsp` that formats the text it is sent, so editor plugins do not have to open the file
