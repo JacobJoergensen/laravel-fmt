@@ -463,6 +463,12 @@ func TestFormatKeepsInlineElementEdgeWhitespace(t *testing.T) {
 		{"trailing edge only", "<p>foo<span>bar </span>baz</p>\n", "<p>foo<span>bar </span>baz</p>\n"},
 		{"block container still trims", "<div> block </div>\n", "<div>block</div>\n"},
 		{"several inline siblings", "<p>x<b> y </b><em> z </em>w</p>\n", "<p>x<b> y </b><em> z </em>w</p>\n"},
+		{"custom element keeps both edges", "<p>foo<my-tag> bar </my-tag>baz</p>\n", "<p>foo<my-tag> bar </my-tag>baz</p>\n"},
+		{
+			"custom element stays glued when its tag wraps",
+			"<p>Hello<my-tag class=\"inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700\">World</my-tag>!</p>\n",
+			"<p>\n    Hello<my-tag\n        class=\"inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700\"\n    >World</my-tag>!\n</p>\n",
+		},
 	}
 
 	cfg := config.Default()
@@ -507,6 +513,16 @@ func TestFormatKeepsGlueInMixedBlockAndInlineChildren(t *testing.T) {
 			"block children are unaffected",
 			"<div>\n<h2>T</h2>\n<p>para</p>\n</div>\n",
 			"<div>\n    <h2>T</h2>\n    <p>para</p>\n</div>\n",
+		},
+		{
+			"inline element with a block child keeps its glued edges",
+			"<div>Find<span><b>Search</b><div>Results</div>end</span>!</div>\n",
+			"<div>\n    Find<span><b>Search</b>\n        <div>Results</div>\n        end</span>!\n</div>\n",
+		},
+		{
+			"custom element with a block child keeps its glued edges",
+			"<div>Find<my-search><button>Search</button><dialog>Results</dialog></my-search>now</div>\n",
+			"<div>\n    Find<my-search><button>Search</button>\n        <dialog>Results</dialog>\n    </my-search>now\n</div>\n",
 		},
 	}
 

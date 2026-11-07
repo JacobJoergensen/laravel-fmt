@@ -122,7 +122,13 @@ func EmitMultilineAttrValue(w *formatter.Writer, src []byte, a *parser.Attr, spa
 	value := NormalizeLineBreaks(a.Value)
 
 	if !ValueReflows(a) {
-		w.WithoutIndent(func() { formatter.EmitVerbatimStrippingKeepTrailing(w, value, 0) })
+		// The line the closing quote sits on is part of the value. The empty
+		// write settles its start here, at column zero, before the caller's
+		// quote would flush the tag's indent into the value.
+		w.WithoutIndent(func() {
+			formatter.EmitVerbatimStrippingKeepTrailing(w, value, 0)
+			w.WriteBytes(nil)
+		})
 
 		return
 	}

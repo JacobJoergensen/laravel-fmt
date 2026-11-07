@@ -338,7 +338,7 @@ func emitTextChildren(w *formatter.Writer, el *parser.Element, openFlat bool) {
 		return
 	}
 
-	if parser.IsInlineLevelElement(el.Name) && !edgesSpaced(raw) {
+	if IsInlineContainer(el.Name) && !edgesSpaced(raw) {
 		emitInlineTextChildren(w, el)
 
 		return
@@ -366,7 +366,7 @@ func emitInlineTextChildren(w *formatter.Writer, el *parser.Element) {
 	// An inline-level element's edge whitespace renders, so it collapses to one
 	// space instead of being trimmed. A block element's edge whitespace is
 	// only layout.
-	if parser.IsInlineLevelElement(el.Name) && len(text) > 0 {
+	if IsInlineContainer(el.Name) && len(text) > 0 {
 		if len(bytes.TrimLeft(raw, CollapsibleSpace)) < len(raw) {
 			w.Write(" ")
 		}
@@ -409,6 +409,13 @@ func emitStructuralChildren(w *formatter.Writer, src []byte, idx *docIndex, el *
 
 	brokeSincePrev := false
 
+	// A line break at an inline element's inner edge paints as a space unless
+	// the child there is block-level, which gluedTo and nodeEndForGlue refuse.
+	inlineEdges := IsInlineContainer(el.Name)
+	last := el.Children[len(el.Children)-1]
+	hugOpen := inlineEdges && gluedTo(el.OpenClose.End.Offset, el.Children[0])
+	hugClose := inlineEdges && len(el.CloseName) > 0 && nodeEndForGlue(last, false) == el.CloseOpen.Start.Offset
+
 	for _, child := range el.Children {
 		t, isText := child.(*parser.Text)
 
@@ -439,6 +446,7 @@ func emitStructuralChildren(w *formatter.Writer, src []byte, idx *docIndex, el *
 		}
 
 		switch {
+		case prev == nil && hugOpen:
 		case gluedTo(prevEnd, child):
 		case inline && prev != nil && !brokeSincePrev:
 			w.Space()
@@ -472,7 +480,10 @@ func emitStructuralChildren(w *formatter.Writer, src []byte, idx *docIndex, el *
 	}
 
 	w.Dedent()
-	w.Newline()
+
+	if !hugClose {
+		w.Newline()
+	}
 }
 
 func isInlineContent(children []parser.Node) bool {
@@ -483,7 +494,7 @@ func isInlineContent(children []parser.Node) bool {
 		case *parser.Text, *parser.Comment:
 			hasContent = true
 		case *parser.Element:
-			if !parser.IsInlineLevelElement(n.Name) {
+			if !IsInlineContainer(n.Name) {
 				return false
 			}
 

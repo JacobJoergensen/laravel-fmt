@@ -22,6 +22,21 @@ func TestFormatMovesOnlyMultilineValuesWhoseWhitespaceDoesNotRender(t *testing.T
 	}
 }
 
+func TestFormatAddsNothingToAValueEndingInALineBreak(t *testing.T) {
+	src := "<div>\n<div>\n<button data-copy-text=\"line one\nline two\n\">Copy</button>\n</div>\n</div>\n"
+	want := "<div>\n    <div>\n        <button\n            data-copy-text=\"line one\nline two\n\"\n        >Copy</button>\n    </div>\n</div>\n"
+
+	got := mustFormat(t, []byte(src), config.Default())
+
+	if string(got) != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent.\n=== once ===\n%q\n=== twice ===\n%q", got, twice)
+	}
+}
+
 func TestFormatKeepsTheLinesOfATemplateLiteralInAJSValue(t *testing.T) {
 	src := "<div>\n<a x-data=\"{ msg: `one\n  two` }\" class=\"a\">k</a>\n</div>\n"
 	want := "<div>\n    <a\n        x-data=\"{ msg: `one\n  two` }\"\n        class=\"a\"\n    >k</a>\n</div>\n"
