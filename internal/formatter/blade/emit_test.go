@@ -1385,9 +1385,9 @@ func TestFormatTailwindKeepsAVerticalTabAtTheClassEdge(t *testing.T) {
 	cfg := config.Default()
 	cfg.Tailwind = true
 
-	got := mustFormat(t, []byte("<p class=\"z \vz 0\"></p>"), cfg)
+	got := mustFormat(t, []byte("<p class=\"z-0 \vz 0\"></p>"), cfg)
 
-	if want := "<p class=\"\vz 0 z\"></p>\n"; string(got) != want {
+	if want := "<p class=\"\vz 0 z-0\"></p>\n"; string(got) != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 

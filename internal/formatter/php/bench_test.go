@@ -2,7 +2,6 @@ package php
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -30,7 +29,7 @@ func genPHP(methods int) []byte {
 
 	for i := range methods {
 		if i%2 == 0 {
-			sb.WriteString("    /**\n     * Handle unit " + strconv.Itoa(i) + ".\n     *\n     * @param  array<int, mixed>  $rows\n     * @return mixed\n     */\n")
+			fmt.Fprintf(&sb, "    /**\n     * Handle unit %d.\n     *\n     * @param  array<int, mixed>  $rows\n     * @return mixed\n     */\n", i)
 		}
 
 		fmt.Fprintf(&sb, "    public function method%d(int $id, array $rows, string $kind, int $step, ?int $value): mixed\n    {\n%s    }\n\n", i, bodies[i%len(bodies)])

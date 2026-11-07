@@ -105,8 +105,8 @@ func TestAdoptedIgnoreListsAreLayersOfTheirOwn(t *testing.T) {
 
 	got := make([]string, 0, len(paths))
 
-	for _, path := range paths {
-		got = append(got, relSlash(root, path))
+	for _, file := range paths {
+		got = append(got, relSlash(root, file))
 	}
 
 	want := []string{"keep/manual.php", "own/a.php"}

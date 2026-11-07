@@ -7,7 +7,7 @@ import (
 )
 
 // candidate is a narrow port of tailwindcss/src/candidate.ts's Candidate,
-// holding only what the sort comparator needs. Parsing drops a trailing `!`
+// holding only what the sort comparator needs. Parsing drops the important `!`
 // and a `/modifier`, since the comparator reorders the original class strings
 // and never rebuilds them. A leading `-` stays: `-mt` is a root of its own,
 // ranked apart from `mt`. Fraction keeps the modifier for a class the engine
@@ -82,8 +82,12 @@ func parseCandidate(theme *Theme, s string) candidate {
 		c.Variants = append(c.Variants, classVariant{Text: text, Variant: v})
 	}
 
-	if len(base) > 0 && base[len(base)-1] == '!' {
+	// As candidate.ts does, `!p-3!` loses only its trailing mark and is no class.
+	switch {
+	case len(base) > 0 && base[len(base)-1] == '!':
 		base = base[:len(base)-1]
+	case len(base) > 0 && base[0] == '!':
+		base = base[1:]
 	}
 
 	whole := base

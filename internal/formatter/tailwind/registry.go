@@ -9,6 +9,7 @@ package tailwind
 //go:generate node ../../../scripts/generate-tailwind-registry/generate.mjs
 
 import (
+	"slices"
 	"sync"
 )
 
@@ -26,15 +27,18 @@ type utilityEntry struct {
 // depends on the value, holds one per arbitraryProbeIndex, nil where the engine
 // rejects the value.
 type stemEntry struct {
-	Order        []int
-	Count        int
-	ColorOrder   []int
-	ColorCount   int
-	SizeOrder    []int
-	SizeCount    int
-	BracketOrder []int
-	ParenOrder   []int
-	ProbeOrders  [][]int
+	Order         []int
+	Count         int
+	ColorOrder    []int
+	ColorCount    int
+	SizeOrder     []int
+	SizeCount     int
+	BracketOrder  []int
+	ParenOrder    []int
+	ProbeOrders   [][]int
+	Siblings      []string
+	ColorSiblings []string
+	SizeSiblings  []string
 }
 
 // classification is the resolved sort key for a candidate. Unknown marks a candidate
@@ -131,12 +135,14 @@ func classify(theme *Theme, c *candidate) classification {
 	}
 
 	if c.Root != "" {
-		if entry, ok := stemRegistry[c.Root]; ok && theme.namedValueExists(c.Value) {
+		// A stem that compiles alone is listed under its own name, so a stem
+		// reached without a value is no class.
+		if entry, ok := stemRegistry[c.Root]; ok && c.Value != "" && theme.namedValueExists(c.Value) {
 			if isArbitraryValue(c.Value) {
 				return classifyArbitrary(&entry, c.Value)
 			}
 
-			order, count := selectStemBranch(theme, c.Root, &entry, c.Value)
+			order, count := selectStemBranch(theme, c.Root, &entry, c.Value, c.Base)
 			return classification{Order: order, Count: count}
 		}
 	}
@@ -193,20 +199,32 @@ func classifyArbitrary(stem *stemEntry, value string) classification {
 // project's `@theme` tokens decide through Theme.branchFor. A branch that is nil
 // falls through to default, so a theme hint registered for an unambiguous stem
 // is a no-op.
-func selectStemBranch(theme *Theme, stemName string, stem *stemEntry, value string) ([]int, int) {
+func selectStemBranch(theme *Theme, stemName string, stem *stemEntry, value, name string) ([]int, int) {
 	switch theme.branchFor(stemName, value) {
 	case branchSize:
 		if stem.SizeOrder != nil {
-			return stem.SizeOrder, stem.SizeCount
+			return amongSiblings(stem.SizeSiblings, name, stem.SizeOrder), stem.SizeCount
 		}
 	case branchColor:
 		if stem.ColorOrder != nil {
-			return stem.ColorOrder, stem.ColorCount
+			return amongSiblings(stem.ColorSiblings, name, stem.ColorOrder), stem.ColorCount
 		}
 	case branchDefault:
 	}
 
-	return stem.Order, stem.Count
+	return amongSiblings(stem.Siblings, name, stem.Order), stem.Count
+}
+
+// An equal rank falls to the comparator's name tie-break, which puts the class
+// just after its predecessor.
+func amongSiblings(siblings []string, name string, order []int) []int {
+	if len(siblings) == 0 {
+		return order
+	}
+
+	i, _ := slices.BinarySearchFunc(siblings, name, naturalCompare)
+
+	return utilityRegistry[siblings[max(i-1, 0)]].Order
 }
 
 // variantMaskWords is the number of 64-bit words in a variantMask. Its bits

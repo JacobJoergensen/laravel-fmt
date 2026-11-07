@@ -66,6 +66,109 @@ func TestSortUnknownClassFirst(t *testing.T) {
 	}
 }
 
+// Every want is what Tailwind v4.3.5's getClassOrder gives.
+func TestSortBareStemIsKnownOnlyWhenItCompiles(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"a stem that needs a value is unknown", "z-10 row", "row z-10"},
+		{"a color or size stem alone is unknown", "p-4 text", "text p-4"},
+		{"a stem with a default value is known", "rounded custom-foo", "custom-foo rounded"},
+		{"a side stem with a default value is known", "rounded-t custom-foo", "custom-foo rounded-t"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Sort(nil, tc.in); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Every want is what Tailwind v4.3.5's getClassOrder gives. A theme is loaded,
+// since without one any value under a stem counts as known.
+func TestSortRanksUtilitiesKeptForOldMarkup(t *testing.T) {
+	theme := mustTheme(t, nil, nil, nil, nil)
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"a static one", "break-words flex custom-foo", "custom-foo flex break-words"},
+		{"a static one with a direction", "bg-gradient-to-r p-4 custom-foo", "custom-foo bg-gradient-to-r p-4"},
+		{"a functional one with a breakpoint", "max-w-screen-lg w-full custom-foo", "custom-foo w-full max-w-screen-lg"},
+		{"a functional one with none", "filter-none blur custom-foo", "custom-foo blur filter-none"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Sort(theme, tc.in); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Every want is what Tailwind v4.3.5's getClassOrder gives.
+func TestSortReadsTheLeadingImportantMark(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"before the utility", "!p-3 z-10 custom-foo", "custom-foo z-10 !p-3"},
+		{"after a variant", "hover:!opacity-100 opacity-50 custom-foo", "custom-foo opacity-50 hover:!opacity-100"},
+		{"before a negative utility", "!-mt-2 z-10 custom-foo", "custom-foo z-10 !-mt-2"},
+		{"on both ends is no class", "z-10 !p-3!", "!p-3! z-10"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Sort(nil, tc.in); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Every want is what Tailwind v4.3.5's getClassOrder gives with these tokens.
+func TestSortPlacesAnUnlistedValueAmongItsSiblingsByName(t *testing.T) {
+	theme := mustTheme(t, []ThemeToken{
+		{Namespace: "color", Name: "brand"},
+		{Namespace: "color", Name: "accent"},
+		{Namespace: "spacing", Name: "gutter"},
+	}, nil, nil, nil)
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"a number between listed ones", "rotate-12 rotate-7 rotate-1", "rotate-1 rotate-7 rotate-12"},
+		{"a number past the listed ones", "z-24 z-10", "z-10 z-24"},
+		{"a value of a stem that is also a static utility", "flex-24 max-w-25 flex", "flex max-w-25 flex-24"},
+		{"a theme color among the palette", "bg-zinc-500 bg-brand bg-amber-500", "bg-amber-500 bg-brand bg-zinc-500"},
+		{"a theme color before the whole palette", "bg-amber-500 bg-accent", "bg-accent bg-amber-500"},
+		{"a theme spacing among the scale", "p-gutter p-px p-4", "p-4 p-gutter p-px"},
+		{"a sibling that is a stem of its own", "inset-gutter inset-full inset-auto", "inset-auto inset-full inset-gutter"},
+		{"a number on a stem that also takes colors", "border-13 border-none border-4", "border-4 border-13 border-none"},
+		{"a color set in a custom property", "drop-shadow-brand drop-shadow-none drop-shadow-lg", "drop-shadow-lg drop-shadow-none drop-shadow-brand"},
+		{"a bare stem before its arbitrary values", "rounded-(--x) rounded", "rounded rounded-(--x)"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Sort(theme, tc.in); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSortPreservesZeroOrSingleToken(t *testing.T) {
 	cases := []string{"", "   ", "only-one"}
 

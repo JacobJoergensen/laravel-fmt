@@ -31,7 +31,12 @@ async function main() {
 
   const utilityStems = buildUtilityStems(design)
   const numeric = syntheticNumericCandidates(design)
-  const synthetic = [...numeric, ...syntheticArbitraryCandidates(design, numeric, utilityStems)]
+  const synthetic = [
+    ...numeric,
+    ...hiddenCandidates(design),
+    ...bareStemCandidates(design, utilityStems),
+    ...syntheticArbitraryCandidates(design, numeric, utilityStems),
+  ]
   const arbitraryProbes = buildArbitraryProbes(design)
   const { rank, propertyRanks } = buildClassOrderRanks(
     design,
@@ -47,6 +52,7 @@ async function main() {
   for (const entry of stemRegistry) {
     entry.arbitrary = arbitraryOrders.get(entry.stem) ?? null
   }
+
   const variantRegistry = buildVariantRegistry(design)
   const tailwindVersion = readTailwindVersion()
 
@@ -471,6 +477,51 @@ function syntheticNumericCandidates(design) {
   return out
 }
 
+// getClassList leaves out the utilities the engine keeps only for old markup
+// (`break-words`, `bg-gradient-to-r`), yet it still compiles and orders them.
+// A hidden root no probe compiles stops the run, since its classes would sort
+// as unknown.
+function hiddenCandidates(design) {
+  const listed = design.getClassList().map(([name]) => name)
+  const listedSet = new Set(listed)
+  const out = [...design.utilities.keys('static')].filter((name) => !listedSet.has(name))
+  const values = ['none', ...themeNamespace(design, '--breakpoint').map(([key]) => key)]
+
+  for (const root of design.utilities.keys('functional')) {
+    const prefix = `${root}-`
+
+    if (design.utilities.getCompletions(root).length > 0 || listed.some((name) => name.startsWith(prefix))) {
+      continue
+    }
+
+    const probes = [...values.map((value) => prefix + value), `${prefix}0`]
+    const compiled = design
+      .getClassOrder(probes)
+      .filter(([, order]) => order !== null)
+      .map(([name]) => name)
+
+    if (compiled.length === 0) {
+      throw new Error(`hidden utility ${root}-* compiles for no probe value`)
+    }
+
+    out.push(...compiled.filter((name) => name !== `${prefix}0`))
+  }
+
+  return out
+}
+
+// A stem with a default value compiles alone (`rounded`, `blur`) without being
+// listed, so it is ranked as a class of its own.
+function bareStemCandidates(design, utilityStems) {
+  const listed = new Set(design.getClassList().map(([name]) => name))
+  const unlisted = utilityStems.filter((stem) => !listed.has(stem))
+
+  return design
+    .getClassOrder(unlisted)
+    .filter(([, order]) => order !== null)
+    .map(([name]) => name)
+}
+
 // Some functional utilities take only arbitrary values (`content-[…]`), so no
 // listed or numeric class reaches their stem and every use sorts as unknown.
 // One arbitrary probe per such stem fills the gap; a stem that already has
@@ -699,12 +750,15 @@ function buildUtilityRegistry(design, rank, propertyOrder, synthetic = []) {
     }
 
     const nodes = design.candidatesToAst([name])[0] ?? []
-    const { order: shapeTuple } = collectPropertySort(nodes, propertyToIndex)
-    const hasColor = shapeTuple.some((i) => colorIndices.has(i))
+    const { order: shapeTuple, count, properties } = collectPropertySort(nodes, propertyToIndex)
+    // Shape reads every declared property, as a color can live in one the
+    // property order does not rank (`--tw-drop-shadow-color`).
+    const hasColor = shapeTuple.some((i) => colorIndices.has(i)) || properties.some(isColorPropertyName)
     const hasSize = shapeTuple.some((i) => sizeIndices.has(i))
     const shape = hasColor && !hasSize ? 'color' : hasSize && !hasColor ? 'size' : 'other'
+    const signature = `${shapeTuple.join(',')}|${count}`
 
-    registry.push({ name, order: [r], count: 1, shape })
+    registry.push({ name, order: [r], count: 1, shape, signature })
   }
 
   return registry
@@ -713,6 +767,7 @@ function buildUtilityRegistry(design, rank, propertyOrder, synthetic = []) {
 // Mirrors the engine's getPropertySort (compile.ts).
 function collectPropertySort(nodes, propertyToIndex) {
   const order = new Set()
+  const properties = []
 
   let count = 0
   let seenTwSort = false
@@ -728,6 +783,7 @@ function collectPropertySort(nodes, propertyToIndex) {
       }
 
       count++
+      properties.push(node.property)
 
       if (seenTwSort) {
         continue
@@ -759,6 +815,7 @@ function collectPropertySort(nodes, propertyToIndex) {
   return {
     order: Array.from(order).sort((a, b) => a - b),
     count,
+    properties,
   }
 }
 
@@ -834,11 +891,29 @@ function buildStemRegistry(utilityRegistry, utilityStems) {
     group.push(entry)
   }
 
-  // A branch's representative rank is the EARLIEST (min) rank among its classes:
-  // a stem's color/size/other classes cluster contiguously in getClassOrder, so
-  // the min is a faithful slot for an unseen value of that shape (`text-brand`
-  // sorts where text colors do). Shape comes from buildUtilityRegistry.
-  const minRank = (es) => (es.length === 0 ? null : [Math.min(...es.map((e) => e.order[0]))])
+  // A branch's representative is its earliest class that takes a value: the
+  // bare stem can be another utility altogether (`flex` sets display, while
+  // `flex-24` sets flex). Its siblings are the classes named `<stem>-…` with
+  // its property signature, in engine order, including ones that are stems of
+  // their own (`inset-full`). The engine breaks their tie by name, so an
+  // unseen value of the branch (`bg-brand`, `rotate-7`) sorts among them by
+  // name.
+  const branch = (stem, es) => {
+    const valued = es.filter((e) => e.name !== stem)
+    const pool = valued.length > 0 ? valued : es
+
+    if (pool.length === 0) {
+      return { order: null, siblings: [] }
+    }
+
+    const rep = pool.reduce((a, b) => (b.order[0] < a.order[0] ? b : a))
+    const siblings = utilityRegistry
+      .filter((e) => e.name.startsWith(`${stem}-`) && e.signature === rep.signature)
+      .sort((a, b) => a.order[0] - b.order[0])
+      .map((e) => e.name)
+
+    return { order: [rep.order[0]], siblings: siblings.length > 1 ? siblings : [] }
+  }
 
   const out = []
 
@@ -853,17 +928,24 @@ function buildStemRegistry(utilityRegistry, utilityStems) {
           : entries
         : sizeShaped
 
-    const colorOrder = minRank(colorShaped)
-    const sizeOrder = minRank(sizeShaped)
+    // A project theme names its colors, so a value that reaches the default
+    // branch is not one: `border-13` sorts with the widths, not the colors.
+    const nonColor = entries.filter((e) => e.shape !== 'color' && e.name !== stem)
+    const main = branch(stem, nonColor.length > 0 ? nonColor : dominant)
+    const color = branch(stem, colorShaped)
+    const size = branch(stem, sizeShaped)
 
     out.push({
       stem,
-      order: minRank(dominant) ?? minRank(entries) ?? [],
+      order: main.order ?? branch(stem, entries).order ?? [],
+      siblings: main.siblings,
       count: 1,
-      colorOrder,
-      colorCount: colorOrder ? 1 : 0,
-      sizeOrder,
-      sizeCount: sizeOrder ? 1 : 0,
+      colorOrder: color.order,
+      colorSiblings: color.siblings,
+      colorCount: color.order ? 1 : 0,
+      sizeOrder: size.order,
+      sizeSiblings: size.siblings,
+      sizeCount: size.order ? 1 : 0,
     })
   }
 
@@ -1149,6 +1231,20 @@ function renderGo({
 
       if (s.arbitrary?.probes) {
         fields.push(`ProbeOrders: [][]int{${s.arbitrary.probes.map(rankList).join(', ')}}`)
+      }
+
+      const names = (list) => `[]string{${list.map(quote).join(', ')}}`
+
+      if (s.siblings.length > 0) {
+        fields.push(`Siblings: ${names(s.siblings)}`)
+      }
+
+      if (s.colorSiblings.length > 0) {
+        fields.push(`ColorSiblings: ${names(s.colorSiblings)}`)
+      }
+
+      if (s.sizeSiblings.length > 0) {
+        fields.push(`SizeSiblings: ${names(s.sizeSiblings)}`)
       }
 
       return `m[${quote(s.stem)}] = stemEntry{${fields.join(', ')}}`

@@ -1165,12 +1165,8 @@ func (b *builder) fileTailComments(eof parser.Token, bodyEmitted bool) *document
 		parts = append(parts, document.HardLine())
 	}
 
-	for i, c := range lead {
-		if i > 0 || bodyEmitted {
-			parts = append(parts, document.HardLine())
-		}
-
-		parts = append(parts, c)
+	for _, c := range lead {
+		parts = append(parts, document.HardLine(), c)
 	}
 
 	return document.Concat(parts...)

@@ -9,6 +9,9 @@
 * Fixed `const`, `let` and `var` losing their space before `[` in Alpine attributes
 * Fixed `-- >` in an Alpine attribute being joined into `-->`
 * Fixed strings in an Alpine attribute being spaced apart after a `/` that follows a property named like a keyword, such as `cache.delete / 2`
+* Fixed Tailwind sorting treating a bare utility name like `row` or `text` as a class
+* Fixed Tailwind sorting moving `!p-3` and older utilities like `break-words` to the front
+* Fixed Tailwind sorting placing theme values like `bg-brand` before the built-in ones
 * Fixed a `<script>` in a CRLF file with a backslash-continued string moving one level on the second format
 
 ## Version 0.8.0 (2026-11-03)
