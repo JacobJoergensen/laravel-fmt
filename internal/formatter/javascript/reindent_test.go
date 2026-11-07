@@ -37,9 +37,14 @@ func TestLineDepthsFollowBracketNesting(t *testing.T) {
 			[]int{0, 1, 2, 2, 2, 0},
 		},
 		{
-			"case label colon does not continue",
-			"switch (a) {\ncase 1:\nb()\n}",
-			[]int{0, 1, 1, 0},
+			"case body indents under its label, the next label does not",
+			"switch (a) {\ncase 1:\nb()\nbreak\ncase 2: {\nc({\nd: 1,\n})\n}\ndefault:\ne()\n}",
+			[]int{0, 1, 2, 2, 1, 2, 3, 2, 1, 1, 2, 0},
+		},
+		{
+			"default outside a switch is an object key whose value continues",
+			"{\ndefault:\nx\n}",
+			[]int{0, 1, 2, 0},
 		},
 		{
 			"condition spanning lines keeps one level and its block hangs from the if",
@@ -100,10 +105,38 @@ func TestLineDepthsFollowBracketNesting(t *testing.T) {
 				t.Fatalf("LineDepths(%q) refused, want %v", c.value, c.want)
 			}
 
-			if !slices.Equal(got, c.want) {
-				t.Fatalf("LineDepths(%q) = %v, want %v", c.value, got, c.want)
+			levels := make([]int, len(got))
+			for i, d := range got {
+				levels[i] = d.Level
+			}
+
+			if !slices.Equal(levels, c.want) {
+				t.Fatalf("LineDepths(%q) levels = %v, want %v", c.value, levels, c.want)
 			}
 		})
+	}
+}
+
+func TestLineDepthsHoldADocCommentAtItsOpenersLevel(t *testing.T) {
+	value := "{\n        /**\n            * Opens it.\n  */\n    open() {}, /** a\n * b */ close() {\n}\n}"
+	want := []Depth{
+		{Level: 0},
+		{Level: 1},
+		{Level: 1, InComment: true},
+		{Level: 1, InComment: true},
+		{Level: 1},
+		{Level: 1, InComment: true},
+		{Level: 1},
+		{Level: 0},
+	}
+
+	got, ok := LineDepths([]byte(value))
+	if !ok {
+		t.Fatalf("LineDepths(%q) refused, want %v", value, want)
+	}
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("LineDepths(%q) = %v, want %v", value, got, want)
 	}
 }
 
@@ -114,7 +147,7 @@ func TestLineDepthsRefusesValuesItCannotMeasure(t *testing.T) {
 	}{
 		{"template literal across lines", "{\nmsg: `a\n  b`\n}"},
 		{"string continued across lines", "{\nmsg: 'a\\\n  b'\n}"},
-		{"block comment across lines", "{\n/* a\n  b */\nc: 1\n}"},
+		{"block comment across lines without a star on each", "{\n/** a\n  b\n */\nc: 1\n}"},
 		{"entity that decodes to a bracket", "{\na: 1 &#125;\n}"},
 		{"Annex B line comment opener", "{\n--> a\n}"},
 		{"unclosed bracket", "{\na: 1"},

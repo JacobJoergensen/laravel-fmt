@@ -8,6 +8,7 @@
 * Fixed a Blade comment in an Alpine attribute being spaced apart
 * Fixed `const`, `let` and `var` losing their space before `[` in Alpine attributes
 * Fixed `-- >` in an Alpine attribute being joined into `-->`
+* Fixed strings in an Alpine attribute being spaced apart after a `/` that follows a property named like a keyword, such as `cache.delete / 2`
 * Fixed a `<script>` in a CRLF file with a backslash-continued string moving one level on the second format
 
 ## Version 0.8.0 (2026-11-03)

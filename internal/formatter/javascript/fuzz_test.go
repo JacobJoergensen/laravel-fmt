@@ -49,47 +49,79 @@ func FuzzLineDepths(f *testing.F) {
 		"items\n.filter(i => i.on)\n.map(i => i.id)",
 		"ok = a &&\nb ?\nc :\nd",
 		"{\nmsg: `a\n  b`\n}",
+		"{\n    /**\n  * a\n     */\nb() {}\n}",
 		"",
 	} {
 		f.Add([]byte(seed))
 	}
 
 	f.Fuzz(func(t *testing.T, value []byte) {
-		levels, ok := LineDepths(value)
+		depths, ok := LineDepths(value)
 		if !ok {
 			return
 		}
 
-		out := atLevels(value, levels)
+		out := atDepths(value, depths)
 
 		if !bytes.Equal(trimmedLines(value), trimmedLines(out)) {
 			t.Fatalf("changed more than leading whitespace: %q -> %q", value, out)
 		}
 
-		if toks, _ := parser.Lex(value); !sameTokens(value, toks, out) {
+		if !sameTokensMovingComments(value, out) {
 			t.Fatalf("moved a token: %q -> %q", value, out)
 		}
 
-		levels2, ok := LineDepths(out)
+		depths2, ok := LineDepths(out)
 		if !ok {
 			t.Fatalf("reindented value rejected on second pass: %q", out)
 		}
 
-		if out2 := atLevels(out, levels2); !bytes.Equal(out, out2) {
+		if out2 := atDepths(out, depths2); !bytes.Equal(out, out2) {
 			t.Fatalf("not idempotent: %q -> %q -> %q", value, out, out2)
 		}
 	})
 }
 
-func atLevels(value []byte, levels []int) []byte {
+func atDepths(value []byte, depths []Depth) []byte {
 	lines := bytes.Split(value, []byte("\n"))
 
 	for i := 1; i < len(lines); i++ {
-		body := bytes.TrimLeft(lines[i], " \t")
-		lines[i] = append(bytes.Repeat([]byte("    "), levels[i]), body...)
+		indent := bytes.Repeat([]byte("    "), depths[i].Level)
+		if depths[i].InComment {
+			indent = append(indent, ' ')
+		}
+
+		lines[i] = append(indent, bytes.TrimLeft(lines[i], " \t")...)
 	}
 
 	return bytes.Join(lines, []byte("\n"))
+}
+
+func sameTokensMovingComments(src, out []byte) bool {
+	srcToks, ok := parser.Lex(src)
+	if !ok {
+		return false
+	}
+
+	outToks, ok := parser.Lex(out)
+	if !ok || len(srcToks) != len(outToks) {
+		return false
+	}
+
+	for i, s := range srcToks {
+		o := outToks[i]
+		a, b := src[s.Start:s.End], out[o.Start:o.End]
+
+		if s.Kind == parser.KindComment {
+			a, b = trimmedLines(a), trimmedLines(b)
+		}
+
+		if o.Kind != s.Kind || !bytes.Equal(a, b) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func trimmedLines(b []byte) []byte {

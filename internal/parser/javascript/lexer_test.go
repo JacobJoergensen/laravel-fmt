@@ -154,3 +154,23 @@ func TestMultilineLiterals(t *testing.T) {
 		})
 	}
 }
+
+func TestLexReadsSlashAfterPropertyNameAsDivision(t *testing.T) {
+	cases := []string{"a.in / 2", "a?.in / 2", "cache.delete / 2", "a./* c */new / 2"}
+
+	for _, src := range cases {
+		t.Run(src, func(t *testing.T) {
+			toks, ok := Lex([]byte(src))
+
+			if !ok {
+				t.Fatalf("Lex(%q) refused", src)
+			}
+
+			for _, tok := range toks {
+				if tok.Kind == KindRegex {
+					t.Fatalf("Lex(%q) produced regex token %q, want a division punct", src, src[tok.Start:tok.End])
+				}
+			}
+		})
+	}
+}

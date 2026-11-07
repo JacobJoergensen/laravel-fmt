@@ -132,8 +132,8 @@ func EmitMultilineAttrValue(w *formatter.Writer, src []byte, a *parser.Attr, spa
 			value = spaced
 		}
 
-		if levels, ok := jsfmt.LineDepths(value); ok {
-			emitAtLevels(w, value, levels)
+		if depths, ok := jsfmt.LineDepths(value); ok {
+			emitAtDepths(w, value, depths)
 
 			return
 		}
@@ -158,26 +158,32 @@ func EmitMultilineAttrValue(w *formatter.Writer, src []byte, a *parser.Attr, spa
 	formatter.EmitVerbatimStrippingKeepTrailing(w, value, attrIndent)
 }
 
-func emitAtLevels(w *formatter.Writer, value []byte, levels []int) {
+func emitAtDepths(w *formatter.Writer, value []byte, depths []jsfmt.Depth) {
 	for i, line := range bytes.Split(value, []byte("\n")) {
 		if i > 0 {
 			w.Newline()
 			line = bytes.TrimLeft(line, " \t")
 		}
 
-		if len(line) == 0 {
-			continue
+		if len(line) > 0 {
+			writeAtDepth(w, depths[i], line)
 		}
+	}
+}
 
-		for range levels[i] {
-			w.Indent()
-		}
+func writeAtDepth(w *formatter.Writer, depth jsfmt.Depth, line []byte) {
+	for range depth.Level {
+		w.Indent()
+	}
 
-		w.WriteBytes(line)
+	if depth.InComment {
+		w.Write(" ")
+	}
 
-		for range levels[i] {
-			w.Dedent()
-		}
+	w.WriteBytes(line)
+
+	for range depth.Level {
+		w.Dedent()
 	}
 }
 

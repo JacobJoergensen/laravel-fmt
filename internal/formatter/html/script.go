@@ -113,7 +113,7 @@ func emitShiftedScript(w *formatter.Writer, raw []byte, base int, php, phpLitera
 	}
 
 	common := commonRawIndent(shifted)
-	levels, measured := scriptLevels(raw, masked, lines, frozen, base, php)
+	depths, measured := scriptLevels(raw, masked, lines, frozen, base, php)
 
 	w.Indent()
 
@@ -143,18 +143,12 @@ func emitShiftedScript(w *formatter.Writer, raw []byte, base int, php, phpLitera
 		}
 
 		if measured {
-			for range levels[i] {
-				w.Indent()
-			}
+			writeAtDepth(w, depths[i], body)
+
+			continue
 		}
 
 		w.WriteBytes(body)
-
-		if measured {
-			for range levels[i] {
-				w.Dedent()
-			}
-		}
 	}
 
 	w.Dedent()
@@ -166,7 +160,7 @@ func emitShiftedScript(w *formatter.Writer, raw []byte, base int, php, phpLitera
 // scriptLevels reports false when the body keeps its relative layout: a line
 // starts inside a literal, a Blade construct spans lines, or a directive other
 // than a value one nests it by Blade's blocks.
-func scriptLevels(raw, masked []byte, lines, frozen [][2]int, base int, php []parser.Span) ([]int, bool) {
+func scriptLevels(raw, masked []byte, lines, frozen [][2]int, base int, php []parser.Span) ([]jsfmt.Depth, bool) {
 	if len(frozen) > 0 || hasNestingDirective(raw) {
 		return nil, false
 	}

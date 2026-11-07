@@ -24,35 +24,46 @@ const (
 	keywordDo      = "do"
 	keywordCase    = "case"
 	keywordDefault = "default"
+	keywordSwitch  = "switch"
 )
 
 type bracket struct {
-	level    int
-	line     int
-	exprLine int
-	head     bool
+	level      int
+	line       int
+	exprLine   int
+	head       bool
+	switchHead bool
+	switchBody bool
+	labeled    bool
 }
 
-// LineDepths returns each line's indent level by bracket depth, or false when
-// the value's layout must stay as written.
-func LineDepths(value []byte) ([]int, bool) {
-	levels, ok := BlockDepths(value)
+// Depth is one line's layout: its indent level, and whether it continues a
+// block comment, whose `*` then sits one space past the indent.
+type Depth struct {
+	Level     int
+	InComment bool
+}
+
+// LineDepths returns each line's depth by bracket nesting, or false when the
+// value's layout must stay as written.
+func LineDepths(value []byte) ([]Depth, bool) {
+	depths, ok := BlockDepths(value)
 	if !ok {
 		return nil, false
 	}
 
 	if first, _, _ := bytes.Cut(value, []byte("\n")); len(bytes.TrimLeft(first, " \t")) == 0 {
-		for i := 1; i < len(levels); i++ {
-			levels[i]++
+		for i := 1; i < len(depths); i++ {
+			depths[i].Level++
 		}
 	}
 
-	return levels, true
+	return depths, true
 }
 
 // BlockDepths is LineDepths for a block whose first line is laid out like the
 // rest, such as a script body.
-func BlockDepths(body []byte) ([]int, bool) {
+func BlockDepths(body []byte) ([]Depth, bool) {
 	lines := bytes.Split(body, []byte("\n"))
 
 	for _, line := range lines {
@@ -67,41 +78,53 @@ func BlockDepths(body []byte) ([]int, bool) {
 	}
 
 	for _, t := range toks {
-		if bytes.IndexByte(body[t.Start:t.End], '\n') >= 0 {
+		text := body[t.Start:t.End]
+
+		if bytes.IndexByte(text, '\n') >= 0 && (t.Kind != parser.KindComment || !indentableComment(text)) {
 			return nil, false
 		}
 	}
 
-	// No token crosses a line, so moving the whitespace that starts one cannot
-	// fuse or split a token; FuzzLineDepths holds the layout to that.
-	levels, ok := lineLevels(body, toks, lines)
-	if !ok {
-		return nil, false
+	// Only a comment crosses a line, so moving the whitespace that starts one
+	// cannot fuse or split a token; FuzzLineDepths holds the layout to that.
+	return lineLevels(body, toks, lines)
+}
+
+func indentableComment(text []byte) bool {
+	lines := bytes.Split(text, []byte("\n"))
+
+	for _, line := range lines[1:] {
+		if !bytes.HasPrefix(bytes.TrimLeft(line, " \t"), []byte("*")) {
+			return false
+		}
 	}
 
-	return levels, true
+	return true
 }
 
 type leveler struct {
 	src     []byte
 	toks    []parser.Token
 	classes []tokenClass
-	levels  []int
+	depths  []Depth
 	stack   []bracket
 
-	prevTok   int
-	prevEnd   int
-	headClose int
+	prevTok     int
+	prevEnd     int
+	headClose   int
+	switchClose int
 }
 
-func lineLevels(src []byte, toks []parser.Token, lines [][]byte) ([]int, bool) {
+func lineLevels(src []byte, toks []parser.Token, lines [][]byte) ([]Depth, bool) {
 	l := &leveler{
 		src: src, toks: toks, classes: classify(src, toks),
-		levels: make([]int, len(lines)), prevTok: -1, prevEnd: -1, headClose: -1,
+		depths: make([]Depth, len(lines)), prevTok: -1, prevEnd: -1, headClose: -1, switchClose: -1,
 	}
 
 	next := 0
 	lineStart := 0
+	commentEnd := -1
+	commentLevel := 0
 
 	for i, line := range lines {
 		lineEnd := lineStart + len(line)
@@ -109,20 +132,28 @@ func lineLevels(src []byte, toks []parser.Token, lines [][]byte) ([]int, bool) {
 		closedLevel := -1
 
 		if i > 0 {
-			if next < len(toks) && toks[next].Start < lineEnd {
+			switch {
+			case lineStart < commentEnd:
+				l.depths[i] = Depth{Level: commentLevel, InComment: true}
+			case next < len(toks) && toks[next].Start < lineEnd:
 				level, ok := l.lineLevel(next)
 				if !ok {
 					return nil, false
 				}
 
-				l.levels[i] = level
-			} else {
-				l.levels[i] = l.innerLevel()
+				l.depths[i].Level = level
+			default:
+				l.depths[i].Level = l.innerLevel()
 			}
 		}
 
 		for ; next < len(toks) && toks[next].Start < lineEnd; next++ {
 			if toks[next].Kind == parser.KindComment {
+				if toks[next].End > lineEnd {
+					commentEnd = toks[next].End
+					commentLevel = l.depths[i].Level
+				}
+
 				continue
 			}
 
@@ -138,7 +169,11 @@ func lineLevels(src []byte, toks []parser.Token, lines [][]byte) ([]int, bool) {
 		lineStart = lineEnd + 1
 	}
 
-	return l.levels, len(l.stack) == 0
+	if len(l.stack) > 0 {
+		return nil, false
+	}
+
+	return l.depths, true
 }
 
 func (l *leveler) lineLevel(first int) (int, bool) {
@@ -154,6 +189,10 @@ func (l *leveler) lineLevel(first int) (int, bool) {
 	}
 
 	level := l.innerLevel()
+
+	if top := l.top(); top != nil && top.labeled && !isLabelKeyword(l.src, t) {
+		level++
+	}
 
 	switch {
 	case l.endsHead():
@@ -179,13 +218,19 @@ func (l *leveler) read(i, line int, closedLevel *int) bool {
 
 	switch {
 	case isPunct && opensBracket(text):
-		level := l.levels[line]
+		level := l.depths[line].Level
 		if *closedLevel >= 0 {
 			level = *closedLevel
 		}
 
 		head := text == "(" && l.prevTok >= 0 && isControlKeyword(l.src, l.toks[l.prevTok])
-		l.stack = append(l.stack, bracket{level: level, line: line, exprLine: -1, head: head})
+		switchHead := text == "(" && l.prevTok >= 0 && isIdentText(l.src, l.toks[l.prevTok], keywordSwitch)
+		switchBody := text == "{" && l.switchClose >= 0 && l.prevTok == l.switchClose
+
+		l.stack = append(l.stack, bracket{
+			level: level, line: line, exprLine: -1, head: head,
+			switchHead: switchHead, switchBody: switchBody,
+		})
 	case isPunct && closesBracket(text):
 		if len(l.stack) == 0 {
 			return false
@@ -198,12 +243,20 @@ func (l *leveler) read(i, line int, closedLevel *int) bool {
 			l.headClose = i
 		}
 
+		if closed.switchHead {
+			l.switchClose = i
+		}
+
 		if closed.line < line {
 			*closedLevel = closed.level
 		}
 	case isPunct && (text == "," || text == ";"):
 		if top := l.top(); top != nil {
 			top.exprLine = -1
+		}
+	case !isPunct:
+		if top := l.top(); top != nil && top.switchBody && !top.labeled && isLabelKeyword(l.src, t) {
+			top.labeled = true
 		}
 	}
 
@@ -263,12 +316,17 @@ func (l *leveler) continues(first int) bool {
 		(isPunctText(l.src, l.toks[end], ":") && !l.endsLabel(end))
 }
 
+// Outside a switch body, `default:` and `case:` are object keys.
 func (l *leveler) endsLabel(i int) bool {
+	if top := l.top(); top == nil || !top.switchBody {
+		return false
+	}
+
 	for j := i - 1; j >= 0; j-- {
 		t := l.toks[j]
 		text := string(l.src[t.Start:t.End])
 
-		if t.Kind == parser.KindIdent && labelKeywords[text] {
+		if isLabelKeyword(l.src, t) {
 			return true
 		}
 
@@ -290,4 +348,12 @@ func closesBracket(text string) bool {
 
 func isControlKeyword(src []byte, t parser.Token) bool {
 	return t.Kind == parser.KindIdent && conditionKeywords[string(src[t.Start:t.End])]
+}
+
+func isLabelKeyword(src []byte, t parser.Token) bool {
+	return t.Kind == parser.KindIdent && labelKeywords[string(src[t.Start:t.End])]
+}
+
+func isIdentText(src []byte, t parser.Token, s string) bool {
+	return t.Kind == parser.KindIdent && string(src[t.Start:t.End]) == s
 }

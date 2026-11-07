@@ -32,11 +32,12 @@ var regexKeywords = map[string]bool{
 }
 
 type lexer struct {
-	src  []byte
-	off  int
-	toks []Token
-	prev int
-	ok   bool
+	src            []byte
+	off            int
+	toks           []Token
+	prev           int
+	ok             bool
+	prevIsProperty bool
 }
 
 // Lex tokenizes src, every non-whitespace byte in exactly one token, or reports
@@ -116,6 +117,10 @@ func (l *lexer) emit(k Kind, start int) {
 	}
 }
 
+func (l *lexer) isMemberAccess(t Token) bool {
+	return t.Kind == KindPunct && t.End-t.Start < len("...") && l.src[t.End-1] == '.'
+}
+
 func (l *lexer) fail() {
 	l.ok = false
 }
@@ -127,6 +132,7 @@ func (l *lexer) scanIdent() {
 		l.off++
 	}
 
+	l.prevIsProperty = l.prev >= 0 && l.isMemberAccess(l.toks[l.prev])
 	l.emit(KindIdent, start)
 }
 
@@ -248,8 +254,8 @@ func (l *lexer) scanTemplate() {
 // atomic token.
 func (l *lexer) skipTemplateExpr() {
 	mark := len(l.toks)
-	prev := l.prev
-	l.prev = -1
+	prev, prevIsProperty := l.prev, l.prevIsProperty
+	l.prev, l.prevIsProperty = -1, false
 	depth := 0
 
 	for l.ok {
@@ -280,7 +286,7 @@ func (l *lexer) skipTemplateExpr() {
 	}
 
 	l.toks = l.toks[:mark]
-	l.prev = prev
+	l.prev, l.prevIsProperty = prev, prevIsProperty
 }
 
 func (l *lexer) scanSlash() {
@@ -329,7 +335,7 @@ func (l *lexer) regexPosition() regexPos {
 
 	switch t.Kind {
 	case KindIdent:
-		if regexKeywords[string(l.src[t.Start:t.End])] {
+		if !l.prevIsProperty && regexKeywords[string(l.src[t.Start:t.End])] {
 			return regexYes
 		}
 

@@ -2098,7 +2098,7 @@ func (e *emitter) emitAlpinePartsAtDepth(parts []htmlparser.Node) bool {
 		}
 	}
 
-	levels, ok := jsfmt.LineDepths(js)
+	depths, ok := jsfmt.LineDepths(js)
 	if !ok {
 		return false
 	}
@@ -2137,9 +2137,9 @@ func (e *emitter) emitAlpinePartsAtDepth(parts []htmlparser.Node) bool {
 
 			// Only the closing quote can land on a blank line, and it belongs at
 			// the attribute.
-			level := levels[line]
+			depth := depths[line]
 			if len(bytes.TrimLeft(lines[line], " \t")) == 0 {
-				level = 0
+				depth = jsfmt.Depth{}
 			}
 
 			for range applied {
@@ -2148,11 +2148,15 @@ func (e *emitter) emitAlpinePartsAtDepth(parts []htmlparser.Node) bool {
 
 			e.w.Newline()
 
-			for range level {
+			for range depth.Level {
 				e.w.Indent()
 			}
 
-			applied = level
+			if depth.InComment {
+				e.w.Write(" ")
+			}
+
+			applied = depth.Level
 			text = bytes.TrimLeft(text[nl+1:], " \t")
 		}
 	}

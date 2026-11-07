@@ -21,3 +21,13 @@
       second`;
         run(note);
 </script>
+
+<script>
+    /**
+     * Loads a page.
+     */
+    function load(page) {
+        /** Keeps
+         * its shape. */ return page;
+    }
+</script>
