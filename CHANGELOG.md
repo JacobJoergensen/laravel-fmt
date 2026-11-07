@@ -1,25 +1,27 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.9.0 (2026-11-07)
+* Updated Tailwind to 4.3.5
 * Improved multi-line Alpine attribute values to be spaced like single-line ones and indented by their bracket nesting
 * Improved `<script>` bodies without Blade blocks like `@if` to be indented by their bracket nesting
 * Improved `:` bindings like `:class` on plain HTML tags to be spaced like their `x-bind:` form
 * Improved `.html` files to keep a paragraph holding a custom element on one line, as Blade does
-* Updated Tailwind to 4.3.5
 * Fixed a Blade comment in an Alpine attribute being spaced apart
 * Fixed `const`, `let` and `var` losing their space before `[` in Alpine attributes
 * Fixed `-- >` in an Alpine attribute being joined into `-->`
 * Fixed strings in an Alpine attribute being spaced apart after a `/` that follows a property named like a keyword, such as `cache.delete / 2`
+* Fixed a `<script>` in a CRLF file with a backslash-continued string moving one level on the second format
 * Fixed Tailwind sorting treating a bare utility name like `row` or `text` as a class
 * Fixed Tailwind sorting moving `!p-3` and older utilities like `break-words` to the front
 * Fixed Tailwind sorting placing theme values like `bg-brand` before the built-in ones
-* Fixed a `<script>` in a CRLF file with a backslash-continued string moving one level on the second format
-* Fixed the error for a file that cannot be written saying `open` twice
 * Fixed `@apply` in a stylesheet without Tailwind v4 getting spaces after commas, which split classes like `shadow-[0_1px_rgba(0,0,0,0.1)]`
 * Fixed a custom property whose value holds `{}`, such as `--x: {{a}}`, failing to parse
 * Fixed an empty fallback like `var(--tw-blur,)` getting a space before its `)`
 * Fixed `.html` files getting a visible space at the edge of an inline or custom element
 * Fixed `.html` files adding spaces to a multi-line attribute value that ends in a line break
+* Fixed the error for a file that cannot be written saying `open` twice
 
 ## Version 0.8.0 (2026-11-03)
 * Added a `laravel-fmt/format` request to `laravel-fmt lsp` that formats the text it is sent, so editor plugins do not have to open the file
