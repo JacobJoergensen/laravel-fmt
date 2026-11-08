@@ -44,9 +44,10 @@ type File struct {
 // after the last member (or inside an otherwise-empty object) with no member to
 // attach to.
 type Object struct {
-	Range    Span
-	Members  []*Member
-	Dangling []Comment
+	Range         Span
+	Members       []*Member
+	Dangling      []Comment
+	TrailingComma bool
 }
 
 func (o *Object) Span() Span { return o.Range }
@@ -67,9 +68,10 @@ type Member struct {
 
 // Array is `[ elements ]`. Elements is in source order. Dangling mirrors Object.
 type Array struct {
-	Range    Span
-	Elements []*Element
-	Dangling []Comment
+	Range         Span
+	Elements      []*Element
+	Dangling      []Comment
+	TrailingComma bool
 }
 
 func (a *Array) Span() Span { return a.Range }

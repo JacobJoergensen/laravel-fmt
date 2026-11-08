@@ -109,6 +109,95 @@ func TestFormatKeepsContainerFlatUpToPrintWidth(t *testing.T) {
 	}
 }
 
+func TestFormatCountsTheCommaAfterAFlatValue(t *testing.T) {
+	cfg := config.Default()
+	cfg.PrintWidth = 20
+
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			"member value one column over with its comma",
+			"{\n  \"k\": [1, 2, 3, 45],\n  \"z\": 1\n}\n",
+			"{\n  \"k\": [\n    1,\n    2,\n    3,\n    45\n  ],\n  \"z\": 1\n}\n",
+		},
+		{
+			"last member value at print width",
+			"{\n  \"k\": [1, 2, 3, 45]\n}\n",
+			"{\n  \"k\": [1, 2, 3, 45]\n}\n",
+		},
+		{
+			"element one column over with its comma",
+			"[\n  [1, 2, 3, 4, 5678],\n  1\n]\n",
+			"[\n  [\n    1,\n    2,\n    3,\n    4,\n    5678\n  ],\n  1\n]\n",
+		},
+		{
+			"last element at print width",
+			"[\n  1,\n  [1, 2, 3, 4, 5678]\n]\n",
+			"[\n  1,\n  [1, 2, 3, 4, 5678]\n]\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, "test.json", []byte(tc.src), cfg)
+
+			if string(got) != tc.want {
+				t.Fatalf("Format output differs.\n=== got ===\n%s\n=== want ===\n%s", got, tc.want)
+			}
+
+			if twice := mustFormat(t, "test.json", got, cfg); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent: %q then %q", got, twice)
+			}
+		})
+	}
+}
+
+func TestFormatJSONCKeepsAnAuthoredTrailingCommaOnlyWhenItemsWrap(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			"before commented-out members",
+			"{\n  \"a\": 1,\n  \"b\": \"x\",\n  // \"c\": [],\n  // \"d\": \"none\"\n}\n",
+			"{\n  \"a\": 1,\n  \"b\": \"x\",\n  // \"c\": [],\n  // \"d\": \"none\"\n}\n",
+		},
+		{
+			"after the last element",
+			"[\n  1,\n  2,\n]\n",
+			"[\n  1,\n  2,\n]\n",
+		},
+		{
+			"before a same-line comment",
+			"{\n  \"a\": 1, // note\n}\n",
+			"{\n  \"a\": 1, // note\n}\n",
+		},
+		{
+			"dropped from a flat container",
+			"{\"a\": [1, 2,]}\n",
+			"{ \"a\": [1, 2] }\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, "app.jsonc", []byte(tc.src), config.Default())
+
+			if string(got) != tc.want {
+				t.Fatalf("Format output differs.\n=== got ===\n%s\n=== want ===\n%s", got, tc.want)
+			}
+
+			if twice := mustFormat(t, "app.jsonc", got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent: %q then %q", got, twice)
+			}
+		})
+	}
+}
+
 func TestFormatJSONCKeepsEveryComment(t *testing.T) {
 	tests := []struct {
 		name string
@@ -134,6 +223,16 @@ func TestFormatJSONCKeepsEveryComment(t *testing.T) {
 			"same-line comment after the root",
 			"{\"a\": 1} // why\n// own\n",
 			"{ \"a\": 1 } // why\n// own\n",
+		},
+		{
+			"own-line comment before a comma stays ahead of one after it",
+			"[\n  1\n  // before\n  , // after\n  2\n]\n",
+			"[\n  1,\n  // before\n  // after\n  2\n]\n",
+		},
+		{
+			"own-line comment before a comma stays ahead of one after it in an object",
+			"{\n  \"a\": 1\n  // before\n  , // after\n  \"b\": 2\n}\n",
+			"{\n  \"a\": 1,\n  // before\n  // after\n  \"b\": 2\n}\n",
 		},
 		{
 			"multi-line block comment follows its indent",

@@ -3,7 +3,12 @@
 ## Unreleased
 * Improved `laravel-fmt.json` to reject duplicate keys, wrong-case keys like `PrintWidth`, `null` and invalid UTF-8
 * Improved the error for a wrong value in `laravel-fmt.json`, `pint.json` or `mago.json` to name its key, like `preset must be a string`
+* Improved `devcontainer.json` and `.vscode/*.json` to be formatted as JSONC
+* Improved JSONC to keep a trailing comma in a multi-line list
 * Fixed `pint.json`, `composer.json`, `package.json` and `mago.json` keys matching in any case, like `"Preset"` for `preset`
+* Fixed JSON that is not UTF-8 being formatted instead of reported
+* Fixed a flat JSON array or object before a comma going one column past `printWidth`
+* Fixed JSONC comments around a comma swapping places
 
 ## Version 0.9.0 (2026-11-07)
 * Updated Tailwind to 4.3.5

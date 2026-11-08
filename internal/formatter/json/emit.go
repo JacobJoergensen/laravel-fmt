@@ -27,7 +27,7 @@ func emitFile(w *formatter.Writer, file *parser.File) {
 		root := file.Root.Span()
 		emitVerbatimRange(w, file.Src, root.Start.Offset, root.End.Offset)
 	} else {
-		emitValue(w, file.Src, file.Root)
+		emitValue(w, file.Src, file.Root, 0)
 	}
 
 	emitTrailingComment(w, file.Src, file.RootTrailing)
@@ -40,12 +40,16 @@ func emitFile(w *formatter.Writer, file *parser.File) {
 	w.Newline()
 }
 
-func emitValue(w *formatter.Writer, src []byte, v parser.Value) {
+// suffix is the width written right after v on its line, a comma, which v's
+// flat form must leave room for. It is passed, not reserved with WithTrailing:
+// a line comment after a member's colon starts a new line before v is measured,
+// and Newline clears a reservation.
+func emitValue(w *formatter.Writer, src []byte, v parser.Value, suffix int) {
 	switch n := v.(type) {
 	case *parser.Object:
-		emitObject(w, src, n)
+		emitObject(w, src, n, suffix)
 	case *parser.Array:
-		emitArray(w, src, n)
+		emitArray(w, src, n, suffix)
 	case *parser.String:
 		emitString(w, n)
 	case *parser.Number:
@@ -61,25 +65,25 @@ func emitValue(w *formatter.Writer, src []byte, v parser.Value) {
 	}
 }
 
-func emitObject(w *formatter.Writer, src []byte, o *parser.Object) {
-	emitContainer(w, src, "{", "}", " ", o.Members, o.Dangling, fitsFlat(w, o),
+func emitObject(w *formatter.Writer, src []byte, o *parser.Object, suffix int) {
+	emitContainer(w, src, "{", "}", " ", o.Members, o.Dangling, o.TrailingComma, fitsFlat(w, o, suffix),
 		func(m *parser.Member) []parser.Comment { return m.Leading },
 		func(m *parser.Member) *parser.Comment { return m.Trailing },
 		func(m *parser.Member) bool { return m.BlankBefore },
-		func(m *parser.Member) {
+		func(m *parser.Member, itemSuffix int) {
 			if hasIgnoreDirective(m.Leading) {
 				emitVerbatimRange(w, src, m.Key.Range.Start.Offset, m.Value.Span().End.Offset)
 
 				return
 			}
 
-			emitMember(w, src, m)
+			emitMember(w, src, m, itemSuffix)
 		})
 }
 
 // emitMember puts the value on a new line after a line comment that follows
 // the colon, since the comment would otherwise swallow it.
-func emitMember(w *formatter.Writer, src []byte, m *parser.Member) {
+func emitMember(w *formatter.Writer, src []byte, m *parser.Member, suffix int) {
 	emitString(w, m.Key)
 	w.Write(":")
 
@@ -102,15 +106,15 @@ func emitMember(w *formatter.Writer, src []byte, m *parser.Member) {
 		w.Write(" ")
 	}
 
-	emitValue(w, src, m.Value)
+	emitValue(w, src, m.Value, suffix)
 }
 
-func emitArray(w *formatter.Writer, src []byte, a *parser.Array) {
-	emitContainer(w, src, "[", "]", "", a.Elements, a.Dangling, fitsFlat(w, a),
+func emitArray(w *formatter.Writer, src []byte, a *parser.Array, suffix int) {
+	emitContainer(w, src, "[", "]", "", a.Elements, a.Dangling, a.TrailingComma, fitsFlat(w, a, suffix),
 		func(e *parser.Element) []parser.Comment { return e.Leading },
 		func(e *parser.Element) *parser.Comment { return e.Trailing },
 		func(e *parser.Element) bool { return e.BlankBefore },
-		func(e *parser.Element) {
+		func(e *parser.Element, itemSuffix int) {
 			if hasIgnoreDirective(e.Leading) {
 				value := e.Value.Span()
 				emitVerbatimRange(w, src, value.Start.Offset, value.End.Offset)
@@ -118,23 +122,26 @@ func emitArray(w *formatter.Writer, src []byte, a *parser.Array) {
 				return
 			}
 
-			emitValue(w, src, e.Value)
+			emitValue(w, src, e.Value, itemSuffix)
 		})
 }
 
 // emitContainer's flat layout writes no comments, so flatFits must be false
-// whenever an item or the dangling run carries one.
+// whenever an item or the dangling run carries one. A JSONC trailing comma is
+// kept in the multi-line layout: it lets a commented-out item below be
+// uncommented without touching the line above.
 func emitContainer[T any](
 	w *formatter.Writer,
 	src []byte,
 	open, closer, flatPad string,
 	items []T,
 	dangling []parser.Comment,
+	trailingComma bool,
 	flatFits bool,
 	leading func(T) []parser.Comment,
 	trailing func(T) *parser.Comment,
 	blankBefore func(T) bool,
-	body func(T),
+	body func(item T, suffix int),
 ) {
 	if len(items) == 0 && len(dangling) == 0 {
 		w.Write(open + closer)
@@ -150,7 +157,7 @@ func emitContainer[T any](
 				w.Write(", ")
 			}
 
-			body(it)
+			body(it, 0)
 		}
 
 		w.Write(flatPad + closer)
@@ -179,10 +186,12 @@ func emitContainer[T any](
 		}
 
 		line(blankBefore(it))
-		body(it)
 
-		if i < len(items)-1 {
+		if i < len(items)-1 || trailingComma {
+			body(it, len(","))
 			w.Write(",")
+		} else {
+			body(it, 0)
 		}
 
 		emitTrailingComment(w, src, trailing(it))
@@ -203,8 +212,8 @@ const noFlat = -1
 // fitsFlat reports whether v's flat form fits on the current line. It measures
 // rather than emitting speculatively: a nested container probed inside its
 // parent's probe repeats that emission at every level, which costs 2^depth.
-func fitsFlat(w *formatter.Writer, v parser.Value) bool {
-	return flatWidth(v, w.Remaining()) != noFlat
+func fitsFlat(w *formatter.Writer, v parser.Value, suffix int) bool {
+	return flatWidth(v, w.Remaining()-suffix) != noFlat
 }
 
 // flatWidth returns v's flat width, or noFlat when it cannot go flat. It stops

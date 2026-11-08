@@ -52,6 +52,44 @@ func TestConventionWithoutExplicitIndent(t *testing.T) {
 	}
 }
 
+func TestFormatReadsCommentsOnlyWhereTheFilesReaderDoes(t *testing.T) {
+	src := []byte("{\n  // note\n  \"a\": 1\n}\n")
+
+	cases := []struct {
+		filename string
+		jsonc    bool
+	}{
+		{"app.jsonc", true},
+		{"tsconfig.json", true},
+		{"jsconfig.json", true},
+		{".devcontainer/devcontainer.json", true},
+		{".devcontainer.json", true},
+		{".vscode/settings.json", true},
+		{".VSCode/launch.json", true},
+		{"composer.json", false},
+		{"settings.json", false},
+		{"vscode/settings.json", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.filename, func(t *testing.T) {
+			out, err := Format(tc.filename, src, config.Default())
+
+			if !tc.jsonc {
+				if err == nil {
+					t.Fatalf("Format = %q, want an error: the file's reader rejects comments", out)
+				}
+
+				return
+			}
+
+			if err != nil || !bytes.Equal(out, src) {
+				t.Fatalf("Format = %q, %v, want the comment kept", out, err)
+			}
+		})
+	}
+}
+
 func TestEmitScriptBodyRejectsWhatIsNotStrictJSON(t *testing.T) {
 	cases := []struct{ name, src string }{
 		{"comment", "{\n  // a\n  \"a\": 1\n}"},

@@ -198,6 +198,9 @@ func TestParseRejectsInvalidSyntax(t *testing.T) {
 		{"bad true", `tru`, false},
 		{"bad null", `nul`, false},
 		{"unterminated block comment", `/* open`, true},
+		{"byte that is not UTF-8 in a string", "\"caf\xe9\"", false},
+		{"byte that is not UTF-8 in a line comment", "// caf\xe9\n{}", true},
+		{"byte that is not UTF-8 in a block comment", "/* caf\xe9 */ {}", true},
 	}
 
 	for _, tc := range cases {
@@ -213,6 +216,14 @@ func TestParseRejectsInvalidSyntax(t *testing.T) {
 				t.Fatalf("expected at least one error, got none")
 			}
 		})
+	}
+}
+
+func TestParseReportsAFileThatIsNotUTF8Once(t *testing.T) {
+	_, errs := ParseJSONC([]byte("// caf\xe9\n[\"\xe9\xe9\", \"\xe9\"]"))
+
+	if len(errs) != 1 || errs[0].Pos.Line != 1 || errs[0].Pos.Column != 7 {
+		t.Fatalf("errors = %+v, want one at the first byte, 1:7", errs)
 	}
 }
 

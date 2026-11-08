@@ -15,6 +15,7 @@ package json
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
@@ -67,9 +68,11 @@ func EmitScriptBody(w *formatter.Writer, src []byte) bool {
 	return true
 }
 
-// isJSONCFilename reports whether filename is a JSONC document: a `.jsonc` file,
-// or a `tsconfig.*`/`jsconfig.*` config (which allow comments and trailing commas
-// by convention). Every other `.json` is parsed as strict RFC 8259 JSON.
+var jsoncFilenames = []string{"devcontainer.json", ".devcontainer.json"}
+
+// isJSONCFilename reports whether filename is read only by a JSONC reader:
+// TypeScript's for tsconfig.* and jsconfig.*, and VS Code's for its .vscode
+// files and a dev container, which Laravel Sail writes with comments.
 func isJSONCFilename(filename string) bool {
 	base := strings.ToLower(filepath.Base(filename))
 
@@ -79,6 +82,13 @@ func isJSONCFilename(filename string) bool {
 
 	if !strings.HasSuffix(base, ".json") {
 		return false
+	}
+
+	dir := filepath.Dir(filename)
+	folder := filepath.Base(dir)
+
+	if slices.Contains(jsoncFilenames, base) || strings.EqualFold(folder, ".vscode") {
+		return true
 	}
 
 	return strings.HasPrefix(base, "tsconfig.") || strings.HasPrefix(base, "jsconfig.")

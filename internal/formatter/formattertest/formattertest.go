@@ -97,9 +97,16 @@ func AddFuzzSeeds(f *testing.F, ext string) {
 func CheckIdempotent(t *testing.T, format func([]byte) ([]byte, error), src []byte) {
 	t.Helper()
 
+	_, _ = FormatIdempotent(t, format, src)
+}
+
+// FormatIdempotent is CheckIdempotent that also returns the first format's result.
+func FormatIdempotent(t *testing.T, format func([]byte) ([]byte, error), src []byte) ([]byte, error) {
+	t.Helper()
+
 	out, err := format(src)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	out2, err := format(out)
@@ -110,6 +117,8 @@ func CheckIdempotent(t *testing.T, format func([]byte) ([]byte, error), src []by
 	if diff := FirstDiff(out, out2); diff >= 0 {
 		t.Fatalf("not idempotent at offset %d.\n=== first ===\n%s\n=== second ===\n%s", diff, out, out2)
 	}
+
+	return out, nil
 }
 
 // SpanCoverage records which source bytes are claimed by parse tree spans.

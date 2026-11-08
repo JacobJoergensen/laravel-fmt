@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"slices"
+	"unicode/utf8"
 
 	parserpkg "github.com/JacobJoergensen/laravel-fmt/internal/parser"
 )
@@ -11,9 +12,10 @@ import (
 type jsonParser struct {
 	parserpkg.Cursor
 
-	errors        []Error
-	depth         int
-	depthExceeded bool
+	errors              []Error
+	depth               int
+	depthExceeded       bool
+	reportedInvalidUTF8 bool
 
 	// jsonc enables comments and trailing commas (tsconfig.json and friends).
 	// Strict JSON keeps every comment/trailing-comma path inert.
@@ -34,6 +36,44 @@ func (p *jsonParser) addError(pos Position, msg string) {
 	}
 
 	p.errors = append(p.errors, Error{Pos: pos, Msg: msg})
+}
+
+// advanceChar consumes one character of a string or comment, the only places
+// JSON text holds more than ASCII. RFC 8259 requires that text to be UTF-8.
+func (p *jsonParser) advanceChar() {
+	c := p.Peek()
+	if c < utf8.RuneSelf {
+		p.Advance()
+
+		return
+	}
+
+	// One error says the file is not UTF-8; a line per byte of a Latin-1 file
+	// would bury it.
+	r, size := utf8.DecodeRune(p.Src[p.Pos.Offset:])
+	if r == utf8.RuneError && size == 1 && !p.reportedInvalidUTF8 {
+		p.addError(p.Pos, fmt.Sprintf("invalid UTF-8 byte %#02x", c))
+		p.reportedInvalidUTF8 = true
+	}
+
+	p.AdvanceN(size)
+}
+
+// A comment written before the comma comes first, so one after it only
+// stands beside the item when there is none.
+func (p *jsonParser) commaComment(trailing **Comment, mid []Comment) []Comment {
+	c := p.sameLineComment()
+
+	switch {
+	case c == nil:
+		return mid
+	case *trailing == nil && len(mid) == 0:
+		*trailing = c
+
+		return mid
+	default:
+		return append(mid, *c)
+	}
 }
 
 func (p *jsonParser) exceedDepth() {
@@ -75,7 +115,7 @@ func (p *jsonParser) scanComment() (Comment, bool) {
 		start := p.Pos
 
 		for !p.Eof() && p.Peek() != '\n' {
-			p.Advance()
+			p.advanceChar()
 		}
 
 		text := bytes.TrimRight(p.Src[start.Offset:p.Pos.Offset], " \t\r")
@@ -86,7 +126,7 @@ func (p *jsonParser) scanComment() (Comment, bool) {
 		p.AdvanceN(2)
 
 		for !p.Eof() && !p.StartsWith("*/") {
-			p.Advance()
+			p.advanceChar()
 		}
 
 		if p.StartsWith("*/") {
@@ -252,13 +292,7 @@ func (p *jsonParser) parseObject() *Object {
 		case ',':
 			p.Advance()
 
-			if tc := p.sameLineComment(); tc != nil {
-				if member.Trailing == nil {
-					member.Trailing = tc
-				} else {
-					mid = append(mid, *tc)
-				}
-			}
+			mid = p.commaComment(&member.Trailing, mid)
 
 			next, nextBlank := p.leadingComments()
 			lead, blank = slices.Concat(mid, next), nextBlank
@@ -268,6 +302,7 @@ func (p *jsonParser) parseObject() *Object {
 					p.addError(p.Pos, "trailing comma not permitted in object")
 				}
 
+				obj.TrailingComma = true
 				obj.Dangling = lead
 				p.Advance()
 				obj.Range = Span{Start: start, End: p.Pos}
@@ -324,13 +359,7 @@ func (p *jsonParser) parseArray() *Array {
 		case ',':
 			p.Advance()
 
-			if tc := p.sameLineComment(); tc != nil {
-				if element.Trailing == nil {
-					element.Trailing = tc
-				} else {
-					mid = append(mid, *tc)
-				}
-			}
+			mid = p.commaComment(&element.Trailing, mid)
 
 			next, nextBlank := p.leadingComments()
 			lead, blank = slices.Concat(mid, next), nextBlank
@@ -340,6 +369,7 @@ func (p *jsonParser) parseArray() *Array {
 					p.addError(p.Pos, "trailing comma not permitted in array")
 				}
 
+				arr.TrailingComma = true
 				arr.Dangling = lead
 				p.Advance()
 				arr.Range = Span{Start: start, End: p.Pos}
@@ -397,6 +427,8 @@ func (p *jsonParser) parseString() *String {
 		case c < 0x20:
 			p.addError(p.Pos, fmt.Sprintf("unescaped control character %#02x in string", c))
 			p.Advance()
+		case c >= utf8.RuneSelf:
+			p.advanceChar()
 		default:
 			p.Advance()
 		}
