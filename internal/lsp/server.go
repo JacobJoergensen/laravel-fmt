@@ -3,7 +3,8 @@
 package lsp
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -93,7 +94,7 @@ func (s *server) replyMalformed(req *request, readErr error) error {
 		code = codeParseError
 	}
 
-	id := json.RawMessage("null")
+	id := jsontext.Value("null")
 	if req != nil && !req.isNotification() {
 		id = req.ID
 	}
@@ -147,8 +148,8 @@ func (s *server) handleRequest(req *request) error {
 		s.shutdownRequested = true
 
 		// JSON-RPC requires result on success; shutdown's is null, so send it
-		// explicitly rather than letting omitempty drop the field.
-		return s.conn.reply(req.ID, json.RawMessage("null"))
+		// as a JSON null rather than a nil any, which omitzero drops.
+		return s.conn.reply(req.ID, jsontext.Value("null"))
 	case "textDocument/formatting":
 		return s.handleFormatting(req)
 	case "textDocument/rangeFormatting":
@@ -325,7 +326,7 @@ func (s *server) handleFormat(req *request) error {
 	return s.conn.reply(req.ID, formatReply{Edits: edits, EndOfLine: res.endOfLine})
 }
 
-func (s *server) replyEdits(id json.RawMessage, edits []TextEdit, formatErr error) error {
+func (s *server) replyEdits(id jsontext.Value, edits []TextEdit, formatErr error) error {
 	if formatErr != nil {
 		return s.replyFailure(id, []TextEdit{}, formatErr)
 	}
@@ -339,7 +340,7 @@ func (s *server) replyEdits(id json.RawMessage, edits []TextEdit, formatErr erro
 // so a failure the user has to fix is shown as a message instead. A document
 // that does not parse is usually mid-edit and already marked by the editor,
 // so it only goes to the server log.
-func (s *server) replyFailure(id json.RawMessage, untouched any, formatErr error) error {
+func (s *server) replyFailure(id jsontext.Value, untouched any, formatErr error) error {
 	switch {
 	case errors.Is(formatErr, errUntouched):
 	case errors.Is(formatErr, errUnparseable):

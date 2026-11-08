@@ -1,7 +1,9 @@
 package detector
 
 import (
-	"encoding/json"
+	"bytes"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"reflect"
 	"strings"
 	"testing"
@@ -221,6 +223,7 @@ func TestDetectPintParsesPreset(t *testing.T) {
 		{"symfony preset", `{"preset":"symfony"}`, "symfony"},
 		{"per preset", `{"preset":"per"}`, "per"},
 		{"no preset", `{}`, "laravel"},
+		{"key in another case is not the key, as json_decode reads it", `{"Preset":"psr12"}`, "laravel"},
 	}
 
 	for _, tc := range cases {
@@ -372,8 +375,115 @@ func TestDetectPintMalformedJSONErrors(t *testing.T) {
 
 	_, _, err := detectPint(dir)
 
-	if err == nil || !strings.Contains(err.Error(), "pint.json:1:2: invalid character 'n'") {
-		t.Fatalf("detectPint err = %v, want the malformed byte located as pint.json:1:2", err)
+	if err == nil || !strings.Contains(err.Error(), "pint.json:1:3: invalid character 'o'") {
+		t.Fatalf("detectPint err = %v, want the malformed byte located as pint.json:1:3", err)
+	}
+}
+
+func TestDetectPintNamesTheKeyOfAValueOfTheWrongType(t *testing.T) {
+	dir := t.TempDir()
+	seedFileAt(t, dir, "pint.json", `{"preset": 12}`)
+
+	_, _, err := detectPint(dir)
+	if err == nil || !strings.Contains(err.Error(), "pint.json: preset must be a string, not a number") {
+		t.Fatalf("detectPint err = %v, want it to name preset and the expected type", err)
+	}
+}
+
+func TestLastKeyWinsKeepsOnlyTheLastValueOfARepeatedKey(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"scalar", `{"a": 1, "a": 2}`, `{"a": 2}`},
+		{"value of another type", `{"a": "x", "a": {"b": 1}}`, `{"a": {"b": 1}}`},
+		{"object replaced, not merged", `{"a": {"b": 1}, "a": {"c": 2}}`, `{"a": {"c": 2}}`},
+		{"nested object", `{"a": {"b": 1, "b": 2}}`, `{"a": {"b": 2}}`},
+		{"object in a list", `[{"a": 1, "a": 2}]`, `[{"a": 2}]`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kept, err := lastKeyWins([]byte(tc.raw))
+			if err != nil {
+				t.Fatalf("lastKeyWins: %v", err)
+			}
+
+			var got, want any
+			if err := json.Unmarshal(kept, &got); err != nil {
+				t.Fatalf("decode %s: %v", kept, err)
+			}
+
+			if err := json.Unmarshal([]byte(tc.want), &want); err != nil {
+				t.Fatalf("decode want: %v", err)
+			}
+
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("lastKeyWins(%s) = %s, want %s", tc.raw, kept, tc.want)
+			}
+		})
+	}
+}
+
+func TestLastKeyWinsReturnsJSONWithoutARepeatedKeyAsWritten(t *testing.T) {
+	raw := []byte("{ \"a\" : [1,  2] }")
+
+	kept, err := lastKeyWins(raw)
+	if err != nil {
+		t.Fatalf("lastKeyWins: %v", err)
+	}
+
+	if !bytes.Equal(kept, raw) {
+		t.Fatalf("lastKeyWins = %s, want the input unchanged", kept)
+	}
+}
+
+func TestDetectPintKeepsTheLastOfAKeyWrittenTwice(t *testing.T) {
+	cases := []struct {
+		name  string
+		files map[string]string
+		check func(p Pint) bool
+	}{
+		{
+			name:  "in pint.json",
+			files: map[string]string{"pint.json": `{"preset": "psr12", "preset": "per"}`},
+			check: func(p Pint) bool { return p.Preset == "per" },
+		},
+		{
+			name: "in a file that extends",
+			files: map[string]string{
+				"pint.json": `{"extend": "base.json", "preset": "psr12", "preset": "per"}`,
+				"base.json": `{}`,
+			},
+			check: func(p Pint) bool { return p.Preset == "per" },
+		},
+		{
+			name: "in the extended file",
+			files: map[string]string{
+				"pint.json": `{"extend": "base.json"}`,
+				"base.json": `{"preset": "psr12", "preset": "per"}`,
+			},
+			check: func(p Pint) bool { return p.Preset == "per" },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for rel, body := range tc.files {
+				seedFileAt(t, dir, rel, body)
+			}
+
+			pint, _, err := detectPint(dir)
+			if err != nil {
+				t.Fatalf("detectPint: %v", err)
+			}
+
+			if !tc.check(pint) {
+				t.Fatalf("detectPint = %+v, want the last of the key written twice", pint)
+			}
+		})
 	}
 }
 
@@ -457,7 +567,15 @@ func TestDetectPintRejectsBrokenExtend(t *testing.T) {
 		{
 			name:  "extend is not a string",
 			files: map[string]string{"pint.json": `{"extend": ["base.json"]}`},
-			want:  "extend of type string",
+			want:  "pint.json: extend must be a string, not a list",
+		},
+		{
+			name: "extended preset is not a string",
+			files: map[string]string{
+				"pint.json": `{"extend": "base.json"}`,
+				"base.json": `{"preset": ["laravel"]}`,
+			},
+			want: "base.json: preset must be a string, not a list",
 		},
 	}
 
@@ -863,7 +981,7 @@ func TestApplyPintDisabledRuleSwitchesItsBehaviorOff(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var rules map[string]json.RawMessage
+			var rules map[string]jsontext.Value
 			if err := json.Unmarshal([]byte(tc.rules), &rules); err != nil {
 				t.Fatalf("rules: %v", err)
 			}
@@ -1263,6 +1381,7 @@ func TestDetectPintFromAComposerRequirementWithoutPintJSON(t *testing.T) {
 		{"pint.json wins", `{"require-dev":{"laravel/pint":"^1.24"}}`, `{"preset":"psr12"}`, true, "psr12"},
 		{"not required", `{"require":{"laravel/framework":"^13.0"}}`, "", false, ""},
 		{"unparseable composer.json", `{"require-dev":`, "", false, ""},
+		{"key written twice", `{"name":"a","name":"b","require-dev":{"laravel/pint":"^1.24"}}`, "", true, "laravel"},
 	}
 
 	for _, tc := range cases {

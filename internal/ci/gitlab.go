@@ -3,7 +3,8 @@ package ci
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -75,11 +76,14 @@ func WriteGitLabReport(w io.Writer, s Summary, workDir, projectDir string) error
 		add(gitLabCheckUnformatted, gitLabSeverityStyle, c.Path, c.Line, UnformattedMessage)
 	}
 
-	enc := json.NewEncoder(w)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
+	// A path or message can hold bytes that are not UTF-8; one must not cost
+	// the whole report.
+	data, err := json.Marshal(issues, jsontext.WithIndent("  "), jsontext.AllowInvalidUTF8(true))
+	if err != nil {
+		return fmt.Errorf("encode GitLab report: %w", err)
+	}
 
-	if err := enc.Encode(issues); err != nil {
+	if _, err := w.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("write GitLab report: %w", err)
 	}
 

@@ -100,6 +100,30 @@ return (new PhpCsFixer\Config())->setRules([
 	}
 }
 
+func TestDetectPhpCsFixerKeepsAConfigWithBytesThatAreNotUTF8(t *testing.T) {
+	cases := map[string]string{
+		"in a value":       "'header_comment' => ['header' => 'caf\xe9'],",
+		"in an option key": "'header_comment' => ['caf\xe9' => 'x'],",
+	}
+
+	for name, rule := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			seedFileAt(t, dir, ".php-cs-fixer.dist.php", "<?php\nreturn (new PhpCsFixer\\Config())->setRules([\n"+
+				"    'concat_space' => ['spacing' => 'one'],\n    "+rule+"\n]);")
+
+			pint, found, err := detectPhpCsFixer(dir)
+			if err != nil {
+				t.Fatalf("detectPhpCsFixer: %v", err)
+			}
+
+			if !found || pint.ConcatSpace == nil || pint.ConcatSpace.Spacing != pintSpacingOne {
+				t.Fatalf("found = %v, ConcatSpace = %+v, want the config adopted with spacing=one", found, pint.ConcatSpace)
+			}
+		})
+	}
+}
+
 func TestDetectPhpCsFixerBailsToDefaults(t *testing.T) {
 	cases := []struct {
 		name string

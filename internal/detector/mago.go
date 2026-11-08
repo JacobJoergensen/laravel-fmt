@@ -1,7 +1,7 @@
 package detector
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"maps"
 	"os"
@@ -199,8 +199,13 @@ func readMagoFile(path string) (map[string]any, error) {
 	case ".yaml", ".yml":
 		err = yaml.Unmarshal(raw, &doc)
 	case ".json":
-		if err := json.Unmarshal(raw, &doc); err != nil {
+		kept, err := lastKeyWins(raw)
+		if err != nil {
 			return nil, config.ParseJSONError(path, raw, err)
+		}
+
+		if err := json.Unmarshal(kept, &doc); err != nil {
+			return nil, config.ParseJSONError(path, kept, err)
 		}
 	default:
 		return nil, fmt.Errorf("read %s: a Mago config must be TOML, YAML or JSON", path)

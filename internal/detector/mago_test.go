@@ -167,6 +167,11 @@ func TestDetectMagoReadsTheProjectFileAndItsExtends(t *testing.T) {
 			want: 90,
 		},
 		{
+			name:  "a key written twice in mago.json keeps the last, as serde_json does",
+			files: map[string]string{"mago.json": `{"formatter": {"print-width": 80, "print-width": 90}}`},
+			want:  90,
+		},
+		{
 			name: "mago.toml beats mago.dist.toml",
 			files: map[string]string{
 				"mago.toml":      "[formatter]\nprint-width = 90\n",

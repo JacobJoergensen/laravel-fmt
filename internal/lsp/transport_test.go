@@ -2,7 +2,7 @@ package lsp
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -73,7 +73,7 @@ func TestConnReplyIsFramedAndReadable(t *testing.T) {
 	var out bytes.Buffer
 	c := newConn(strings.NewReader(""), &out)
 
-	if err := c.reply(json.RawMessage("7"), []TextEdit{{NewText: "x"}}); err != nil {
+	if err := c.reply(jsontext.Value("7"), []TextEdit{{NewText: "x"}}); err != nil {
 		t.Fatalf("reply: %v", err)
 	}
 

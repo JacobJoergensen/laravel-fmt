@@ -2,13 +2,15 @@ package config
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -53,12 +55,9 @@ func LoadFile(base *File, path string) (Loaded, error) {
 		return Loaded{}, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	// Runs before the typed decode: json.Unmarshal reports every malformed file
-	// (truncated, empty, trailing data) as a positioned SyntaxError, where the
-	// Decoder gives a bare "unexpected EOF" and accepts trailing data.
 	keys, err := extractTopLevelKeys(raw)
 	if err != nil {
-		return Loaded{}, decodeError(path, raw, err)
+		return Loaded{}, ParseJSONError(path, raw, err)
 	}
 
 	if err := checkRenamedKeys(raw, path); err != nil {
@@ -71,11 +70,8 @@ func LoadFile(base *File, path string) (Loaded, error) {
 	// overwrites, so the built-ins must be cloned before the decode.
 	builtInIgnore := slices.Clone(base.Ignore)
 
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-
-	if err := dec.Decode(&cfg); err != nil {
-		return Loaded{}, decodeError(path, raw, err)
+	if err := json.Unmarshal(raw, &cfg, json.RejectUnknownMembers(true), rejectNull); err != nil {
+		return Loaded{}, ParseJSONError(path, raw, err)
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -89,42 +85,58 @@ func LoadFile(base *File, path string) (Loaded, error) {
 	return Loaded{File: cfg, UserKeys: keys}, nil
 }
 
-const jsonTruncatedMessage = "unexpected end of JSON input"
+// The schema never allows null, and encoding/json would decode it as the
+// zero value: `"sortUses": null` would switch sorting off without a word.
+var rejectNull = json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext.Decoder, target any) error {
+	if dec.PeekKind() != jsontext.KindNull {
+		return errors.ErrUnsupported
+	}
 
-// ParseJSONError reports a failed decode of the JSON at path, locating a syntax
-// error as path:line:column in bytes.
+	return &json.SemanticError{JSONKind: jsontext.KindNull, GoType: reflect.TypeOf(target).Elem()}
+}))
+
+// ParseJSONError reports a failed decode of the JSON at path: a value of the
+// wrong type by its key, and a syntax error as path:line:column in bytes.
 func ParseJSONError(path string, raw []byte, err error) error {
-	syntaxErr, ok := errors.AsType[*json.SyntaxError](err)
-	if !ok {
-		return fmt.Errorf("parse %s: %w", path, err)
+	semanticErr, ok := errors.AsType[*json.SemanticError](err)
+	if !ok || semanticErr.GoType == nil {
+		return syntaxError(path, raw, err)
 	}
 
-	// Offset counts the offending byte itself, except for a truncated file,
-	// where it is len(raw) too and the error sits past the last byte. Only the
-	// message tells the two apart (`{"a":1}}` ends on an offending byte).
-	before := raw[:max(syntaxErr.Offset-1, 0)]
-	if syntaxErr.Error() == jsonTruncatedMessage {
-		before = raw
-	}
+	tokens := slices.Collect(semanticErr.JSONPointer.Tokens())
 
-	line := bytes.Count(before, []byte("\n")) + 1
-	column := len(before) - (bytes.LastIndexByte(before, '\n') + 1) + 1
-
-	return fmt.Errorf("%s:%d:%d: %w", path, line, column, syntaxErr)
-}
-
-func decodeError(path string, raw []byte, err error) error {
-	typeErr, ok := errors.AsType[*json.UnmarshalTypeError](err)
-	if !ok {
-		return ParseJSONError(path, raw, err)
-	}
-
-	key := typeErr.Field
+	key := strings.Join(tokens, ".")
 	if key == "" {
 		key = "the config"
 	}
 
-	return fmt.Errorf("%s: %s must be %s, not %s", path, key, describeGoType(typeErr.Type), describeJSONValue(typeErr.Value))
+	if errors.Is(semanticErr.Err, json.ErrUnknownName) {
+		return fmt.Errorf("%s: unknown key %q", path, key)
+	}
+
+	if errors.Is(semanticErr.Err, strconv.ErrRange) {
+		return fmt.Errorf("%s: %s is out of range: %s", path, key, semanticErr.JSONValue)
+	}
+
+	return fmt.Errorf("%s: %s must be %s, not %s", path, key, describeGoType(semanticErr.GoType), describeJSONValue(semanticErr.JSONKind, semanticErr.JSONValue))
+}
+
+func syntaxError(path string, raw []byte, err error) error {
+	syntaxErr, ok := errors.AsType[*jsontext.SyntacticError](err)
+	if !ok {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+
+	before := raw[:min(syntaxErr.ByteOffset, int64(len(raw)))]
+	line := bytes.Count(before, []byte("\n")) + 1
+	column := len(before) - (bytes.LastIndexByte(before, '\n') + 1) + 1
+
+	// The cause alone, since the full message repeats the offset as a byte count.
+	if errors.Is(syntaxErr.Err, jsontext.ErrDuplicateName) {
+		return fmt.Errorf("%s:%d:%d: %w %q", path, line, column, syntaxErr.Err, syntaxErr.JSONPointer.LastToken())
+	}
+
+	return fmt.Errorf("%s:%d:%d: %w", path, line, column, syntaxErr.Err)
 }
 
 // Decoding a list onto the slice would replace it, so one entry of the user's
@@ -144,6 +156,10 @@ func mergeIgnore(builtIn, user []string) []string {
 }
 
 func describeGoType(t reflect.Type) string {
+	if t == reflect.TypeFor[StringOrSlice]() {
+		return "a string or a list of strings"
+	}
+
 	switch t.Kind() {
 	case reflect.Slice, reflect.Array:
 		if t.Elem().Kind() == reflect.String {
@@ -167,33 +183,34 @@ func describeGoType(t reflect.Type) string {
 	}
 }
 
-// encoding/json reports a fraction in an integer field as "number 1.5".
-func describeJSONValue(value string) string {
-	switch value {
-	case "bool":
+// encoding/json keeps the number itself only when the number is the fault, as
+// for a fraction in a whole-number field.
+func describeJSONValue(kind jsontext.Kind, value jsontext.Value) string {
+	switch kind {
+	case jsontext.KindTrue, jsontext.KindFalse:
 		return "a boolean"
-	case "string":
+	case jsontext.KindString:
 		return "a string"
-	case "array":
+	case jsontext.KindBeginArray:
 		return "a list"
-	case "object":
+	case jsontext.KindBeginObject:
 		return "an object"
-	case "number":
+	case jsontext.KindNumber:
+		if len(value) > 0 {
+			return string(value)
+		}
+
 		return "a number"
+	default:
+		return kind.String()
 	}
-
-	if number, ok := strings.CutPrefix(value, "number "); ok {
-		return number
-	}
-
-	return value
 }
 
 // checkRenamedKeys turns a removed-but-recognized key into a migration hint
-// instead of the generic unknown-field error DisallowUnknownFields would give.
+// instead of the generic unknown-key error.
 func checkRenamedKeys(raw []byte, path string) error {
 	var probe struct {
-		PHP map[string]json.RawMessage `json:"php"`
+		PHP map[string]jsontext.Value `json:"php"`
 	}
 
 	if err := json.Unmarshal(raw, &probe); err != nil {
@@ -210,7 +227,7 @@ func checkRenamedKeys(raw []byte, path string) error {
 // A second, generic decode is needed because the typed struct can't tell an
 // absent key from an explicit zero value.
 func extractTopLevelKeys(raw []byte) (map[string]bool, error) {
-	var generic map[string]json.RawMessage
+	var generic map[string]jsontext.Value
 
 	if err := json.Unmarshal(raw, &generic); err != nil {
 		return nil, fmt.Errorf("unmarshal json: %w", err)
@@ -225,7 +242,7 @@ func extractTopLevelKeys(raw []byte) (map[string]bool, error) {
 	// The per-file Prettier overlay adopts proseWrap, which lives under
 	// "markdown"; record it so an override cannot clobber a value the user set.
 	if rawMarkdown, ok := generic["markdown"]; ok {
-		var markdown map[string]json.RawMessage
+		var markdown map[string]jsontext.Value
 
 		if err := json.Unmarshal(rawMarkdown, &markdown); err == nil {
 			if _, ok := markdown["proseWrap"]; ok {

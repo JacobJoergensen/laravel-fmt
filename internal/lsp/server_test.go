@@ -3,7 +3,8 @@ package lsp
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/dispatch"
@@ -33,9 +35,9 @@ func pathToURI(path string) string {
 }
 
 type wireResponse struct {
-	ID     json.RawMessage `json:"id"`
-	Result json.RawMessage `json:"result"`
-	Error  *responseError  `json:"error"`
+	ID     jsontext.Value `json:"id"`
+	Result jsontext.Value `json:"result"`
+	Error  *responseError `json:"error"`
 }
 
 func readFrame(r *bufio.Reader) ([]byte, error) {
@@ -295,6 +297,7 @@ func TestServeAnswersAMalformedMessageAndKeepsServing(t *testing.T) {
 		{name: "empty body", body: "", id: "null", code: codeParseError},
 		{name: "not a request object", body: `[]`, id: "null", code: codeInvalidRequest},
 		{name: "request with a mistyped field", body: `{"jsonrpc":"2.0","id":7,"method":5}`, id: "7", code: codeInvalidRequest},
+		{name: "request with a key written twice", body: `{"jsonrpc":"2.0","id":7,"method":"a","method":"b"}`, id: "7", code: codeInvalidRequest},
 	}
 
 	for _, tc := range cases {
@@ -423,7 +426,7 @@ func TestInitializeReportsTheServerVersion(t *testing.T) {
 func TestInitializeAdvertisesTheFormatRequest(t *testing.T) {
 	s, out := newRecordingServer(map[string]string{})
 
-	req := &request{JSONRPC: "2.0", ID: json.RawMessage("1"), Params: json.RawMessage("{}")}
+	req := &request{JSONRPC: "2.0", ID: jsontext.Value("1"), Params: jsontext.Value("{}")}
 
 	if err := s.handleInitialize(req); err != nil {
 		t.Fatalf("handleInitialize: %v", err)
@@ -529,6 +532,20 @@ func TestFormattingKeepsAShownFailureAcrossAnUntouchedDocument(t *testing.T) {
 	}
 }
 
+func TestFailureQuotingBytesThatAreNotUTF8StillReachesTheClient(t *testing.T) {
+	s, out := newRecordingServer(map[string]string{})
+
+	if err := s.replyFailure(jsontext.Value(formatRequestID), []TextEdit{}, errors.New("bad value \"caf\xe9\"")); err != nil {
+		t.Fatalf("replyFailure: %v", err)
+	}
+
+	shown := messagesSent(t, out.Bytes(), "window/showMessage")
+
+	if len(shown) != 1 || shown[0].Message != "bad value \"caf"+string(utf8.RuneError)+"\"" {
+		t.Fatalf("showMessage = %+v, want the message with the byte replaced", shown)
+	}
+}
+
 func TestFormattingShowsEachOfTwoBrokenConfigsOnce(t *testing.T) {
 	base := t.TempDir()
 	seedFiles(t, base, map[string]string{
@@ -579,7 +596,7 @@ func formattingRequest(t *testing.T, uri string) *request {
 		t.Fatal(err)
 	}
 
-	return &request{JSONRPC: "2.0", ID: json.RawMessage(formatRequestID), Method: "textDocument/formatting", Params: params}
+	return &request{JSONRPC: "2.0", ID: jsontext.Value(formatRequestID), Method: "textDocument/formatting", Params: params}
 }
 
 func TestFormatDocumentUnknownURIIsUntouched(t *testing.T) {
@@ -1064,7 +1081,7 @@ func TestEndOfLineReportsTheProjectsLineEnding(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			req := &request{JSONRPC: "2.0", ID: json.RawMessage(formatRequestID), Method: "laravel-fmt/endOfLine", Params: params}
+			req := &request{JSONRPC: "2.0", ID: jsontext.Value(formatRequestID), Method: "laravel-fmt/endOfLine", Params: params}
 
 			if _, err := s.handle(req); err != nil {
 				t.Fatalf("handle: %v", err)
@@ -1163,7 +1180,7 @@ func TestFormatRequestFormatsTheTextItCarries(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			req := &request{JSONRPC: "2.0", ID: json.RawMessage(formatRequestID), Method: "laravel-fmt/format", Params: params}
+			req := &request{JSONRPC: "2.0", ID: jsontext.Value(formatRequestID), Method: "laravel-fmt/format", Params: params}
 
 			if _, err := s.handle(req); err != nil {
 				t.Fatalf("handle: %v", err)
@@ -1199,9 +1216,9 @@ func TestFormatRequestRejectsInvalidParams(t *testing.T) {
 			s, out := newRecordingServer(map[string]string{})
 			req := &request{
 				JSONRPC: "2.0",
-				ID:      json.RawMessage(formatRequestID),
+				ID:      jsontext.Value(formatRequestID),
 				Method:  "laravel-fmt/format",
-				Params:  json.RawMessage(tc.params),
+				Params:  jsontext.Value(tc.params),
 			}
 
 			if _, err := s.handle(req); err != nil {

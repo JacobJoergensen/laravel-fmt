@@ -155,23 +155,30 @@ func TestDetectPrettierYAMLFilesArray(t *testing.T) {
 }
 
 func TestDetectPrettierPackageJSON(t *testing.T) {
-	dir := t.TempDir()
-	seedFileAt(t, dir, "package.json", `{
-		"name": "app",
-		"prettier": { "printWidth": 100, "singleQuote": true }
-	}`)
-
-	prettier, found, err := detectPrettier(dir)
-	if err != nil {
-		t.Fatalf("detectPrettier: %v", err)
+	cases := map[string]string{
+		"plain":             `{"name": "app", "prettier": { "printWidth": 100, "singleQuote": true }}`,
+		"key written twice": `{"name": "a", "name": "b", "prettier": { "printWidth": 100, "singleQuote": true }}`,
+		"invalid UTF-8":     "{\"description\": \"caf\xe9\", \"prettier\": { \"printWidth\": 100, \"singleQuote\": true }}",
 	}
 
-	if !found {
-		t.Fatal("detectPrettier reported not found, want found")
-	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			seedFileAt(t, dir, "package.json", raw)
 
-	wantIntPtr(t, prettier.options.PrintWidth, 100, "PrintWidth")
-	wantBoolPtr(t, prettier.options.SingleQuote, true, "SingleQuote")
+			prettier, found, err := detectPrettier(dir)
+			if err != nil {
+				t.Fatalf("detectPrettier: %v", err)
+			}
+
+			if !found {
+				t.Fatal("detectPrettier reported not found, want found")
+			}
+
+			wantIntPtr(t, prettier.options.PrintWidth, 100, "PrintWidth")
+			wantBoolPtr(t, prettier.options.SingleQuote, true, "SingleQuote")
+		})
+	}
 }
 
 func TestDetectPrettierPackageJSONWithoutKeyNotDetected(t *testing.T) {

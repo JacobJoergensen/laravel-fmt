@@ -2,7 +2,8 @@
 package config
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -219,26 +220,28 @@ type TailwindCS struct {
 // StringOrSlice is a JSON field written as one string or a list of them.
 type StringOrSlice []string
 
-// UnmarshalJSON accepts a bare string as a one-element list.
-func (s *StringOrSlice) UnmarshalJSON(data []byte) error {
-	var single string
+var errNotStringOrSlice = errors.New("not a string or a list of strings")
 
-	if err := json.Unmarshal(data, &single); err == nil {
-		*s = withoutBlanks([]string{single})
-
-		return nil
-	}
-
+// UnmarshalJSONFrom accepts a bare string as a one-element list.
+func (s *StringOrSlice) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	// Decoding from dec carries the caller's options, such as rejecting null,
+	// to every entry. Its errors go back unwrapped: encoding/json keeps the key
+	// path of an unwrapped one and would cover a wrapped one with its own.
 	var many []string
 
-	if err := json.Unmarshal(data, &many); err != nil {
-		// encoding/json adds no key path to an Unmarshaler's error, so this is
-		// the whole message the user sees; keep Go's type names out of it.
-		if typeErr, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
-			return fmt.Errorf("expected a string or a list of strings, not %s", describeJSONValue(typeErr.Value))
-		}
+	switch dec.PeekKind() {
+	case jsontext.KindString:
+		many = make([]string, 1)
 
-		return fmt.Errorf("expected a string or a list of strings: %w", err)
+		if err := json.UnmarshalDecode(dec, &many[0]); err != nil {
+			return err //nolint:wrapcheck // see above
+		}
+	case jsontext.KindBeginArray:
+		if err := json.UnmarshalDecode(dec, &many); err != nil {
+			return err //nolint:wrapcheck // see above
+		}
+	default:
+		return &json.SemanticError{JSONKind: dec.PeekKind(), Err: errNotStringOrSlice}
 	}
 
 	*s = withoutBlanks(many)
@@ -260,14 +263,14 @@ func withoutBlanks(values []string) StringOrSlice {
 
 // MarshalJSON writes one entry as a string and none as "", since the schema
 // does not allow null.
-func (s StringOrSlice) MarshalJSON() ([]byte, error) {
-	var value any = []string(s)
+func (s *StringOrSlice) MarshalJSON() ([]byte, error) {
+	var value any = []string(*s)
 
-	switch len(s) {
+	switch len(*s) {
 	case 0:
 		value = ""
 	case 1:
-		value = s[0]
+		value = (*s)[0]
 	}
 
 	out, err := json.Marshal(value)

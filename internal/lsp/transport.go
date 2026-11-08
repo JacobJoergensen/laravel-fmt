@@ -2,7 +2,8 @@ package lsp
 
 import (
 	"bufio"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -25,21 +26,23 @@ func newConn(r io.Reader, w io.Writer) *conn {
 // request is one incoming JSON-RPC message. A missing id marks a notification,
 // for which no response is written.
 type request struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
+	JSONRPC string         `json:"jsonrpc"`
+	ID      jsontext.Value `json:"id,omitempty"`
+	Method  string         `json:"method"`
+	Params  jsontext.Value `json:"params,omitempty"`
 }
 
 func (r *request) isNotification() bool {
 	return len(r.ID) == 0
 }
 
+// omitzero, not omitempty: omitempty also drops a result that encodes as [],
+// the answer for a document that is already formatted.
 type response struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id"`
-	Result  any             `json:"result,omitempty"`
-	Error   *responseError  `json:"error,omitempty"`
+	JSONRPC string         `json:"jsonrpc"`
+	ID      jsontext.Value `json:"id"`
+	Result  any            `json:"result,omitzero"`
+	Error   *responseError `json:"error,omitzero"`
 }
 
 type notification struct {
@@ -109,7 +112,8 @@ func (c *conn) read() (*request, error) {
 		return nil, fmt.Errorf("read message body: %w", err)
 	}
 
-	if !json.Valid(body) {
+	// A key written twice is still JSON, so it is an invalid request, not a parse error.
+	if !jsontext.Value(body).IsValid(jsontext.AllowDuplicateNames(true)) {
 		return nil, errParse
 	}
 
@@ -118,7 +122,7 @@ func (c *conn) read() (*request, error) {
 	var req request
 	if err := json.Unmarshal(body, &req); err != nil {
 		var idOnly struct {
-			ID json.RawMessage `json:"id"`
+			ID jsontext.Value `json:"id"`
 		}
 
 		_ = json.Unmarshal(body, &idOnly)
@@ -149,11 +153,11 @@ func (c *conn) readBody(length int) ([]byte, error) {
 	return body, nil
 }
 
-func (c *conn) reply(id json.RawMessage, result any) error {
+func (c *conn) reply(id jsontext.Value, result any) error {
 	return c.write(response{JSONRPC: jsonrpcVersion, ID: id, Result: result})
 }
 
-func (c *conn) replyError(id json.RawMessage, code int, message string) error {
+func (c *conn) replyError(id jsontext.Value, code int, message string) error {
 	return c.write(response{JSONRPC: jsonrpcVersion, ID: id, Error: &responseError{Code: code, Message: message}})
 }
 
@@ -162,7 +166,9 @@ func (c *conn) notify(method string, params any) error {
 }
 
 func (c *conn) write(msg any) error {
-	body, err := json.Marshal(msg)
+	// An error can quote bytes from a project file that are not UTF-8, which
+	// must not cost the server its connection.
+	body, err := json.Marshal(msg, jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return fmt.Errorf("encode message: %w", err)
 	}

@@ -2,7 +2,7 @@ package run
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -101,7 +101,7 @@ func TestShowConfigExplainsItsSourcesOnStderr(t *testing.T) {
 		t.Fatalf("Format(--show-config) = %v", err)
 	}
 
-	if !json.Valid(stdout.Bytes()) {
+	if !jsontext.Value(stdout.Bytes()).IsValid() {
 		t.Fatalf("stdout is no longer a config:\n%s", stdout.String())
 	}
 

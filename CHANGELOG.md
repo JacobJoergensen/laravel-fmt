@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+* Improved `laravel-fmt.json` to reject duplicate keys, wrong-case keys like `PrintWidth`, `null` and invalid UTF-8
+* Improved the error for a wrong value in `laravel-fmt.json`, `pint.json` or `mago.json` to name its key, like `preset must be a string`
+* Fixed `pint.json`, `composer.json`, `package.json` and `mago.json` keys matching in any case, like `"Preset"` for `preset`
 
 ## Version 0.9.0 (2026-11-07)
 * Updated Tailwind to 4.3.5

@@ -1,7 +1,8 @@
 package config
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 )
 
@@ -14,7 +15,7 @@ func Generate(cfg *File) ([]byte, error) {
 		out.Schema = SchemaURL
 	}
 
-	data, err := json.MarshalIndent(out, "", "  ")
+	data, err := json.Marshal(out, jsontext.WithIndent("  "))
 	if err != nil {
 		return nil, fmt.Errorf("encode %s: %w", FileName, err)
 	}

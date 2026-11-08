@@ -1,7 +1,8 @@
 package detector
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"os"
@@ -396,7 +397,14 @@ func loadPrettierFromPackage(path string, kind int) (Prettier, bool, error) {
 	if kind == prettierKindPackageYAML {
 		err = yaml.Unmarshal(raw, &pkg)
 	} else {
-		err = json.Unmarshal(raw, &pkg)
+		// Node decodes the file as UTF-8 before parsing it, replacing bytes that
+		// do not decode instead of failing.
+		lenient := jsontext.AllowInvalidUTF8(true)
+
+		var kept []byte
+		if kept, err = lastKeyWins(raw, lenient); err == nil {
+			err = json.Unmarshal(kept, &pkg, lenient)
+		}
 	}
 
 	if err != nil {

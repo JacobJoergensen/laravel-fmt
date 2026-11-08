@@ -25,6 +25,11 @@ func TestLoadFile(t *testing.T) {
 			json:    `{"printWith": 80}`,
 			wantErr: true,
 		},
+		{
+			name:    "key in another case errors",
+			json:    `{"PrintWidth": 80}`,
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -260,8 +265,15 @@ func TestLoadFileWrongValueTypeNamesKeyAndExpectedShape(t *testing.T) {
 		{"boolean for a statement list", `{"php": {"blankLineBeforeStatements": true}}`, "php.blankLineBeforeStatements must be a list of strings, not a boolean"},
 		{"string for a width", `{"printWidth": "120"}`, "printWidth must be a whole number, not a string"},
 		{"fraction for a width", `{"printWidth": 1.5}`, "printWidth must be a whole number, not 1.5"},
-		{"boolean for a string-or-list", `{"tailwind": {"stylesheet": true}}`, "expected a string or a list of strings, not a boolean"},
+		{"boolean for a string-or-list", `{"tailwind": {"stylesheet": true}}`, "tailwind.stylesheet must be a string or a list of strings, not a boolean"},
+		{"number in a string-or-list", `{"tailwind": {"stylesheet": ["a.css", 3]}}`, "tailwind.stylesheet.1 must be a string, not a number"},
 		{"list for the whole file", `[]`, "the config must be an object, not a list"},
+		{"null for the whole file", `null`, "the config must be an object, not null"},
+		{"null for a section", `{"php": null}`, "php must be an object, not null"},
+		{"null for a setting", `{"php": {"sortUses": null}}`, "php.sortUses must be true or false, not null"},
+		{"null for a string-or-list", `{"tailwind": {"stylesheet": null}}`, "tailwind.stylesheet must be a string or a list of strings, not null"},
+		{"null in a string-or-list", `{"tailwind": {"stylesheet": ["a.css", null]}}`, "tailwind.stylesheet.1 must be a string, not null"},
+		{"width out of range", `{"printWidth": 99999999999999999999}`, "printWidth is out of range: 99999999999999999999"},
 	}
 
 	for _, tc := range tests {
@@ -287,10 +299,12 @@ func TestLoadFileSyntaxErrorNamesLineAndColumn(t *testing.T) {
 		json string
 		want string
 	}{
-		{"trailing comma on a later line", "{\n  \"printWidth\": 120,\n}\n", ":3:1: invalid character '}'"},
+		{"trailing comma", "{\n  \"printWidth\": 120,\n}\n", ":2:20: invalid character ','"},
 		{"offending last byte", `{"printWidth": 120}}`, ":1:20: invalid character '}' after top-level value"},
-		{"truncated after a key", "{\n  \"printWidth\": ", ":2:17: unexpected end of JSON input"},
-		{"empty file", "", ":1:1: unexpected end of JSON input"},
+		{"truncated after a key", "{\n  \"printWidth\": ", ":2:17: unexpected EOF"},
+		{"empty file", "", ":1:1: unexpected EOF"},
+		{"key written twice", "{\n  \"printWidth\": 80,\n  \"printWidth\": 120\n}\n", ":3:3: duplicate object member name \"printWidth\""},
+		{"invalid UTF-8", "{\"$schema\": \"\xff\"}", ":1:14: invalid UTF-8"},
 	}
 
 	for _, tc := range tests {

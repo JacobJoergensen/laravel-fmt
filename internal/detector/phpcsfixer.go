@@ -2,7 +2,8 @@ package detector
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,7 +60,7 @@ func detectPhpCsFixer(root string) (Pint, bool, error) {
 	return pint, true, nil
 }
 
-func extractSetRules(src []byte) (map[string]json.RawMessage, bool) {
+func extractSetRules(src []byte) (map[string]jsontext.Value, bool) {
 	file, errs := php.Parse(src)
 	if len(errs) > 0 {
 		return nil, false
@@ -143,8 +144,8 @@ func findSetRulesArray(expr php.Expr) (*php.ArrayExpr, bool) {
 
 // Rule sets such as @PSR12 are skipped: laravel-fmt does not model what they
 // expand to, so only rules written out are read.
-func transcodeRules(arr *php.ArrayExpr) (map[string]json.RawMessage, bool) {
-	rules := make(map[string]json.RawMessage, len(arr.Elements))
+func transcodeRules(arr *php.ArrayExpr) (map[string]jsontext.Value, bool) {
+	rules := make(map[string]jsontext.Value, len(arr.Elements))
 
 	for _, el := range arr.Elements {
 		if el.Spread || el.ByRef {
@@ -171,23 +172,25 @@ func transcodeRules(arr *php.ArrayExpr) (map[string]json.RawMessage, bool) {
 	return rules, true
 }
 
-func transcodeValue(expr php.Expr) (json.RawMessage, bool) {
+func transcodeValue(expr php.Expr) (jsontext.Value, bool) {
 	switch e := unwrapParen(expr).(type) {
 	case *php.BoolExpr:
 		if e.Value {
-			return json.RawMessage("true"), true
+			return jsontext.Value("true"), true
 		}
 
-		return json.RawMessage("false"), true
+		return jsontext.Value("false"), true
 	case *php.NullExpr:
-		return json.RawMessage("null"), true
+		return jsontext.Value("null"), true
 	case *php.StringExpr:
 		value, ok := singleQuotedString(e)
 		if !ok {
 			return nil, false
 		}
 
-		encoded, err := json.Marshal(value)
+		// A PHP string is bytes. Replacing what is not UTF-8 only touches values
+		// laravel-fmt never reads, where failing would drop the whole config.
+		encoded, err := json.Marshal(value, jsontext.AllowInvalidUTF8(true))
 		if err != nil {
 			return nil, false
 		}
@@ -204,13 +207,13 @@ func transcodeValue(expr php.Expr) (json.RawMessage, bool) {
 	}
 }
 
-func transcodeArray(arr *php.ArrayExpr) (json.RawMessage, bool) {
+func transcodeArray(arr *php.ArrayExpr) (jsontext.Value, bool) {
 	if len(arr.Elements) == 0 {
-		return json.RawMessage("[]"), true
+		return jsontext.Value("[]"), true
 	}
 
 	if arr.Elements[0].Key != nil {
-		obj := make(map[string]json.RawMessage, len(arr.Elements))
+		obj := make(map[string]jsontext.Value, len(arr.Elements))
 
 		for _, el := range arr.Elements {
 			if el.Spread || el.Key == nil {
@@ -230,7 +233,7 @@ func transcodeArray(arr *php.ArrayExpr) (json.RawMessage, bool) {
 			obj[key] = value
 		}
 
-		encoded, err := json.Marshal(obj)
+		encoded, err := json.Marshal(obj, jsontext.AllowInvalidUTF8(true))
 		if err != nil {
 			return nil, false
 		}
@@ -238,7 +241,7 @@ func transcodeArray(arr *php.ArrayExpr) (json.RawMessage, bool) {
 		return encoded, true
 	}
 
-	list := make([]json.RawMessage, 0, len(arr.Elements))
+	list := make([]jsontext.Value, 0, len(arr.Elements))
 
 	for _, el := range arr.Elements {
 		if el.Spread || el.Key != nil {
@@ -287,12 +290,13 @@ func singleQuotedString(expr php.Expr) (string, bool) {
 
 // A numeric literal passes through only if its text is already valid JSON; PHP
 // forms JSON rejects (digit separators, hex, octal, leading zeros) bail.
-func numberLiteral(text []byte) (json.RawMessage, bool) {
-	if !json.Valid(text) {
+func numberLiteral(text []byte) (jsontext.Value, bool) {
+	value := jsontext.Value(text)
+	if !value.IsValid() {
 		return nil, false
 	}
 
-	return text, true
+	return value, true
 }
 
 func identName(expr php.Expr) string {

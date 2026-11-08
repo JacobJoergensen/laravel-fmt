@@ -2,10 +2,11 @@ package ci
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func decodeGitLabReport(t *testing.T, s Summary, workDir, projectDir string) []gitLabIssue {
@@ -66,6 +67,16 @@ func TestWriteGitLabReportWritesAnEmptyListWhenAllIsFormatted(t *testing.T) {
 
 	if got := buf.String(); got != "[]\n" {
 		t.Fatalf("report = %q, want an empty JSON list", got)
+	}
+}
+
+func TestWriteGitLabReportReplacesBytesThatAreNotUTF8(t *testing.T) {
+	failure := Failure{Path: "app/caf\xe9.php", Line: 1, Message: "unexpected \xe9"}
+
+	issues := decodeGitLabReport(t, Summary{Failures: []Failure{failure}}, "", "")
+
+	if got := issues[0].Location.Path; got != "app/caf"+string(utf8.RuneError)+".php" {
+		t.Fatalf("path = %q, want the byte replaced", got)
 	}
 }
 

@@ -2,7 +2,8 @@ package detector
 
 import (
 	"cmp"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -111,13 +112,74 @@ type ArraySyntax struct {
 	Syntax string `json:"syntax"`
 }
 
+// lastKeyWins rewrites raw so a key written twice keeps only its last value, at
+// any depth, as PHP's json_decode, Mago's serde_json and Node's JSON.parse read
+// it; encoding/json would merge the two values instead. A syntax error is
+// reported with its position in raw.
+func lastKeyWins(raw []byte, opts ...json.Options) ([]byte, error) {
+	value := jsontext.Value(raw)
+	if value.IsValid() {
+		return raw, nil
+	}
+
+	options := append([]json.Options{jsontext.AllowDuplicateNames(true)}, opts...)
+
+	switch value.Kind() {
+	case jsontext.KindBeginObject:
+		var members map[string]jsontext.Value
+
+		if err := json.Unmarshal(raw, &members, options...); err != nil {
+			return nil, fmt.Errorf("decode object: %w", err)
+		}
+
+		for name, member := range members {
+			kept, err := lastKeyWins(member, opts...)
+			if err != nil {
+				return nil, err
+			}
+
+			members[name] = kept
+		}
+
+		return marshalKept(members, options)
+	case jsontext.KindBeginArray:
+		var elements []jsontext.Value
+
+		if err := json.Unmarshal(raw, &elements, options...); err != nil {
+			return nil, fmt.Errorf("decode list: %w", err)
+		}
+
+		for i, element := range elements {
+			kept, err := lastKeyWins(element, opts...)
+			if err != nil {
+				return nil, err
+			}
+
+			elements[i] = kept
+		}
+
+		return marshalKept(elements, options)
+	default:
+		return raw, nil
+	}
+}
+
+func marshalKept(value any, options []json.Options) ([]byte, error) {
+	encoded, err := json.Marshal(value, options...)
+	if err != nil {
+		return nil, fmt.Errorf("encode json: %w", err)
+	}
+
+	return encoded, nil
+}
+
 type pintFile struct {
-	Extend  *string                    `json:"extend"`
-	Preset  string                     `json:"preset"`
-	Rules   map[string]json.RawMessage `json:"rules"`
-	Exclude json.RawMessage            `json:"exclude"`
-	NotName json.RawMessage            `json:"notName"`
-	NotPath json.RawMessage            `json:"notPath"`
+	Extend  *string                   `json:"extend"`
+	Preset  string                    `json:"preset"`
+	Rules   map[string]jsontext.Value `json:"rules"`
+	Exclude jsontext.Value            `json:"exclude"`
+	NotName jsontext.Value            `json:"notName"`
+	NotPath jsontext.Value            `json:"notPath"`
 }
 
 func detectPint(root string) (Pint, bool, error) {
@@ -148,54 +210,66 @@ func detectPint(root string) (Pint, bool, error) {
 }
 
 func parsePintFile(path string, raw []byte) (pintFile, error) {
+	own, err := lastKeyWins(raw)
+	if err != nil {
+		return pintFile{}, config.ParseJSONError(path, raw, err)
+	}
+
 	var parsed pintFile
 
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return pintFile{}, config.ParseJSONError(path, raw, err)
+	if err := json.Unmarshal(own, &parsed); err != nil {
+		return pintFile{}, config.ParseJSONError(path, own, err)
 	}
 
 	if parsed.Extend == nil {
 		return parsed, nil
 	}
 
-	merged, err := extendPint(path, *parsed.Extend, raw)
+	// Joined without cleaning, as Pint does, so `..` resolves through symlinks.
+	basePath := filepath.Dir(path) + string(filepath.Separator) + *parsed.Extend
+
+	merged, err := extendPint(path, basePath, own)
 	if err != nil {
 		return pintFile{}, err
 	}
 
 	var extended pintFile
 
+	// pint.json's own values passed the decode above, so a bad value here came
+	// from the extended file.
 	if err := json.Unmarshal(merged, &extended); err != nil {
-		return pintFile{}, fmt.Errorf("parse %s: %w", path, err)
+		return pintFile{}, config.ParseJSONError(basePath, merged, err)
 	}
 
 	return extended, nil
 }
 
-func extendPint(path, extend string, raw []byte) ([]byte, error) {
-	// Joined without cleaning, as Pint does, so `..` resolves through symlinks.
-	basePath := filepath.Dir(path) + string(filepath.Separator) + extend
-
+func extendPint(path, basePath string, own []byte) ([]byte, error) {
 	baseRaw, err := os.ReadFile(basePath)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", basePath, err)
 	}
 
-	var base, own map[string]any
-
-	if err := json.Unmarshal(baseRaw, &base); err != nil {
+	baseKept, err := lastKeyWins(baseRaw)
+	if err != nil {
 		return nil, config.ParseJSONError(basePath, baseRaw, err)
+	}
+
+	var base, overlay map[string]any
+
+	if err := json.Unmarshal(baseKept, &base); err != nil {
+		return nil, config.ParseJSONError(basePath, baseKept, err)
 	}
 
 	if base["extend"] != nil {
 		return nil, fmt.Errorf("read %s: Pint cannot extend from more than 1 file", basePath)
 	}
 
-	if err := json.Unmarshal(raw, &own); err != nil {
-		return nil, config.ParseJSONError(path, raw, err)
+	if err := json.Unmarshal(own, &overlay); err != nil {
+		return nil, config.ParseJSONError(path, own, err)
 	}
 
-	merged, err := json.Marshal(replaceRecursive(base, own))
+	merged, err := json.Marshal(replaceRecursive(base, overlay))
 	if err != nil {
 		return nil, fmt.Errorf("merge %s into %s: %w", path, basePath, err)
 	}
@@ -247,12 +321,17 @@ func detectComposerPint(root string) (Pint, bool, error) {
 		return Pint{}, false, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	var manifest struct {
-		Require    map[string]json.RawMessage `json:"require"`
-		RequireDev map[string]json.RawMessage `json:"require-dev"`
+	kept, err := lastKeyWins(raw)
+	if err != nil {
+		return Pint{}, false, nil //nolint:nilerr // formatting composer.json reports it; detection just finds no Pint
 	}
 
-	if err := json.Unmarshal(raw, &manifest); err != nil {
+	var manifest struct {
+		Require    map[string]jsontext.Value `json:"require"`
+		RequireDev map[string]jsontext.Value `json:"require-dev"`
+	}
+
+	if err := json.Unmarshal(kept, &manifest); err != nil {
 		return Pint{}, false, nil //nolint:nilerr // formatting composer.json reports it; detection just finds no Pint
 	}
 
@@ -267,7 +346,7 @@ func detectComposerPint(root string) (Pint, bool, error) {
 }
 
 // Pint casts each Finder option to an array, so a single string is a list.
-func finderList(raw json.RawMessage) []string {
+func finderList(raw jsontext.Value) []string {
 	var list []string
 	if json.Unmarshal(raw, &list) == nil {
 		return list
@@ -285,7 +364,7 @@ func finderList(raw json.RawMessage) []string {
 // to false switches its behavior off where laravel-fmt has an off state; a
 // spacing rule has none, so disabling it keeps laravel-fmt's own, which Pint
 // with the rule off accepts too.
-func rulesToPint(rules map[string]json.RawMessage) Pint {
+func rulesToPint(rules map[string]jsontext.Value) Pint {
 	var pint Pint
 
 	for _, key := range []string{"curly_braces_position", "braces_position"} {
@@ -333,7 +412,7 @@ func rulesToPint(rules map[string]json.RawMessage) Pint {
 
 // rule returns nil for an absent rule or one not shaped like T, such as true,
 // so one odd rule does not abort the file.
-func rule[T any](rules map[string]json.RawMessage, key string) *T {
+func rule[T any](rules map[string]jsontext.Value, key string) *T {
 	body, ok := rules[key]
 	if !ok {
 		return nil
@@ -348,7 +427,7 @@ func rule[T any](rules map[string]json.RawMessage, key string) *T {
 	return &v
 }
 
-func ruleEnabled(rules map[string]json.RawMessage, key string) *bool {
+func ruleEnabled(rules map[string]jsontext.Value, key string) *bool {
 	body, ok := rules[key]
 	if !ok {
 		return nil
@@ -359,7 +438,7 @@ func ruleEnabled(rules map[string]json.RawMessage, key string) *bool {
 		return &enabled
 	}
 
-	var options map[string]json.RawMessage
+	var options map[string]jsontext.Value
 	if err := json.Unmarshal(body, &options); err == nil {
 		return new(true)
 	}
@@ -367,7 +446,7 @@ func ruleEnabled(rules map[string]json.RawMessage, key string) *bool {
 	return nil
 }
 
-func parseHeredocIndentation(body json.RawMessage) string {
+func parseHeredocIndentation(body jsontext.Value) string {
 	var enabled bool
 
 	if err := json.Unmarshal(body, &enabled); err == nil {

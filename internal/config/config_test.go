@@ -1,7 +1,7 @@
 package config
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"maps"
 	"os"
 	"path/filepath"
@@ -22,7 +22,6 @@ func TestStylesheetAcceptsStringOrList(t *testing.T) {
 		"list":          {`{"tailwind": {"stylesheet": ["a.css", "b.css"]}}`, []string{"a.css", "b.css"}},
 		"empty list":    {`{"tailwind": {"stylesheet": []}}`, nil},
 		"empty string":  {`{"tailwind": {"stylesheet": ""}}`, nil},
-		"null":          {`{"tailwind": {"stylesheet": null}}`, nil},
 		"absent":        {`{}`, nil},
 		"blank entry":   {`{"tailwind": {"stylesheet": ["", "b.css"]}}`, []string{"b.css"}},
 		"all blank":     {`{"tailwind": {"stylesheet": ["", ""]}}`, nil},
