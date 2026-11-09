@@ -35,6 +35,96 @@ func TestUnterminatedConstructIsAnError(t *testing.T) {
 	}
 }
 
+func TestParseRejectsTextAfterAClosedValue(t *testing.T) {
+	cases := []struct {
+		name              string
+		src               string
+		wantErr           bool
+		wantLine, wantCol int
+	}{
+		{"key glued to a flow sequence", "a:\n  b: [c]d: [e]\n", true, 2, 9},
+		{"text after a quote", "a: 'b': c\n", true, 1, 7},
+		{"comment glued to a quote", "a: \"b\"# c\n", true, 1, 7},
+		{"comment after a quote", "a: \"b\" # c\n", false, 0, 0},
+		{"space after a flow at the end of the file", "a: [b] ", false, 0, 0},
+		{"text after a root flow", "[a] b\n", true, 1, 5},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errs := Parse([]byte(tc.src))
+
+			if !tc.wantErr {
+				if len(errs) != 0 {
+					t.Fatalf("errors = %v, want none", errs)
+				}
+
+				return
+			}
+
+			if len(errs) == 0 || !strings.HasPrefix(errs[0].Msg, "unexpected text after") || errs[0].Pos.Line != tc.wantLine || errs[0].Pos.Column != tc.wantCol {
+				t.Fatalf("errors = %v, want unexpected text at %d:%d", errs, tc.wantLine, tc.wantCol)
+			}
+		})
+	}
+}
+
+func TestParseRejectsABlankLineIndentedPastABlockScalarsText(t *testing.T) {
+	cases := []struct {
+		name              string
+		src               string
+		wantErr           bool
+		wantLine, wantCol int
+	}{
+		{"deeper blank line before the text", "a: >\n \n   \n  b\n", true, 3, 4},
+		{"deeper blank line before a tab line that opens the body", "a: |\n     \n  \t\n", true, 2, 6},
+		{"blank line at the text's indent", "a: |\n  \n  b\n", false, 0, 0},
+		{"indentation indicator", "a: |1\n   \n  b\n", false, 0, 0},
+		{"deeper blank line after the text", "a: |\n  b\n     \n  c\n", false, 0, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errs := Parse([]byte(tc.src))
+
+			if !tc.wantErr {
+				if len(errs) != 0 {
+					t.Fatalf("errors = %v, want none", errs)
+				}
+
+				return
+			}
+
+			if len(errs) != 1 || !strings.HasPrefix(errs[0].Msg, "blank line indented past") || errs[0].Pos.Line != tc.wantLine || errs[0].Pos.Column != tc.wantCol {
+				t.Fatalf("errors = %v, want one blank line error at %d:%d", errs, tc.wantLine, tc.wantCol)
+			}
+		})
+	}
+}
+
+func TestParseRejectsABlockCollectionOnTheMarkerLine(t *testing.T) {
+	cases := []struct {
+		name    string
+		src     string
+		wantErr bool
+	}{
+		{"mapping", "--- a: b\n", true},
+		{"sequence", "--- - a\n", true},
+		{"scalar", "--- text\n", false},
+		{"comment holding a colon", "--- # a: b\nc: d\n", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errs := Parse([]byte(tc.src))
+
+			if gotErr := len(errs) > 0; gotErr != tc.wantErr {
+				t.Fatalf("errors = %v, want error %v", errs, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseReadsADashBlockScalarAgainstTheDash(t *testing.T) {
 	for _, src := range []string{"- |\n  a\n- b\n", "- !!str |\n  a\n- b\n"} {
 		t.Run(src, func(t *testing.T) {
@@ -101,7 +191,6 @@ func TestParseRecordsABlockScalarsContentIndent(t *testing.T) {
 		{"indentation indicator", "a: |2\n    b\n", 0},
 		{"empty body", "a: |\nb: c\n", 0},
 		{"tab after the indent", "a: |\n  \tb\n", 0},
-		{"whitespace-only tab line skipped", "a: >\n\t\n  b\n", 2},
 	}
 
 	for _, tc := range cases {

@@ -170,6 +170,7 @@ func TestBlockScalarBodySitsOneIndentUnderItsOwner(t *testing.T) {
 		{"kept blank lines stay", "a: |+\n    b\n\n\nc: d\n", "a: |+\n  b\n\n\nc: d\n"},
 		{"indicator body keeps its value", "k:\n    a: |4\n            b\n        c\n", "k:\n  a: |4\n          b\n      c\n"},
 		{"indicator body on a dash keeps its value", "k:\n    - |4\n            b\n        c\n", "k:\n  - |4\n          b\n      c\n"},
+		{"body below a bare dash is read against the dash", "-\n  |\n \t\n   x\n", "- |\n \t\n   x\n"},
 		{
 			"dash body leaves the file formatted",
 			"steps:\n  - |\n    echo hi\n  - name:    build\n",
@@ -330,6 +331,10 @@ func TestFormatBlockScalarKeepsTrailingSpace(t *testing.T) {
 		"|\n 0  ",
 		"|\n 0\t",
 		"a: &x |\n  0  \n  1\nb: 2\n",
+		"a: |\n  0\n  \t\nb: 2\n",
+		"a: |\n \t\nb: 2\n",
+		": >\n \t\n  0\n",
+		"a: |\n  0\n\n  \t\nb: 2\n",
 	}
 
 	for _, src := range cases {
@@ -433,10 +438,6 @@ func TestFormatMarkerLineContentStaysContent(t *testing.T) {
 		{"marker as content", "--- ---", "--- ---\n"},
 		{"end marker as content", "--- ...", "--- ...\n"},
 		{"between two markers", "... --- ...", "... --- ...\n"},
-		// Controls: a body the parser can model still drops to its own line, and
-		// markers that do start their line still are markers.
-		{"mapping body", "--- a: 1", "---\na: 1\n"},
-		{"sequence body", "--- - a", "---\n- a\n"},
 		{"two empty documents", "---\n---", "---\n---\n"},
 	}
 
@@ -607,6 +608,11 @@ func TestFormatRejectsTabIndentedKey(t *testing.T) {
 		{"tab before a nested dash", "- a\n\t- b\n", "2:1"},
 		{"tab under a key", "a:\n\tb: 1\n", "2:1"},
 		{"tab before a comment", "\t#x: 1\n", "1:1"},
+		{"tab before a dash's nested list", "-\t- a\n", "1:2"},
+		{"tab before a dash's mapping", "- \ta: 1\n", "1:3"},
+		{"tab before an explicit value's mapping", "? a\n:\tb: c\n", "2:2"},
+		{"tab on a blank line inside a block scalar", "a: |\n  x\n \t \n  y\n", "3:2"},
+		{"tab on a blank line before a block scalar's text", "- |\n\t \n 0\n", "2:1"},
 	}
 
 	for _, tc := range cases {

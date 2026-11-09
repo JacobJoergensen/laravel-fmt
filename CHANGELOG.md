@@ -9,6 +9,8 @@
 * Fixed JSON that is not UTF-8 being formatted instead of reported
 * Fixed a flat JSON array or object before a comma going one column past `printWidth`
 * Fixed JSONC comments around a comma swapping places
+* Fixed invalid YAML like `branches: [main]tags: [v1]`, `-\tname: x` or `--- a: b` being reshaped instead of reported
+* Fixed a YAML block scalar line holding only a tab being removed
 
 ## Version 0.9.0 (2026-11-07)
 * Updated Tailwind to 4.3.5

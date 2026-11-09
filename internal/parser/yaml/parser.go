@@ -86,6 +86,7 @@ func (p *yamlParser) parseDocument() *Document {
 			p.AdvanceN(3)
 			doc.StartMarker = mkspan(markerStart, p.Pos)
 			p.finishLine()
+			p.checkCollectionOnMarkerLine()
 
 			break
 		}
@@ -141,6 +142,18 @@ func (p *yamlParser) parseDocument() *Document {
 	doc.Range = mkspan(start, p.Pos)
 
 	return doc
+}
+
+// YAML allows only a scalar or flow node on the `---` line, as `--- a: b`
+// breaks.
+func (p *yamlParser) checkCollectionOnMarkerLine() {
+	if p.Eof() || p.atLineStart() {
+		return
+	}
+
+	if p.isSeqDash(0) || p.findSeparatorOnCurrentLine() >= 0 {
+		p.errors = append(p.errors, Error{Pos: p.Pos, Msg: "block collection on the --- line"})
+	}
 }
 
 // checkStrandedKey reports a key line left over once the body ends, indented
@@ -434,12 +447,17 @@ func (p *yamlParser) parseMappingEntry(indent int) *MappingEntry {
 }
 
 func (p *yamlParser) parseValueAfterColon(indent int) (Node, *Trivia) {
+	afterColon := p.Pos
 	p.skipInlineSpace()
 
 	if p.Eof() || p.Peek() == '\n' || p.Peek() == '\r' || p.Peek() == '#' {
 		comment := p.finishLine()
 
 		return p.parseBlockValue(indent, sequenceMayShareIndent, indent, comment != nil), comment
+	}
+
+	if bytes.IndexByte(p.slice(afterColon, p.Pos), '\t') >= 0 && (p.isSeqDash(0) || p.findSeparatorOnCurrentLine() >= 0) {
+		p.checkTabBeforeCompactCollection(afterColon)
 	}
 
 	return p.parseInlineValue(indent, indent)
@@ -510,12 +528,14 @@ func (p *yamlParser) parseSequenceItem(indent int) *SequenceItem {
 	valueColumn := p.lineColumn()
 
 	if p.isSeqDash(0) {
+		p.checkTabBeforeCompactCollection(save)
 		value := p.parseSequence(valueColumn, true)
 
 		return &SequenceItem{Range: mkspan(start, p.contentEnd(pendingBefore)), Dash: dash, Value: value}
 	}
 
 	if p.findSeparatorOnCurrentLine() >= 0 {
+		p.checkTabBeforeCompactCollection(save)
 		value := p.parseMapping(valueColumn, true)
 
 		return &SequenceItem{Range: mkspan(start, p.contentEnd(pendingBefore)), Dash: dash, Value: value}
@@ -543,7 +563,7 @@ func (p *yamlParser) parseSequenceItem(indent int) *SequenceItem {
 func (p *yamlParser) parseInlineValue(indent, parentIndent int) (Node, *Trivia) {
 	switch p.Peek() {
 	case '|', '>':
-		return p.parseBlockScalar(indent), nil
+		return p.parseBlockScalar(parentIndent), nil
 	case '{', '[':
 		node := p.parseFlow(indent)
 
@@ -685,7 +705,9 @@ func (p *yamlParser) parseQuotedScalar(indent int) *Scalar {
 		closed = p.skipDoubleQuoted()
 	}
 
-	if !closed {
+	if closed {
+		p.checkClosedValueEnd("quoted scalar")
+	} else {
 		p.errors = append(p.errors, Error{Pos: start, Msg: "unterminated quoted scalar"})
 	}
 
@@ -697,12 +719,12 @@ func (p *yamlParser) parseBlockScalar(indent int) *BlockScalar {
 	end := p.consumeValueBlock(indent, blockIsScalarBody)
 	raw := p.slice(start, end)
 
-	return &BlockScalar{Range: mkspan(start, end), Raw: raw, Indent: indent, ContentIndent: contentIndent(raw)}
+	return &BlockScalar{Range: mkspan(start, end), Raw: raw, Indent: indent, ContentIndent: contentIndent(raw, indent)}
 }
 
-func contentIndent(span []byte) int {
+func contentIndent(span []byte, ownerIndent int) int {
 	_, body, _ := bytes.Cut(span, []byte("\n"))
-	if bytes.ContainsAny(blockIndicator(span), "123456789") {
+	if hasIndentIndicator(span) {
 		return 0
 	}
 
@@ -713,6 +735,10 @@ func contentIndent(span []byte) int {
 		rest := bytes.TrimRight(line[spaces:], " \t\r")
 
 		switch {
+		// A tab line that opens the body sets an indent the text lines do not
+		// show.
+		case len(rest) == 0 && column == 0 && tabOpensScalarBody(line, ownerIndent):
+			return 0
 		case len(rest) == 0:
 		case rest[0] == '\t':
 			return 0
@@ -722,6 +748,10 @@ func contentIndent(span []byte) int {
 	}
 
 	return column
+}
+
+func hasIndentIndicator(span []byte) bool {
+	return bytes.ContainsAny(blockIndicator(span), "123456789")
 }
 
 func blockIndicator(span []byte) []byte {
@@ -767,7 +797,7 @@ func (p *yamlParser) parseAnchoredValue(indent, parentIndent int) Node {
 	raw := p.slice(start, end)
 
 	if isBlockScalar {
-		return &BlockScalar{Range: mkspan(start, end), Raw: raw, Indent: parentIndent, ContentIndent: contentIndent(raw)}
+		return &BlockScalar{Range: mkspan(start, end), Raw: raw, Indent: parentIndent, ContentIndent: contentIndent(raw, parentIndent)}
 	}
 
 	return &Verbatim{Range: mkspan(start, end), Raw: raw, Indent: indent}
@@ -783,7 +813,9 @@ func (p *yamlParser) bailLine(indent int) *Verbatim {
 func (p *yamlParser) parseFlow(indent int) *Flow {
 	start := p.Pos
 
-	if !p.skipFlowCollection() {
+	if p.skipFlowCollection() {
+		p.checkClosedValueEnd("flow collection")
+	} else {
 		p.errors = append(p.errors, Error{Pos: start, Msg: "unterminated flow collection"})
 	}
 
@@ -871,13 +903,22 @@ func (p *yamlParser) consumeValueBlock(indent int, scalarBody bool) Position {
 }
 
 func (p *yamlParser) consumeIndentedBlock(indent int, scalarBody bool) Position {
+	header := p.Pos
 	contentEnd := p.consumeLineKeepEnd()
 	bodyIndent := -1
 
+	var deepestBlank Position
+
+	deepestBlankIndent := -1
+
 	for !p.Eof() {
 		if p.atBlankLine() {
-			// A line of spaces deeper than a scalar body's own indent is text.
-			if scalarBody && bodyIndent >= 0 && p.measureIndent() > bodyIndent {
+			if scalarBody && p.blankLineHoldsText(indent, bodyIndent) {
+				if bodyIndent < 0 {
+					bodyIndent = p.measureIndent()
+					p.checkBlankPastScalarBody(header, deepestBlank, deepestBlankIndent, bodyIndent)
+				}
+
 				contentEnd = p.consumeLineKeepEnd()
 
 				continue
@@ -885,6 +926,17 @@ func (p *yamlParser) consumeIndentedBlock(indent int, scalarBody bool) Position 
 
 			if !p.triviaPrecedesDeeperLine(indent, scalarBody) {
 				break
+			}
+
+			if scalarBody {
+				if tab := bytes.IndexByte(p.restOfLine(0), '\t'); tab >= 0 {
+					p.errorAt(p.Pos, tab, "tab in indentation")
+				}
+			}
+
+			if scalarBody && bodyIndent < 0 && p.measureIndent() > deepestBlankIndent {
+				deepestBlankIndent = p.measureIndent()
+				deepestBlank = p.Pos
 			}
 
 			p.consumeLine()
@@ -903,6 +955,10 @@ func (p *yamlParser) consumeIndentedBlock(indent int, scalarBody bool) Position 
 
 			if bodyIndent < 0 {
 				bodyIndent = ind
+
+				if scalarBody {
+					p.checkBlankPastScalarBody(header, deepestBlank, deepestBlankIndent, bodyIndent)
+				}
 			}
 
 			contentEnd = p.consumeLineKeepEnd()
@@ -914,6 +970,32 @@ func (p *yamlParser) consumeIndentedBlock(indent int, scalarBody bool) Position 
 	}
 
 	return contentEnd
+}
+
+// YAML takes a block scalar's indent from its first text line, so a deeper
+// blank line before it needs an indicator like `|2`.
+func (p *yamlParser) checkBlankPastScalarBody(header, blank Position, blankIndent, bodyIndent int) {
+	if blankIndent <= bodyIndent || hasIndentIndicator(p.Src[header.Offset:]) {
+		return
+	}
+
+	p.errorAt(blank, blankIndent, "blank line indented past the block scalar's text")
+}
+
+func (p *yamlParser) blankLineHoldsText(indent, bodyIndent int) bool {
+	if bodyIndent < 0 {
+		return tabOpensScalarBody(p.restOfLine(0), indent)
+	}
+
+	ind := p.measureIndent()
+
+	return ind > bodyIndent || ind == bodyIndent && p.PeekAt(ind) == '\t'
+}
+
+func tabOpensScalarBody(line []byte, ownerIndent int) bool {
+	spaces := len(line) - len(bytes.TrimLeft(line, " "))
+
+	return spaces > ownerIndent && spaces < len(line) && line[spaces] == '\t'
 }
 
 func (p *yamlParser) consumeLineKeepEnd() Position {
@@ -931,7 +1013,9 @@ func (p *yamlParser) triviaPrecedesDeeperLine(indent int, scalarBody bool) bool 
 	saved := p.Pos
 
 	for !p.Eof() {
-		if p.atBlankLine() || !scalarBody && p.atCommentLine() {
+		tabText := scalarBody && tabOpensScalarBody(p.restOfLine(0), indent)
+
+		if !tabText && (p.atBlankLine() || !scalarBody && p.atCommentLine()) {
 			p.consumeLine()
 
 			continue
@@ -985,17 +1069,51 @@ func (p *yamlParser) checkTabIndentation() {
 		return
 	}
 
-	pos := p.Pos
-	pos.Offset += ind
-	pos.Column += ind
-
 	// Nested dispatches classify the same line more than once, and Format joins
 	// every diagnostic, so without this the one tab is reported repeatedly.
-	if n := len(p.errors); n > 0 && p.errors[n-1].Pos.Offset == pos.Offset {
+	if n := len(p.errors); n > 0 && p.errors[n-1].Pos.Offset == p.Pos.Offset+ind {
 		return
 	}
 
-	p.errors = append(p.errors, Error{Pos: pos, Msg: "tab in indentation"})
+	p.errorAt(p.Pos, ind, "tab in indentation")
+}
+
+// In `-\tkey: value` the gap after the dash is the mapping's indentation,
+// which YAML allows only as spaces.
+func (p *yamlParser) checkTabBeforeCompactCollection(from Position) {
+	if tab := bytes.IndexByte(p.slice(from, p.Pos), '\t'); tab >= 0 {
+		p.errorAt(from, tab, "tab in indentation")
+	}
+}
+
+// YAML rejects text glued to a closed value, like `[a]b: c`; left in place,
+// the rest of the line would be read as the next node.
+func (p *yamlParser) checkClosedValueEnd(what string) {
+	n := p.inlineSpaceLen()
+
+	switch c := p.PeekAt(n); {
+	case c == 0, c == '\n', c == '\r', c == '#' && n > 0:
+		return
+	}
+
+	p.errorAt(p.Pos, n, "unexpected text after "+what)
+}
+
+func (p *yamlParser) errorAt(from Position, n int, msg string) {
+	from.Offset += n
+	from.Column += n
+
+	p.errors = append(p.errors, Error{Pos: from, Msg: msg})
+}
+
+func (p *yamlParser) inlineSpaceLen() int {
+	n := 0
+
+	for c := p.PeekAt(n); c == ' ' || c == '\t'; c = p.PeekAt(n) {
+		n++
+	}
+
+	return n
 }
 
 func (p *yamlParser) skipInlineSpace() {
@@ -1181,12 +1299,7 @@ func (p *yamlParser) measureIndent() int {
 }
 
 func (p *yamlParser) atBlankLine() bool {
-	n := 0
-
-	for c := p.PeekAt(n); c == ' ' || c == '\t'; c = p.PeekAt(n) {
-		n++
-	}
-
+	n := p.inlineSpaceLen()
 	c := p.PeekAt(n)
 
 	return c == '\n' || c == '\r' || p.Pos.Offset+n >= len(p.Src)
