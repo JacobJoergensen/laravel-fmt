@@ -3,6 +3,7 @@ package detector
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -58,8 +59,8 @@ indent-heredoc = false
 		t.Fatal("detectMago reported not found, want found")
 	}
 
-	if mago.Preset != "laravel" {
-		t.Errorf("Preset = %q, want %q", mago.Preset, "laravel")
+	if mago.Preset != magoPresetPint {
+		t.Errorf("Preset = %q, want laravel read as %q", mago.Preset, magoPresetPint)
 	}
 
 	wantIntPtr(t, mago.PrintWidth, 100, "PrintWidth")
@@ -101,12 +102,15 @@ level = "strict"
 		t.Fatalf("detectMago: %v", err)
 	}
 
-	if found {
-		t.Fatal("detectMago reported found for a [formatter]-less chain, want not found")
+	if !found || !mago.LintOnly {
+		t.Fatalf("found = %v, LintOnly = %v; want a lint-only config that ends the search", found, mago.LintOnly)
 	}
 
-	if mago != (Mago{}) {
-		t.Fatalf("Mago = %+v, want zero value", mago)
+	cfg := config.Default()
+	applyMago(cfg, &mago)
+
+	if !reflect.DeepEqual(cfg, config.Default()) {
+		t.Fatalf("a lint-only Mago config changed the settings: %+v", cfg.PHP)
 	}
 }
 
@@ -293,7 +297,7 @@ func TestDetectMagoMalformedTOMLErrors(t *testing.T) {
 }
 
 func TestPresetMagoLaravelDefaults(t *testing.T) {
-	preset := presetMago(magoPresetLaravel)
+	preset := presetMago(magoPresetPint)
 
 	wantStringPtr(t, preset.EndOfLine, magoEndOfLineLF, "EndOfLine")
 	wantBoolPtr(t, preset.ConcatSpace, false, "ConcatSpace")
@@ -318,7 +322,7 @@ func TestPresetMagoUnknownReturnsDefault(t *testing.T) {
 
 func TestApplyMagoLaravelPreset(t *testing.T) {
 	cfg := config.Default()
-	Apply(cfg, Context{Mago: &Mago{Preset: magoPresetLaravel}})
+	Apply(cfg, Context{Mago: &Mago{Preset: magoPresetPint}})
 
 	if cfg.PHP.ConcatSpace {
 		t.Error("ConcatSpace = true, want false (laravel: $a.$b)")
@@ -375,7 +379,7 @@ func TestApplyMagoDrupalPreset(t *testing.T) {
 func TestApplyMagoOverrideBeatsPreset(t *testing.T) {
 	cfg := config.Default()
 	Apply(cfg, Context{Mago: &Mago{
-		Preset:        magoPresetLaravel,
+		Preset:        magoPresetPint,
 		PrintWidth:    new(80),
 		IndentHeredoc: new(false),
 	}})
@@ -404,7 +408,7 @@ func TestApplyMagoEndOfLineMapsEachValue(t *testing.T) {
 			cfg := config.Default()
 			cfg.EndOfLine = tc.from
 
-			Apply(cfg, Context{Mago: &Mago{Preset: magoPresetLaravel, EndOfLine: new(tc.value)}})
+			Apply(cfg, Context{Mago: &Mago{Preset: magoPresetPint, EndOfLine: new(tc.value)}})
 
 			if cfg.EndOfLine != tc.want {
 				t.Errorf("EndOfLine = %q, want %q", cfg.EndOfLine, tc.want)
@@ -422,5 +426,114 @@ func TestApplyMagoAlwaysNextLineBrace(t *testing.T) {
 
 	if cfg.PHP.FunctionBraceStyle != config.BraceStyleAlwaysNextLine {
 		t.Errorf("FunctionBraceStyle = %q, want %q (always-next-line is no longer collapsed)", cfg.PHP.FunctionBraceStyle, config.BraceStyleAlwaysNextLine)
+	}
+}
+
+func TestDetectMagoReadsTheFormatterTableAsMagoDoes(t *testing.T) {
+	cases := []struct {
+		name    string
+		table   string
+		wantErr bool
+		check   func(config.PHP, *config.File) bool
+	}{
+		{"a snake_case brace style", `function-brace-style = "same_line"`, false, func(p config.PHP, _ *config.File) bool {
+			return p.FunctionBraceStyle == config.BraceStyleSameLine
+		}},
+		{"a PascalCase end of line", `end-of-line = "Crlf"`, false, func(_ config.PHP, f *config.File) bool {
+			return f.EndOfLine == config.EndOfLineCRLF
+		}},
+		{"a preset name in another case", `preset = "Laravel"`, false, func(p config.PHP, _ *config.File) bool {
+			return !p.ConcatSpace && p.ClosureFnSpace
+		}},
+		{"the tempest preset", `preset = "tempest"`, false, func(_ config.PHP, f *config.File) bool {
+			return f.PrintWidth == 180
+		}},
+		{"the hack preset", `preset = "hhvm"`, false, func(_ config.PHP, f *config.File) bool {
+			return f.PrintWidth == 80 && f.IndentWidth == 2
+		}},
+		{"sort-uses as a sort order to keep", `sort-uses = "preserve"`, false, func(p config.PHP, _ *config.File) bool {
+			return !p.SortUses
+		}},
+		{"sort-uses as ascending", `sort-uses = "alphanumeric-ascending"`, false, func(p config.PHP, _ *config.File) bool {
+			return p.SortUses
+		}},
+		{"an unknown preset", `preset = "nope"`, true, nil},
+		{"a negative width", `print-width = -2`, true, nil},
+		{"a fractional width", `print-width = 80.5`, true, nil},
+		{"a string for a bool", `use-tabs = "yes"`, true, nil},
+		{"an end of line in the wrong case", `end-of-line = "LF"`, true, nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			seedFileAt(t, dir, "mago.toml", "[formatter]\n"+tc.table+"\n")
+
+			mago, _, err := detectMago(dir)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
+			}
+
+			if tc.wantErr {
+				return
+			}
+
+			cfg := config.Default()
+			applyMago(cfg, &mago)
+
+			if !tc.check(cfg.PHP, cfg) {
+				t.Fatalf("%s gave %+v", tc.table, cfg)
+			}
+		})
+	}
+}
+
+func TestDetectStopsAtTheNearestMagoConfigWithoutAFormatter(t *testing.T) {
+	root := t.TempDir()
+	seedFileAt(t, root, "mago.toml", "[formatter]\nprint-width = 80\n")
+	seedFileAt(t, root, "child/mago.toml", "[linter]\n")
+
+	ctx, err := Detect(filepath.Join(root, "child"))
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+
+	if ctx.Mago == nil || !ctx.Mago.LintOnly {
+		t.Fatalf("Mago = %+v, want the child's lint-only config", ctx.Mago)
+	}
+}
+
+func TestApplyMagoLaysEmptyBodiesOutAsMago(t *testing.T) {
+	cases := []struct {
+		name                          string
+		mago                          Mago
+		functions, methods, classes   bool
+		anonClasses, closures, spaced bool
+	}{
+		{"the default preset", Mago{}, true, true, true, true, true, false},
+		{"the psr-12 preset", Mago{Preset: magoPresetPsr12}, false, false, false, true, true, false},
+		{"the drupal preset", Mago{Preset: magoPresetDrupal}, false, false, true, true, true, false},
+		{"a key over its preset", Mago{InlineEmptyClosureBodies: new(false)}, true, true, true, true, false, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.PHP.InlineEmptyFunctionBodies = false
+			cfg.PHP.AnonClassParenSpace = true
+
+			applyMago(cfg, &tc.mago)
+
+			p := cfg.PHP
+			got := []bool{
+				p.InlineEmptyFunctionBodies, p.InlineEmptyMethodBodies, p.InlineEmptyClassBodies,
+				p.InlineEmptyAnonClassBodies, p.InlineEmptyClosureBodies, p.AnonClassParenSpace,
+			}
+			want := []bool{tc.functions, tc.methods, tc.classes, tc.anonClasses, tc.closures, tc.spaced}
+
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("functions, methods, classes, anonymous classes, closures inline and paren space = %v, want %v", got, want)
+			}
+		})
 	}
 }

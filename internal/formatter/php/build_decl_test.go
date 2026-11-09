@@ -45,3 +45,61 @@ func TestTraitUsesSplitOnlyWhenTheProjectSplitsThem(t *testing.T) {
 		})
 	}
 }
+
+// PHP-CS-Fixer's braces_position without single_line_empty_body puts an empty
+// body's braces on lines of their own; laravel-fmt follows when told to.
+func TestEmptyBodiesFollowTheProjectsLayout(t *testing.T) {
+	tests := []struct {
+		name string
+		set  func(*config.PHP)
+		src  string
+		want string
+	}{
+		{
+			"an empty function",
+			func(p *config.PHP) { p.InlineEmptyFunctionBodies = false },
+			"<?php\n\nfunction run() {}\n",
+			"<?php\n\nfunction run()\n{\n}\n",
+		},
+		{
+			"an empty method beside a wrapped signature",
+			func(p *config.PHP) { p.InlineEmptyMethodBodies = false },
+			"<?php\n\nclass Job\n{\n    public function run(string $aVeryLongFirstArgumentName, string $aVeryLongSecondArgumentName, string $aVeryLongThirdArgumentName) {}\n}\n",
+			"<?php\n\nclass Job\n{\n    public function run(\n        string $aVeryLongFirstArgumentName,\n        string $aVeryLongSecondArgumentName,\n        string $aVeryLongThirdArgumentName,\n    ) {\n    }\n}\n",
+		},
+		{
+			"an empty class",
+			func(p *config.PHP) { p.InlineEmptyClassBodies = false },
+			"<?php\n\nclass Job {}\n",
+			"<?php\n\nclass Job\n{\n}\n",
+		},
+		{
+			"an empty anonymous class",
+			func(p *config.PHP) { p.InlineEmptyAnonClassBodies = false },
+			"<?php\n\n$job = new class {};\n",
+			"<?php\n\n$job = new class\n{\n};\n",
+		},
+		{
+			"a space before an anonymous class's arguments",
+			func(p *config.PHP) { p.AnonClassParenSpace = true },
+			"<?php\n\n$job = new class(1) {};\n",
+			"<?php\n\n$job = new class (1) {};\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Default()
+			tc.set(&cfg.PHP)
+
+			got := mustFormat(t, []byte(tc.src), cfg)
+			if string(got) != tc.want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+
+			if again := mustFormat(t, got, cfg); !bytes.Equal(again, got) {
+				t.Fatalf("not idempotent:\n%s\nthen:\n%s", got, again)
+			}
+		})
+	}
+}

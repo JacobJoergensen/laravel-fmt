@@ -1,13 +1,16 @@
 package detector
 
 import (
+	"bytes"
 	"cmp"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
@@ -19,6 +22,8 @@ const (
 	pintSpacingOne    = "one"
 	pintSpacingNone   = "none"
 	pintAlign         = "align"
+	pintSingleSpace   = "single_space"
+	pintSortAlpha     = "alpha"
 	pintDefaultPreset = "laravel"
 
 	// pintIndentWidth is the indent Pint always formats PHP with.
@@ -47,6 +52,9 @@ type Pint struct {
 	SingleTraitInsertPerStatement *bool
 	NoClosingTag                  *bool
 	NoMultilineDoubleArrow        *bool
+	SingleLineEmptyBody           *bool
+
+	ClassDefinition *ClassDefinition
 
 	GroupToSingleImports *bool
 
@@ -63,6 +71,9 @@ type CurlyBracesPosition struct {
 	ClassesOpeningBrace           string `json:"classes_opening_brace"`
 	AnonymousClassesOpeningBrace  string `json:"anonymous_classes_opening_brace"`
 	ControlStructuresOpeningBrace string `json:"control_structures_opening_brace"`
+
+	AllowSingleLineEmptyAnonClasses bool `json:"allow_single_line_empty_anonymous_classes"`
+	AllowSingleLineAnonFunctions    bool `json:"allow_single_line_anonymous_functions"`
 }
 
 // ConcatSpace is Pint's concat_space rule.
@@ -76,9 +87,10 @@ type FunctionDeclaration struct {
 	ClosureFnSpacing string `json:"closure_fn_spacing"`
 }
 
-// BinaryOperatorSpaces is Pint's binary_operator_spaces rule; only its =>
-// entry is used.
+// BinaryOperatorSpaces is Pint's binary_operator_spaces rule; only what it
+// does to => is used.
 type BinaryOperatorSpaces struct {
+	Default   string            `json:"default"`
 	Operators map[string]string `json:"operators"`
 }
 
@@ -87,10 +99,15 @@ type BlankLineBeforeStatement struct {
 	Statements []string `json:"statements"`
 }
 
-// OrderedImports is Pint's ordered_imports rule. Its sort_algorithm is
-// ignored: laravel-fmt always sorts alphabetically.
+// OrderedImports is Pint's ordered_imports rule. A nil ImportsOrder is the
+// fixer's null: no grouping by kind.
 type OrderedImports struct {
-	ImportsOrder []string `json:"imports_order"`
+	ImportsOrder  []string `json:"imports_order"`
+	SortAlgorithm string   `json:"sort_algorithm"`
+}
+
+type unaryOperatorSpaces struct {
+	OnlyDecInc bool `json:"only_dec_inc"`
 }
 
 // SingleImportOptions is the options object of Pint's
@@ -107,6 +124,12 @@ type LaravelBladeOptions struct {
 // A snapshot of Pint's BlankLineBeforeControlStructures::STATEMENTS.
 var pintBladeStatements = []string{"if", "foreach", "forelse", "for", "while", "switch", config.BladeDirectivePHP}
 
+// ClassDefinition is Pint's class_definition rule; only its anonymous class
+// option is used.
+type ClassDefinition struct {
+	SpaceBeforeParenthesis bool `json:"space_before_parenthesis"`
+}
+
 // ArraySyntax is Pint's array_syntax rule.
 type ArraySyntax struct {
 	Syntax string `json:"syntax"`
@@ -114,8 +137,9 @@ type ArraySyntax struct {
 
 // lastKeyWins rewrites raw so a key written twice keeps only its last value, at
 // any depth, as PHP's json_decode, Mago's serde_json and Node's JSON.parse read
-// it; encoding/json would merge the two values instead. A syntax error is
-// reported with its position in raw.
+// it; encoding/json would merge the two values instead. The key keeps its first
+// place, as a PHP array does, since rule order decides what an @ set overrides.
+// A syntax error is reported with its position in raw.
 func lastKeyWins(raw []byte, opts ...json.Options) ([]byte, error) {
 	value := jsontext.Value(raw)
 	if value.IsValid() {
@@ -126,22 +150,21 @@ func lastKeyWins(raw []byte, opts ...json.Options) ([]byte, error) {
 
 	switch value.Kind() {
 	case jsontext.KindBeginObject:
-		var members map[string]jsontext.Value
-
-		if err := json.Unmarshal(raw, &members, options...); err != nil {
+		members, err := decodeMembers(value, options...)
+		if err != nil {
 			return nil, fmt.Errorf("decode object: %w", err)
 		}
 
-		for name, member := range members {
-			kept, err := lastKeyWins(member, opts...)
+		for i, member := range members {
+			kept, err := lastKeyWins(member.value, opts...)
 			if err != nil {
 				return nil, err
 			}
 
-			members[name] = kept
+			members[i].value = kept
 		}
 
-		return marshalKept(members, options)
+		return encodeMembers(members, options...)
 	case jsontext.KindBeginArray:
 		var elements []jsontext.Value
 
@@ -158,28 +181,87 @@ func lastKeyWins(raw []byte, opts ...json.Options) ([]byte, error) {
 			elements[i] = kept
 		}
 
-		return marshalKept(elements, options)
+		encoded, err := json.Marshal(elements, options...)
+		if err != nil {
+			return nil, fmt.Errorf("encode json: %w", err)
+		}
+
+		return encoded, nil
 	default:
 		return raw, nil
 	}
 }
 
-func marshalKept(value any, options []json.Options) ([]byte, error) {
-	encoded, err := json.Marshal(value, options...)
-	if err != nil {
+type jsonMember struct {
+	name  string
+	value jsontext.Value
+}
+
+func decodeMembers(raw jsontext.Value, opts ...json.Options) ([]jsonMember, error) {
+	dec := jsontext.NewDecoder(bytes.NewReader(raw), opts...)
+
+	if _, err := dec.ReadToken(); err != nil {
+		return nil, fmt.Errorf("read object: %w", err)
+	}
+
+	var members []jsonMember
+
+	place := map[string]int{}
+
+	for dec.PeekKind() == '"' {
+		token, err := dec.ReadToken()
+		if err != nil {
+			return nil, fmt.Errorf("read name: %w", err)
+		}
+
+		name := token.String()
+
+		value, err := dec.ReadValue()
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", name, err)
+		}
+
+		if at, seen := place[name]; seen {
+			members[at].value = bytes.Clone(value)
+
+			continue
+		}
+
+		place[name] = len(members)
+		members = append(members, jsonMember{name: name, value: bytes.Clone(value)})
+	}
+
+	if _, err := dec.ReadToken(); err != nil {
+		return nil, fmt.Errorf("read object: %w", err)
+	}
+
+	return members, nil
+}
+
+func encodeMembers(members []jsonMember, opts ...json.Options) ([]byte, error) {
+	var buf bytes.Buffer
+
+	enc := jsontext.NewEncoder(&buf, opts...)
+
+	err := enc.WriteToken(jsontext.BeginObject)
+	for _, member := range members {
+		err = errors.Join(err, enc.WriteToken(jsontext.String(member.name)), enc.WriteValue(member.value))
+	}
+
+	if err = errors.Join(err, enc.WriteToken(jsontext.EndObject)); err != nil {
 		return nil, fmt.Errorf("encode json: %w", err)
 	}
 
-	return encoded, nil
+	return bytes.TrimSpace(buf.Bytes()), nil
 }
 
 type pintFile struct {
-	Extend  *string                   `json:"extend"`
-	Preset  string                    `json:"preset"`
-	Rules   map[string]jsontext.Value `json:"rules"`
-	Exclude jsontext.Value            `json:"exclude"`
-	NotName jsontext.Value            `json:"notName"`
-	NotPath jsontext.Value            `json:"notPath"`
+	Extend  *string        `json:"extend"`
+	Preset  *string        `json:"preset"`
+	Rules   jsontext.Value `json:"rules"`
+	Exclude jsontext.Value `json:"exclude"`
+	NotName jsontext.Value `json:"notName"`
+	NotPath jsontext.Value `json:"notPath"`
 }
 
 func detectPint(root string) (Pint, bool, error) {
@@ -199,9 +281,24 @@ func detectPint(root string) (Pint, bool, error) {
 		return Pint{}, false, err
 	}
 
-	pint := rulesToPint(parsed.Rules)
+	preset := pintDefaultPreset
+	if parsed.Preset != nil {
+		preset = *parsed.Preset
+	}
+
+	presetRules, ok := pintPresets[preset]
+	if !ok {
+		return Pint{}, false, fmt.Errorf("%s: preset %q is not one of laravel, per, psr12, symfony or empty", path, preset)
+	}
+
+	rules, err := orderedPintRules(path, parsed.Rules)
+	if err != nil {
+		return Pint{}, false, err
+	}
+
+	pint := resolvePintRules(mergePintRules(presetRules, rules))
 	pint.Path = path
-	pint.Preset = cmp.Or(parsed.Preset, pintDefaultPreset)
+	pint.Preset = preset
 	pint.Exclude = finderList(parsed.Exclude)
 	pint.NotName = finderList(parsed.NotName)
 	pint.NotPath = finderList(parsed.NotPath)
@@ -213,6 +310,16 @@ func parsePintFile(path string, raw []byte) (pintFile, error) {
 	own, err := lastKeyWins(raw)
 	if err != nil {
 		return pintFile{}, config.ParseJSONError(path, raw, err)
+	}
+
+	// Pint reads any JSON array as its config, and a list holds none of its
+	// keys; anything that is not an array it refuses.
+	switch jsontext.Value(own).Kind() {
+	case '[':
+		return pintFile{}, nil
+	case '{':
+	default:
+		return pintFile{}, fmt.Errorf("%s: the config must be an object, not %s", path, own)
 	}
 
 	var parsed pintFile
@@ -255,21 +362,23 @@ func extendPint(path, basePath string, own []byte) ([]byte, error) {
 		return nil, config.ParseJSONError(basePath, baseRaw, err)
 	}
 
-	var base, overlay map[string]any
+	base := jsontext.Value(baseKept)
+	if base.Kind() != '{' {
+		return nil, fmt.Errorf("%s: the config must be an object, not %s", basePath, base)
+	}
 
-	if err := json.Unmarshal(baseKept, &base); err != nil {
+	baseMembers, err := decodeMembers(base)
+	if err != nil {
 		return nil, config.ParseJSONError(basePath, baseKept, err)
 	}
 
-	if base["extend"] != nil {
-		return nil, fmt.Errorf("read %s: Pint cannot extend from more than 1 file", basePath)
+	for _, member := range baseMembers {
+		if member.name == "extend" && member.value.Kind() != 'n' {
+			return nil, fmt.Errorf("read %s: Pint cannot extend from more than 1 file", basePath)
+		}
 	}
 
-	if err := json.Unmarshal(own, &overlay); err != nil {
-		return nil, config.ParseJSONError(path, own, err)
-	}
-
-	merged, err := json.Marshal(replaceRecursive(base, overlay))
+	merged, err := replaceRecursive(base, own)
 	if err != nil {
 		return nil, fmt.Errorf("merge %s into %s: %w", path, basePath, err)
 	}
@@ -277,33 +386,82 @@ func extendPint(path, basePath string, own []byte) ([]byte, error) {
 	return merged, nil
 }
 
-// replaceRecursive is PHP's array_replace_recursive over decoded JSON: objects
-// merge by key and lists by index, at any depth; anything else is replaced.
-func replaceRecursive(base, overlay any) any {
-	switch overlay := overlay.(type) {
-	case map[string]any:
-		if base, ok := base.(map[string]any); ok {
-			for key, value := range overlay {
-				base[key] = replaceRecursive(base[key], value)
-			}
-
-			return base
+// replaceRecursive is PHP's array_replace_recursive over JSON: objects merge by
+// key, keeping base's order with new keys after it, and lists by index, at any
+// depth; anything else is replaced. Both values hold no repeated key.
+func replaceRecursive(base, overlay jsontext.Value) (jsontext.Value, error) {
+	switch {
+	case base.Kind() == '{' && overlay.Kind() == '{':
+		return replaceMembers(base, overlay)
+	case overlay.Kind() == '[':
+		// [] is PHP's empty array, which an object is too, so it replaces nothing.
+		if base.Kind() == '{' && len(bytes.TrimSpace(overlay[1:len(overlay)-1])) == 0 {
+			return base, nil
 		}
-	case []any:
-		if base, ok := base.([]any); ok {
-			for i, value := range overlay {
-				if i < len(base) {
-					base[i] = replaceRecursive(base[i], value)
-				} else {
-					base = append(base, value)
-				}
-			}
 
-			return base
+		if base.Kind() == '[' {
+			return replaceElements(base, overlay)
 		}
 	}
 
-	return overlay
+	return overlay, nil
+}
+
+func replaceMembers(base, overlay jsontext.Value) (jsontext.Value, error) {
+	baseMembers, err := decodeMembers(base)
+	if err != nil {
+		return nil, err
+	}
+
+	overlayMembers, err := decodeMembers(overlay)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, member := range overlayMembers {
+		at := slices.IndexFunc(baseMembers, func(m jsonMember) bool { return m.name == member.name })
+		if at < 0 {
+			baseMembers = append(baseMembers, member)
+
+			continue
+		}
+
+		if baseMembers[at].value, err = replaceRecursive(baseMembers[at].value, member.value); err != nil {
+			return nil, err
+		}
+	}
+
+	return encodeMembers(baseMembers)
+}
+
+func replaceElements(base, overlay jsontext.Value) (jsontext.Value, error) {
+	var baseElements, overlayElements []jsontext.Value
+
+	if err := errors.Join(json.Unmarshal(base, &baseElements), json.Unmarshal(overlay, &overlayElements)); err != nil {
+		return nil, fmt.Errorf("decode list: %w", err)
+	}
+
+	for i, element := range overlayElements {
+		if i >= len(baseElements) {
+			baseElements = append(baseElements, element)
+
+			continue
+		}
+
+		merged, err := replaceRecursive(baseElements[i], element)
+		if err != nil {
+			return nil, err
+		}
+
+		baseElements[i] = merged
+	}
+
+	encoded, err := json.Marshal(baseElements)
+	if err != nil {
+		return nil, fmt.Errorf("encode json: %w", err)
+	}
+
+	return encoded, nil
 }
 
 // Without a pint.json, Pint runs its laravel preset, and a project that
@@ -342,7 +500,57 @@ func detectComposerPint(root string) (Pint, bool, error) {
 		return Pint{}, false, nil
 	}
 
-	return Pint{Path: path, Preset: pintDefaultPreset}, true, nil
+	pint := resolvePintRules(pintPresets[pintDefaultPreset])
+	pint.Path = path
+	pint.Preset = pintDefaultPreset
+
+	return pint, true, nil
+}
+
+// @ sets need the rules in file order. Pint reads rules with `?? []`, so null
+// and [] are no rules; a list of rules is not.
+func orderedPintRules(path string, raw jsontext.Value) ([]pintRule, error) {
+	switch raw.Kind() {
+	case 0, 'n':
+		return nil, nil
+	case '[':
+		if len(bytes.TrimSpace(raw[1:len(raw)-1])) == 0 {
+			return nil, nil
+		}
+	case '{':
+		return decodeOrderedRules(path, raw)
+	default:
+	}
+
+	return nil, fmt.Errorf("%s: rules must be an object, not %s", path, raw)
+}
+
+func decodeOrderedRules(path string, raw jsontext.Value) ([]pintRule, error) {
+	dec := jsontext.NewDecoder(bytes.NewReader(raw))
+
+	if _, err := dec.ReadToken(); err != nil {
+		return nil, fmt.Errorf("%s: rules: %w", path, err)
+	}
+
+	var rules []pintRule
+
+	for dec.PeekKind() == '"' {
+		token, err := dec.ReadToken()
+		if err != nil {
+			return nil, fmt.Errorf("%s: rules: %w", path, err)
+		}
+
+		name := token.String()
+
+		body, err := dec.ReadValue()
+		if err != nil {
+			return nil, fmt.Errorf("%s: rules.%s: %w", path, name, err)
+		}
+
+		rules = append(rules, pintRule{name: name, body: bytes.Clone(body)})
+	}
+
+	return rules, nil
 }
 
 // Pint casts each Finder option to an array, so a single string is a list.
@@ -360,30 +568,36 @@ func finderList(raw jsontext.Value) []string {
 	return nil
 }
 
-// Of the two brace rule names, braces_position wins, as in Pint. A rule set
-// to false switches its behavior off where laravel-fmt has an off state; a
+// rules is what resolvePintRules expanded. A rule set to false switches its
+// behavior off where laravel-fmt has an off state; a
 // spacing rule has none, so disabling it keeps laravel-fmt's own, which Pint
 // with the rule off accepts too.
 func rulesToPint(rules map[string]jsontext.Value) Pint {
 	var pint Pint
 
-	for _, key := range []string{"curly_braces_position", "braces_position"} {
-		// The nil-guard keeps a malformed braces_position from clobbering a
-		// good curly_braces_position decoded on the previous iteration.
-		if cbp := rule[CurlyBracesPosition](rules, key); cbp != nil {
-			pint.CurlyBracesPosition = cbp
-		}
-	}
+	pint.CurlyBracesPosition = ruleOptions(rules, ruleBracesPosition, CurlyBracesPosition{
+		FunctionsOpeningBrace:         pintBraceNextLine,
+		ClassesOpeningBrace:           pintBraceNextLine,
+		AnonymousClassesOpeningBrace:  pintBraceSameLine,
+		ControlStructuresOpeningBrace: pintBraceSameLine,
 
-	pint.ConcatSpace = rule[ConcatSpace](rules, "concat_space")
-	pint.NotOperatorWithSuccessorSpace = rule[bool](rules, "not_operator_with_successor_space")
-	pint.FunctionDeclaration = rule[FunctionDeclaration](rules, "function_declaration")
-	pint.BinaryOperatorSpaces = rule[BinaryOperatorSpaces](rules, "binary_operator_spaces")
-	pint.BlankLineBeforeStatement = rule[BlankLineBeforeStatement](rules, "blank_line_before_statement")
-	pint.OrderedImports = rule[OrderedImports](rules, "ordered_imports")
-	pint.ArraySyntax = rule[ArraySyntax](rules, "array_syntax")
+		AllowSingleLineEmptyAnonClasses: true,
+		AllowSingleLineAnonFunctions:    true,
+	})
+	pint.SingleLineEmptyBody = ruleEnabled(rules, ruleSingleLineEmptyBody)
+	pint.ClassDefinition = ruleOptions(rules, ruleClassDefinition, ClassDefinition{})
 
-	if on := ruleEnabled(rules, "blank_line_before_statement"); on != nil && !*on {
+	pint.ConcatSpace = ruleOptions(rules, ruleConcatSpace, ConcatSpace{Spacing: pintSpacingNone})
+	pint.NotOperatorWithSuccessorSpace = notOperatorSpace(rules)
+	pint.FunctionDeclaration = ruleOptions(rules, ruleFunctionDeclaration, FunctionDeclaration{ClosureFnSpacing: pintSpacingOne})
+	pint.BinaryOperatorSpaces = ruleOptions(rules, ruleBinaryOperatorSpaces, BinaryOperatorSpaces{Default: pintSingleSpace})
+	pint.BlankLineBeforeStatement = ruleOptions(rules, ruleBlankLineBeforeStatement, BlankLineBeforeStatement{
+		Statements: []string{"break", "continue", "declare", "return", "throw", "try"},
+	})
+	pint.OrderedImports = ruleOptions(rules, ruleOrderedImports, OrderedImports{SortAlgorithm: pintSortAlpha})
+	pint.ArraySyntax = ruleOptions(rules, ruleArraySyntax, ArraySyntax{Syntax: "short"})
+
+	if on := ruleEnabled(rules, ruleBlankLineBeforeStatement); on != nil && !*on {
 		pint.BlankLineBeforeStatement = &BlankLineBeforeStatement{}
 	}
 
@@ -391,17 +605,23 @@ func rulesToPint(rules map[string]jsontext.Value) Pint {
 		pint.BladeBlankLineBeforeStatement = blade.BlankLineBeforeStatement
 	}
 
-	pint.SortImports = ruleEnabled(rules, "ordered_imports")
-	pint.SingleImportPerStatement = ruleEnabled(rules, "single_import_per_statement")
+	// laravel-fmt sorts only alphabetically. Under none or length it leaves
+	// the order alone, which Pint then keeps.
+	pint.SortImports = ruleEnabled(rules, ruleOrderedImports)
+	if pint.OrderedImports != nil && pint.OrderedImports.SortAlgorithm != pintSortAlpha {
+		pint.SortImports = new(false)
+	}
 
-	if opts := rule[SingleImportOptions](rules, "single_import_per_statement"); opts != nil {
+	pint.SingleImportPerStatement = ruleEnabled(rules, ruleSingleImportPerStatement)
+
+	if opts := ruleOptions(rules, ruleSingleImportPerStatement, SingleImportOptions{GroupToSingleImports: new(true)}); opts != nil {
 		pint.GroupToSingleImports = opts.GroupToSingleImports
 	}
-	pint.SingleTraitInsertPerStatement = ruleEnabled(rules, "single_trait_insert_per_statement")
-	pint.NoClosingTag = ruleEnabled(rules, "no_closing_tag")
-	pint.NoMultilineDoubleArrow = ruleEnabled(rules, "no_multiline_whitespace_around_double_arrow")
+	pint.SingleTraitInsertPerStatement = ruleEnabled(rules, ruleSingleTraitInsert)
+	pint.NoClosingTag = ruleEnabled(rules, ruleNoClosingTag)
+	pint.NoMultilineDoubleArrow = ruleEnabled(rules, ruleNoMultilineDoubleArrow)
 
-	if body, ok := rules["heredoc_indentation"]; ok {
+	if body, ok := rules[ruleHeredocIndentation]; ok {
 		if mode := parseHeredocIndentation(body); mode != "" {
 			pint.HeredocIndentation = &mode
 		}
@@ -425,6 +645,45 @@ func rule[T any](rules map[string]jsontext.Value, key string) *T {
 	}
 
 	return &v
+}
+
+// ruleOptions decodes a rule's body over the fixer's own defaults, since Pint
+// replaces a whole body and an option left out takes the fixer default, not
+// the preset's value.
+func ruleOptions[T any](rules map[string]jsontext.Value, key string, defaults T) *T {
+	body, ok := rules[key]
+	if !ok {
+		return nil
+	}
+
+	if body.Kind() == 't' {
+		return &defaults
+	}
+
+	if body.Kind() != '{' {
+		return nil
+	}
+
+	if err := json.Unmarshal(body, &defaults); err != nil {
+		return nil
+	}
+
+	return &defaults
+}
+
+// unary_operator_spaces strips the space after !, and
+// not_operator_with_successor_space, which runs after it, puts one back.
+func notOperatorSpace(rules map[string]jsontext.Value) *bool {
+	notOperator := ruleEnabled(rules, ruleNotOperatorSpace)
+	if notOperator != nil && *notOperator {
+		return notOperator
+	}
+
+	if unary := ruleOptions(rules, ruleUnaryOperatorSpaces, unaryOperatorSpaces{}); unary != nil && !unary.OnlyDecInc {
+		return new(false)
+	}
+
+	return notOperator
 }
 
 func ruleEnabled(rules map[string]jsontext.Value, key string) *bool {
@@ -473,178 +732,59 @@ func parseHeredocIndentation(body jsontext.Value) string {
 	return ""
 }
 
-// An unknown preset returns the zero Pint. Each preset is a snapshot of Pint's
-// presets/Laravel.php, Psr12.php, Symfony.php and Per.php.
-func presetPint(name string) Pint {
-	switch name {
-	case "laravel":
-		notOperatorSpace := true
-		heredoc := config.HeredocIndentNone
-		doubleArrow := true
-
-		return Pint{
-			CurlyBracesPosition: &CurlyBracesPosition{
-				FunctionsOpeningBrace:         pintBraceNextLine,
-				ClassesOpeningBrace:           pintBraceNextLine,
-				AnonymousClassesOpeningBrace:  pintBraceNextLine,
-				ControlStructuresOpeningBrace: pintBraceSameLine,
-			},
-			ConcatSpace:                   &ConcatSpace{Spacing: pintSpacingNone},
-			NotOperatorWithSuccessorSpace: &notOperatorSpace,
-			FunctionDeclaration:           &FunctionDeclaration{ClosureFnSpacing: pintSpacingOne},
-			BlankLineBeforeStatement: &BlankLineBeforeStatement{
-				Statements: []string{"continue", "return"},
-			},
-			NoMultilineDoubleArrow: &doubleArrow,
-			HeredocIndentation:     &heredoc,
-			// Only Laravel's preset sets an import order; the others keep the
-			// default.
-			OrderedImports: &OrderedImports{
-				ImportsOrder: []string{config.ImportKindConst, config.ImportKindClass, config.ImportKindFunction},
-			},
-		}
-	case "psr12":
-		notOperatorSpace := false
-		heredoc := config.HeredocIndentNone
-
-		return Pint{
-			CurlyBracesPosition: &CurlyBracesPosition{
-				FunctionsOpeningBrace:         pintBraceNextLine,
-				ClassesOpeningBrace:           pintBraceNextLine,
-				AnonymousClassesOpeningBrace:  pintBraceNextLine,
-				ControlStructuresOpeningBrace: pintBraceSameLine,
-			},
-			ConcatSpace:                   &ConcatSpace{Spacing: pintSpacingNone},
-			NotOperatorWithSuccessorSpace: &notOperatorSpace,
-			FunctionDeclaration:           &FunctionDeclaration{ClosureFnSpacing: pintSpacingOne},
-			HeredocIndentation:            &heredoc,
-			SingleTraitInsertPerStatement: new(true),
-		}
-	case "symfony":
-		notOperatorSpace := false
-		heredoc := config.HeredocIndentNone
-		doubleArrow := true
-
-		return Pint{
-			CurlyBracesPosition: &CurlyBracesPosition{
-				FunctionsOpeningBrace:         pintBraceNextLine,
-				ClassesOpeningBrace:           pintBraceNextLine,
-				AnonymousClassesOpeningBrace:  pintBraceNextLine,
-				ControlStructuresOpeningBrace: pintBraceSameLine,
-			},
-			ConcatSpace:                   &ConcatSpace{Spacing: pintSpacingNone},
-			NotOperatorWithSuccessorSpace: &notOperatorSpace,
-			FunctionDeclaration:           &FunctionDeclaration{ClosureFnSpacing: pintSpacingOne},
-			BlankLineBeforeStatement: &BlankLineBeforeStatement{
-				Statements: []string{"return"},
-			},
-			HeredocIndentation:            &heredoc,
-			NoMultilineDoubleArrow:        &doubleArrow,
-			SingleTraitInsertPerStatement: new(true),
-		}
-	case "per":
-		notOperatorSpace := false
-		heredoc := config.HeredocIndentNone
-
-		return Pint{
-			CurlyBracesPosition: &CurlyBracesPosition{
-				FunctionsOpeningBrace:         pintBraceNextLine,
-				ClassesOpeningBrace:           pintBraceNextLine,
-				AnonymousClassesOpeningBrace:  pintBraceNextLine,
-				ControlStructuresOpeningBrace: pintBraceSameLine,
-			},
-			ConcatSpace:                   &ConcatSpace{Spacing: pintSpacingNone},
-			NotOperatorWithSuccessorSpace: &notOperatorSpace,
-			FunctionDeclaration:           &FunctionDeclaration{ClosureFnSpacing: pintSpacingOne},
-			HeredocIndentation:            &heredoc,
-			SingleTraitInsertPerStatement: new(true),
-		}
-	}
-
-	return Pint{}
-}
-
 func applyPint(cfg *config.File, p *Pint) {
-	effective := presetPint(p.Preset)
-	mergePint(&effective, p)
+	applyCurlyBracesPosition(cfg, p.CurlyBracesPosition)
+	applyConcatSpace(cfg, p.ConcatSpace)
+	applyNotOperatorSpace(cfg, p.NotOperatorWithSuccessorSpace)
+	applyFunctionDeclaration(cfg, p.FunctionDeclaration)
+	applyBinaryOperatorSpaces(cfg, p.BinaryOperatorSpaces)
+	applyBlankLineBeforeStatement(cfg, p.BlankLineBeforeStatement)
+	applyBladeBlankLineBeforeStatement(cfg, p.BladeBlankLineBeforeStatement)
+	applyHeredocIndentation(cfg, p.HeredocIndentation)
+	applyOrderedImports(cfg, p.OrderedImports)
+	setIfPresent(&cfg.PHP.SortUses, p.SortImports)
+	setIfPresent(&cfg.PHP.ExpandUseGroups, p.SingleImportPerStatement)
 
-	applyCurlyBracesPosition(cfg, effective.CurlyBracesPosition)
-	applyConcatSpace(cfg, effective.ConcatSpace)
-	applyNotOperatorSpace(cfg, effective.NotOperatorWithSuccessorSpace)
-	applyFunctionDeclaration(cfg, effective.FunctionDeclaration)
-	applyBinaryOperatorSpaces(cfg, effective.BinaryOperatorSpaces)
-	applyBlankLineBeforeStatement(cfg, effective.BlankLineBeforeStatement)
-	applyBladeBlankLineBeforeStatement(cfg, effective.BladeBlankLineBeforeStatement)
-	applyHeredocIndentation(cfg, effective.HeredocIndentation)
-	applyOrderedImports(cfg, effective.OrderedImports)
-	setIfPresent(&cfg.PHP.SortUses, effective.SortImports)
-	setIfPresent(&cfg.PHP.ExpandUseGroups, effective.SingleImportPerStatement)
-
-	if keep := effective.GroupToSingleImports; keep != nil && !*keep {
+	if keep := p.GroupToSingleImports; keep != nil && !*keep {
 		cfg.PHP.KeepBracedUseGroups = true
 	}
 
-	setIfPresent(&cfg.PHP.SplitTraitUses, effective.SingleTraitInsertPerStatement)
-	setIfPresent(&cfg.PHP.RemoveTrailingCloseTag, effective.NoClosingTag)
-	setIfPresent(&cfg.PHP.ArrowValueOnKeyLine, effective.NoMultilineDoubleArrow)
-	applyArraySyntax(cfg, effective.ArraySyntax)
+	setIfPresent(&cfg.PHP.SplitTraitUses, p.SingleTraitInsertPerStatement)
+	setIfPresent(&cfg.PHP.RemoveTrailingCloseTag, p.NoClosingTag)
+	setIfPresent(&cfg.PHP.ArrowValueOnKeyLine, p.NoMultilineDoubleArrow)
+	applyArraySyntax(cfg, p.ArraySyntax)
+	applyEmptyBodies(cfg, p)
+
+	if p.ClassDefinition != nil {
+		cfg.PHP.AnonClassParenSpace = p.ClassDefinition.SpaceBeforeParenthesis
+	}
 }
 
-// Slices replace rather than merge, as Pint replaces a whole rule body.
-func mergePint(base *Pint, overlay *Pint) {
-	if overlay == nil {
+// single_line_empty_body runs after braces_position and keeps every empty body
+// on one line. Without it, braces_position puts an empty body's braces on lines
+// of their own, unless an allow_single_line option keeps one; with neither
+// rule, Pint leaves empty bodies as written.
+func applyEmptyBodies(cfg *config.File, p *Pint) {
+	if on := p.SingleLineEmptyBody; on != nil && *on {
+		cfg.PHP.InlineEmptyFunctionBodies = true
+		cfg.PHP.InlineEmptyMethodBodies = true
+		cfg.PHP.InlineEmptyClassBodies = true
+		cfg.PHP.InlineEmptyAnonClassBodies = true
+		cfg.PHP.InlineEmptyClosureBodies = true
+
 		return
 	}
 
-	base.Path = overlay.Path
-	base.Preset = overlay.Preset
-
-	if overlay.CurlyBracesPosition != nil {
-		base.CurlyBracesPosition = overlay.CurlyBracesPosition
+	cbp := p.CurlyBracesPosition
+	if cbp == nil {
+		return
 	}
 
-	if overlay.ConcatSpace != nil {
-		base.ConcatSpace = overlay.ConcatSpace
-	}
-
-	if overlay.NotOperatorWithSuccessorSpace != nil {
-		base.NotOperatorWithSuccessorSpace = overlay.NotOperatorWithSuccessorSpace
-	}
-
-	if overlay.FunctionDeclaration != nil {
-		base.FunctionDeclaration = overlay.FunctionDeclaration
-	}
-
-	if overlay.BinaryOperatorSpaces != nil {
-		base.BinaryOperatorSpaces = overlay.BinaryOperatorSpaces
-	}
-
-	if overlay.BlankLineBeforeStatement != nil {
-		base.BlankLineBeforeStatement = overlay.BlankLineBeforeStatement
-	}
-
-	if overlay.BladeBlankLineBeforeStatement != nil {
-		base.BladeBlankLineBeforeStatement = overlay.BladeBlankLineBeforeStatement
-	}
-
-	if overlay.HeredocIndentation != nil {
-		base.HeredocIndentation = overlay.HeredocIndentation
-	}
-
-	if overlay.OrderedImports != nil {
-		base.OrderedImports = overlay.OrderedImports
-	}
-
-	if overlay.ArraySyntax != nil {
-		base.ArraySyntax = overlay.ArraySyntax
-	}
-
-	overlayPtr(&base.SortImports, overlay.SortImports)
-	overlayPtr(&base.SingleImportPerStatement, overlay.SingleImportPerStatement)
-	overlayPtr(&base.GroupToSingleImports, overlay.GroupToSingleImports)
-	overlayPtr(&base.SingleTraitInsertPerStatement, overlay.SingleTraitInsertPerStatement)
-	overlayPtr(&base.NoClosingTag, overlay.NoClosingTag)
-	overlayPtr(&base.NoMultilineDoubleArrow, overlay.NoMultilineDoubleArrow)
+	cfg.PHP.InlineEmptyFunctionBodies = false
+	cfg.PHP.InlineEmptyMethodBodies = false
+	cfg.PHP.InlineEmptyClassBodies = false
+	cfg.PHP.InlineEmptyAnonClassBodies = cbp.AllowSingleLineEmptyAnonClasses
+	cfg.PHP.InlineEmptyClosureBodies = cbp.AllowSingleLineAnonFunctions
 }
 
 func applyCurlyBracesPosition(cfg *config.File, cbp *CurlyBracesPosition) {
@@ -716,9 +856,8 @@ func applyBinaryOperatorSpaces(cfg *config.File, bos *BinaryOperatorSpaces) {
 	}
 
 	value, ok := bos.Operators["=>"]
-
 	if !ok {
-		return
+		value = bos.Default
 	}
 
 	switch value {
@@ -772,11 +911,16 @@ func applyHeredocIndentation(cfg *config.File, mode *string) {
 }
 
 func applyOrderedImports(cfg *config.File, oi *OrderedImports) {
-	if oi == nil || len(oi.ImportsOrder) == 0 {
+	if oi == nil {
 		return
 	}
 
-	cfg.PHP.ImportOrder = oi.ImportsOrder
+	order := oi.ImportsOrder
+	if order == nil {
+		order = []string{}
+	}
+
+	cfg.PHP.ImportOrder = order
 }
 
 func applyArraySyntax(cfg *config.File, as *ArraySyntax) {
@@ -790,4 +934,197 @@ func applyArraySyntax(cfg *config.File, as *ArraySyntax) {
 	case "long":
 		cfg.PHP.ShortArray = false
 	}
+}
+
+// Order matters: a later entry replaces an earlier one's whole body, as PHP's
+// array_merge does, and a set expands where it is listed.
+type pintRule struct {
+	name string
+	body jsontext.Value
+}
+
+var (
+	ruleOn  = jsontext.Value("true")
+	ruleOff = jsontext.Value("false")
+)
+
+const (
+	ruleArraySyntax              = "array_syntax"
+	ruleBinaryOperatorSpaces     = "binary_operator_spaces"
+	ruleBlankLineBeforeStatement = "blank_line_before_statement"
+	ruleBracesPosition           = "braces_position"
+	ruleClassDefinition          = "class_definition"
+	ruleConcatSpace              = "concat_space"
+	ruleFunctionDeclaration      = "function_declaration"
+	ruleHeredocIndentation       = "heredoc_indentation"
+	ruleNoClosingTag             = "no_closing_tag"
+	ruleNoMultilineDoubleArrow   = "no_multiline_whitespace_around_double_arrow"
+	ruleNotOperatorSpace         = "not_operator_with_successor_space"
+	ruleOrderedImports           = "ordered_imports"
+	ruleSingleImportPerStatement = "single_import_per_statement"
+	ruleSingleLineEmptyBody      = "single_line_empty_body"
+	ruleSingleTraitInsert        = "single_trait_insert_per_statement"
+	ruleUnaryOperatorSpaces      = "unary_operator_spaces"
+
+	setPSR2       = "@PSR2"
+	setPSR12      = "@PSR12"
+	setPERCS1x0   = "@PER-CS1x0"
+	setPERCS2x0   = "@PER-CS2x0"
+	setPERCS3x0   = "@PER-CS3x0"
+	setPERCS      = "@PER-CS"
+	setSymfony    = "@Symfony"
+	setPhpCsFixer = "@PhpCsFixer"
+)
+
+// Pint's presets and the PHP-CS-Fixer v3.95.25 sets they build on, keeping
+// only the rules and options laravel-fmt models; a body whose modeled options
+// are all the fixer's defaults is written true. No preset runs
+// heredoc_indentation, so each one leaves heredocs as written.
+var pintPresets = map[string][]pintRule{
+	"laravel": {
+		{ruleHeredocIndentation, ruleOff},
+		{ruleArraySyntax, jsontext.Value(`{"syntax":"short"}`)},
+		{ruleBinaryOperatorSpaces, jsontext.Value(`{"default":"single_space"}`)},
+		{ruleBlankLineBeforeStatement, jsontext.Value(`{"statements":["continue","return"]}`)},
+		{ruleBracesPosition, jsontext.Value(`{"control_structures_opening_brace":"same_line",` +
+			`"functions_opening_brace":"next_line_unless_newline_at_signature_end",` +
+			`"classes_opening_brace":"next_line_unless_newline_at_signature_end",` +
+			`"anonymous_classes_opening_brace":"next_line_unless_newline_at_signature_end",` +
+			`"allow_single_line_empty_anonymous_classes":false,"allow_single_line_anonymous_functions":false}`)},
+		{ruleClassDefinition, ruleOn},
+		{ruleConcatSpace, jsontext.Value(`{"spacing":"none"}`)},
+		{ruleFunctionDeclaration, ruleOn},
+		{ruleNoClosingTag, ruleOn},
+		{ruleNoMultilineDoubleArrow, ruleOn},
+		{ruleNotOperatorSpace, ruleOn},
+		{ruleOrderedImports, jsontext.Value(`{"sort_algorithm":"alpha","imports_order":["const","class","function"]}`)},
+		{ruleSingleImportPerStatement, ruleOn},
+		{ruleSingleLineEmptyBody, ruleOn},
+		{ruleUnaryOperatorSpaces, ruleOn},
+	},
+	"per":     {{ruleHeredocIndentation, ruleOff}, {setPERCS, ruleOn}},
+	"psr12":   {{ruleHeredocIndentation, ruleOff}, {setPSR12, ruleOn}},
+	"symfony": {{ruleHeredocIndentation, ruleOff}, {setSymfony, ruleOn}},
+	"empty":   {{ruleHeredocIndentation, ruleOff}},
+}
+
+var pintRuleSets = map[string][]pintRule{
+	setPSR2: {
+		{ruleBracesPosition, jsontext.Value(`{"allow_single_line_anonymous_functions":false}`)},
+		{ruleClassDefinition, ruleOn},
+		{ruleFunctionDeclaration, jsontext.Value(`{"closure_fn_spacing":"one"}`)},
+		{ruleNoClosingTag, ruleOn},
+		{ruleSingleImportPerStatement, ruleOn},
+	},
+	setPSR12: {
+		{setPSR2, ruleOn},
+		{ruleBinaryOperatorSpaces, jsontext.Value(`{"default":"at_least_single_space"}`)},
+		{ruleBracesPosition, jsontext.Value(`{"allow_single_line_anonymous_functions":false,` +
+			`"allow_single_line_empty_anonymous_classes":true}`)},
+		{ruleClassDefinition, jsontext.Value(`{"space_before_parenthesis":true}`)},
+		{ruleOrderedImports, jsontext.Value(`{"imports_order":["class","function","const"],"sort_algorithm":"none"}`)},
+		{ruleSingleImportPerStatement, jsontext.Value(`{"group_to_single_imports":false}`)},
+		{ruleSingleTraitInsert, ruleOn},
+		{ruleUnaryOperatorSpaces, jsontext.Value(`{"only_dec_inc":true}`)},
+	},
+	setPERCS1x0: {{setPSR12, ruleOn}},
+	setPERCS2x0: {
+		{setPERCS1x0, ruleOn},
+		{ruleArraySyntax, ruleOn},
+		{ruleConcatSpace, jsontext.Value(`{"spacing":"one"}`)},
+		{ruleFunctionDeclaration, jsontext.Value(`{"closure_fn_spacing":"none"}`)},
+		{ruleSingleLineEmptyBody, ruleOn},
+	},
+	setPERCS3x0: {{setPERCS2x0, ruleOn}},
+	setPERCS:    {{setPERCS3x0, ruleOn}},
+	setSymfony: {
+		{setPERCS3x0, ruleOn},
+		{ruleBinaryOperatorSpaces, ruleOn},
+		{ruleBlankLineBeforeStatement, jsontext.Value(`{"statements":["return"]}`)},
+		{ruleBracesPosition, jsontext.Value(`{"allow_single_line_anonymous_functions":true,` +
+			`"allow_single_line_empty_anonymous_classes":true}`)},
+		{ruleClassDefinition, ruleOn},
+		{ruleConcatSpace, ruleOn},
+		{ruleFunctionDeclaration, jsontext.Value(`{"closure_fn_spacing":"one"}`)},
+		{ruleNoMultilineDoubleArrow, ruleOn},
+		{ruleOrderedImports, jsontext.Value(`{"imports_order":["class","function","const"],"sort_algorithm":"alpha"}`)},
+		{ruleSingleImportPerStatement, ruleOn},
+		{ruleSingleLineEmptyBody, ruleOff},
+		{ruleUnaryOperatorSpaces, ruleOn},
+	},
+	setPhpCsFixer: {
+		{setPERCS, ruleOn},
+		{setSymfony, ruleOn},
+		{ruleBlankLineBeforeStatement, jsontext.Value(`{"statements":["break","case","continue","declare",` +
+			`"default","exit","goto","include","include_once","phpdoc","require","require_once","return",` +
+			`"switch","throw","try","yield","yield_from"]}`)},
+		{ruleSingleLineEmptyBody, ruleOn},
+	},
+}
+
+var pintRuleAliases = map[string]string{
+	"curly_braces_position": ruleBracesPosition,
+}
+
+var pintRuleSetAliases = map[string]string{
+	"@PER":       setPERCS,
+	"@PER-CS1.0": setPERCS1x0,
+	"@PER-CS2.0": setPERCS2x0,
+	"@PER-CS3.0": setPERCS3x0,
+}
+
+func resolvePintRules(rules []pintRule) Pint {
+	effective := map[string]jsontext.Value{}
+	expandPintRules(effective, rules, nil)
+
+	return rulesToPint(effective)
+}
+
+// A set written false switches off every rule it holds, so its rules take the
+// set's body in place of their own when override is set.
+func expandPintRules(into map[string]jsontext.Value, rules []pintRule, override jsontext.Value) {
+	for _, r := range rules {
+		body := r.body
+		if override != nil {
+			body = override
+		}
+
+		if !strings.HasPrefix(r.name, "@") {
+			into[cmp.Or(pintRuleAliases[r.name], r.name)] = body
+
+			continue
+		}
+
+		name := r.name
+		if alias, ok := pintRuleSetAliases[name]; ok {
+			name = alias
+		}
+
+		var setOverride jsontext.Value
+		if body.Kind() == 'f' {
+			setOverride = ruleOff
+		}
+
+		expandPintRules(into, pintRuleSets[name], setOverride)
+	}
+}
+
+// PHP's array_merge: a rule the preset names keeps its place with pint.json's
+// body, and only new rules go to the end. The place decides which body a later
+// @ set overrides.
+func mergePintRules(preset, own []pintRule) []pintRule {
+	merged := slices.Clone(preset)
+
+	for _, r := range own {
+		at := slices.IndexFunc(merged, func(existing pintRule) bool { return existing.name == r.name })
+		if at < 0 {
+			merged = append(merged, r)
+
+			continue
+		}
+
+		merged[at].body = r.body
+	}
+
+	return merged
 }

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/parser/php"
 	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
@@ -54,13 +53,13 @@ func detectPhpCsFixer(root string) (Pint, bool, error) {
 		return Pint{}, false, nil
 	}
 
-	pint := rulesToPint(rules)
+	pint := resolvePintRules(mergePintRules(nil, rules))
 	pint.Path = path
 
 	return pint, true, nil
 }
 
-func extractSetRules(src []byte) (map[string]jsontext.Value, bool) {
+func extractSetRules(src []byte) ([]pintRule, bool) {
 	file, errs := php.Parse(src)
 	if len(errs) > 0 {
 		return nil, false
@@ -142,10 +141,8 @@ func findSetRulesArray(expr php.Expr) (*php.ArrayExpr, bool) {
 	}
 }
 
-// Rule sets such as @PSR12 are skipped: laravel-fmt does not model what they
-// expand to, so only rules written out are read.
-func transcodeRules(arr *php.ArrayExpr) (map[string]jsontext.Value, bool) {
-	rules := make(map[string]jsontext.Value, len(arr.Elements))
+func transcodeRules(arr *php.ArrayExpr) ([]pintRule, bool) {
+	rules := make([]pintRule, 0, len(arr.Elements))
 
 	for _, el := range arr.Elements {
 		if el.Spread || el.ByRef {
@@ -157,16 +154,12 @@ func transcodeRules(arr *php.ArrayExpr) (map[string]jsontext.Value, bool) {
 			return nil, false
 		}
 
-		if strings.HasPrefix(key, "@") {
-			continue
-		}
-
 		value, ok := transcodeValue(el.Value)
 		if !ok {
 			return nil, false
 		}
 
-		rules[key] = value
+		rules = append(rules, pintRule{name: key, body: value})
 	}
 
 	return rules, true

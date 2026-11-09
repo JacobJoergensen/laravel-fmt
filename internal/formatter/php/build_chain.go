@@ -661,7 +661,7 @@ func (b *builder) qualifiesTrailingBreak(e parser.Expr, stmtLevel bool) bool {
 		return false
 	}
 
-	huggable := len(call.Args) > 0 && isHuggableArg(call.Args[len(call.Args)-1])
+	huggable := len(call.Args) > 0 && b.huggableArg(call.Args[len(call.Args)-1])
 	if huggable && !b.hugLineOverflows(call, stmtLevel) && !b.arrayLinkFitsAlone(call, stmtLevel) {
 		return false
 	}
@@ -1457,7 +1457,7 @@ func (b *builder) stmtArrowFitsAlone(call *parser.CallExpr) bool {
 // hugs at all: a huggable last argument behind leading ones that cannot break,
 // on a callee that stays on one line.
 func (b *builder) hugLineWidth(call *parser.CallExpr) (int, bool) {
-	if len(call.Args) == 0 || !isHuggableArg(call.Args[len(call.Args)-1]) && !isArrowFnArg(call.Args[len(call.Args)-1]) {
+	if len(call.Args) == 0 || !b.huggableArg(call.Args[len(call.Args)-1]) && !isArrowFnArg(call.Args[len(call.Args)-1]) {
 		return 0, false
 	}
 
@@ -1556,7 +1556,7 @@ func (b *builder) callOpenerWidth(callee int, args []parser.Expr) int {
 		return flat - len(", ")
 	}
 
-	if isHuggableArg(args[last]) && (len(args) < 2 || !allNamedArgs(args)) {
+	if b.huggableArg(args[last]) && (len(args) < 2 || !allNamedArgs(args)) {
 		width := open
 		simple := true
 
@@ -1572,7 +1572,7 @@ func (b *builder) callOpenerWidth(callee int, args []parser.Expr) int {
 		}
 	}
 
-	if isHuggableArg(args[0]) && !isArrowFnArg(args[0]) && !isCallLikeArg(args[0]) && b.trailingArgsHug(args[0], args[1:]) &&
+	if b.huggableArg(args[0]) && !isArrowFnArg(args[0]) && !isCallLikeArg(args[0]) && b.trailingArgsHug(args[0], args[1:]) &&
 		!b.leadingArgStaysUnhugged(args) {
 		return open + b.hugOpenerWidth(args[0])
 	}

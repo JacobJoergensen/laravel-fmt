@@ -1,6 +1,7 @@
 package php
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
@@ -41,5 +42,23 @@ func TestValueStaysOnItsArrowLineWhenPintJoinsIt(t *testing.T) {
 				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
 			}
 		})
+	}
+}
+
+// Pint's psr12 keeps the arguments on the call's line and hugs the closure.
+func TestEmptyClosureOnTwoLinesHugsAsAnArgument(t *testing.T) {
+	cfg := config.Default()
+	cfg.PHP.InlineEmptyClosureBodies = false
+
+	src := "<?php\n\n$app->bind(Foo::class, function () {});\n"
+	want := "<?php\n\n$app->bind(Foo::class, function () {\n});\n"
+
+	got := mustFormat(t, []byte(src), cfg)
+	if string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if again := mustFormat(t, got, cfg); !bytes.Equal(again, got) {
+		t.Fatalf("not idempotent:\n%s\nthen:\n%s", got, again)
 	}
 }

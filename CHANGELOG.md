@@ -14,6 +14,19 @@
 * Fixed XML attributes with spaces around `=` being reported as invalid
 * Fixed XML text gaining indent after `laravel-fmt-ignore` or before a close tag
 * Fixed invalid XML like `<a b="1"c="2"/>` or a bare `&` being formatted instead of reported
+* Fixed Pint's `per`, `psr12` and `symfony` presets, rule sets like `@PER-CS` and the order of `pint.json` rules not matching Pint
+* Fixed a Pint rule set to `true` or only partly configured keeping the preset's options
+* Fixed `ordered_imports` with `sort_algorithm: none` still sorting imports
+* Fixed laravel-fmt and Pint's `psr12` and `symfony` presets undoing each other's empty bodies and `new class ()`
+* Fixed `pint.json` with `"rules": []` being rejected and an unknown preset being accepted
+* Fixed `.prettierrc.json` being read as YAML and a byte order mark in `.prettierrc` dropping the first option
+* Fixed Prettier options like `"tabWidth": "4"` being misread or ignored instead of reported
+* Fixed an empty `"prettier"` key in `package.json` hiding `.prettierrc`, and a shared config in `.prettierrc` being reported as invalid
+* Fixed Prettier `overrides` globs like `./src/*.php` or `!*.md` matching other files than Prettier does
+* Fixed Mago values like `same_line`, `Crlf`, `"preserve"` or the `pint` preset being ignored or refused
+* Fixed Mago's `tempest` and `hack` presets missing and its `inline-empty-*-braces` settings being ignored
+* Fixed Mago settings that Mago itself rejects being accepted
+* Fixed a `mago.toml` without a `[formatter]` table letting a parent folder's Mago config apply
 
 ## Version 0.9.0 (2026-11-07)
 * Updated Tailwind to 4.3.5

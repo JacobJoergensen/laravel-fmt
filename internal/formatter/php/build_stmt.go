@@ -64,7 +64,7 @@ func (b *builder) braceBody(style string, body *document.Doc) *document.Doc {
 	return document.Concat(document.Text(" "), body)
 }
 
-func (b *builder) braceBlock(style string, blk *parser.BlockStmt) *document.Doc {
+func (b *builder) braceBlock(style string, blk *parser.BlockStmt, inlineEmpty bool) *document.Doc {
 	if blk == nil {
 		return document.Text(" {}")
 	}
@@ -74,10 +74,18 @@ func (b *builder) braceBlock(style string, blk *parser.BlockStmt) *document.Doc 
 			return b.braceBody(style, dangling)
 		}
 
+		if !inlineEmpty {
+			return b.braceBody(style, emptyBracesOnTwoLines())
+		}
+
 		return document.Text(" {}")
 	}
 
 	return b.braceBody(style, b.block(blk))
+}
+
+func emptyBracesOnTwoLines() *document.Doc {
+	return document.Concat(document.Text("{"), document.HardLine(), document.Text("}"))
 }
 
 func (b *builder) controlBrace(body *document.Doc) *document.Doc {
@@ -114,7 +122,7 @@ func (b *builder) leadAfter(body parser.Stmt) *document.Doc {
 // lines; only class-likes and functions collapse to `{}`.
 func (b *builder) controlBlock(blk *parser.BlockStmt) *document.Doc {
 	if blk != nil && len(blk.Stmts) == 0 && b.danglingComments(blk.RBrace) == nil {
-		return document.Concat(document.Text("{"), document.HardLine(), document.Text("}"))
+		return emptyBracesOnTwoLines()
 	}
 
 	return b.block(blk)

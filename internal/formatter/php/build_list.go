@@ -62,7 +62,7 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 	}
 
 	soleOverflows := sole != nil && b.soleArgOverflows(sole, linkArgs)
-	hugs := isHuggableArg(args[last]) || soleOverflows || b.lastArrowOverflows(args, linkArgs)
+	hugs := b.huggableArg(args[last]) || soleOverflows || b.lastArrowOverflows(args, linkArgs)
 
 	if hugs && !allNamed && !noHug && !authorBroken {
 		leading := make([]*document.Doc, last)
@@ -222,7 +222,7 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 	// trailing a line that reads as the inner call's end, unless that call ends
 	// in an array: `]), $more)` closes the array first, as Mago hugs it.
 	pair := isArrayPair(args)
-	if !allNamed && !noHug && !authorBroken && isHuggableArg(args[0]) && !isArrowFnArg(args[0]) &&
+	if !allNamed && !noHug && !authorBroken && b.huggableArg(args[0]) && !isArrowFnArg(args[0]) &&
 		(!isCallLikeArg(args[0]) || callEndsInArray(args[0])) &&
 		(pair || b.trailingArgsHug(args[0], args[1:])) && !b.leadingArgStaysUnhugged(args) {
 		trailingArg := b.flatText
@@ -491,7 +491,7 @@ func (b *builder) trailingArgsHug(lead parser.Expr, trailing []parser.Expr) bool
 	width := b.depth*b.cfg.IndentWidth + hugCloserWidth(lead) + len(");")
 
 	for _, a := range trailing {
-		if isHuggableArg(a) {
+		if b.huggableArg(a) {
 			return false
 		}
 
@@ -568,6 +568,21 @@ func isArrayArg(arg parser.Expr) bool {
 	_, ok := arg.(*parser.ArrayExpr)
 
 	return ok
+}
+
+// An empty closure whose braces take two lines breaks the way a filled one
+// does, so it hugs as one does.
+func (b *builder) huggableArg(arg parser.Expr) bool {
+	if n, ok := arg.(*parser.NamedArgExpr); ok {
+		arg = n.Value
+	}
+
+	if c, ok := arg.(*parser.ClosureExpr); ok && c.Body != nil && len(c.Body.Stmts) == 0 &&
+		!b.cfg.PHP.InlineEmptyClosureBodies && b.danglingComments(c.Body.RBrace) == nil {
+		return true
+	}
+
+	return isHuggableArg(arg)
 }
 
 // isHuggableArg reports whether arg can carry an overflowing call's wrap without

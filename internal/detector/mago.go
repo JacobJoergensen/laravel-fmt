@@ -2,8 +2,10 @@ package detector
 
 import (
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,48 +17,95 @@ import (
 )
 
 const (
-	magoBraceSameLine       = "same-line"
-	magoBraceNextLine       = "next-line"
-	magoBraceAlwaysNextLine = "always-next-line"
+	magoBraceSameLine       = "same_line"
+	magoBraceNextLine       = "next_line"
+	magoBraceAlwaysNextLine = "always_next_line"
 )
 
 const (
 	magoEndOfLineAuto = "auto"
 	magoEndOfLineLF   = "lf"
 	magoEndOfLineCRLF = "crlf"
+	magoEndOfLineCR   = "cr"
 )
 
 const (
+	magoPresetDefault = "default"
 	magoPresetPsr12   = "psr-12"
-	magoPresetLaravel = "laravel"
+	magoPresetPint    = "pint"
+	magoPresetTempest = "tempest"
+	magoPresetHack    = "hack"
 	magoPresetDrupal  = "drupal"
+)
+
+// Mago 1.59.0's spellings, from crates/formatter/src/settings.rs and
+// presets.rs. A preset name is matched lowercased; the others are not.
+var (
+	magoPresetNames = map[string]string{
+		"default": magoPresetDefault, "per-cs": magoPresetDefault, "percs": magoPresetDefault,
+		"psr-12": magoPresetPsr12, "psr12": magoPresetPsr12,
+		"pint": magoPresetPint, "laravel-pint": magoPresetPint, "laravel_pint": magoPresetPint, "laravel": magoPresetPint,
+		"tempest": magoPresetTempest, "tempest-php": magoPresetTempest, "tempest_php": magoPresetTempest,
+		"hack": magoPresetHack, "hackfmt": magoPresetHack, "hhvm": magoPresetHack,
+		"drupal": magoPresetDrupal,
+	}
+	magoBraceStyles = map[string]string{
+		magoBraceSameLine: magoBraceSameLine, "SameLine": magoBraceSameLine, "same-line": magoBraceSameLine,
+		magoBraceNextLine: magoBraceNextLine, "NextLine": magoBraceNextLine, "next-line": magoBraceNextLine,
+		magoBraceAlwaysNextLine: magoBraceAlwaysNextLine, "AlwaysNextLine": magoBraceAlwaysNextLine,
+		"always-next-line": magoBraceAlwaysNextLine,
+	}
+	magoEndOfLines = map[string]string{
+		magoEndOfLineAuto: magoEndOfLineAuto, "Auto": magoEndOfLineAuto,
+		magoEndOfLineLF: magoEndOfLineLF, "Lf": magoEndOfLineLF,
+		magoEndOfLineCRLF: magoEndOfLineCRLF, "Crlf": magoEndOfLineCRLF,
+		magoEndOfLineCR: magoEndOfLineCR, "Cr": magoEndOfLineCR,
+	}
+	// sort-uses takes a bool or a SortOrder. laravel-fmt sorts only ascending,
+	// so any other order leaves the imports as Mago wrote them.
+	magoSortsAscending = map[string]bool{
+		"preserve": false, "as-is": false, "none": false, "keep": false,
+		"alphanumeric-ascending": true, "alpha-ascending": true, "ascending": true,
+		"alphanumeric-descending": false, "alpha-descending": false, "descending": false,
+		"length-ascending": false, "length-descending": false,
+	}
 )
 
 // Mago is the part of a Mago config's [formatter] table laravel-fmt applies.
 type Mago struct {
-	Path   string `json:"-"`
-	Preset string `json:"preset"`
+	Path   string
+	Preset string
 
-	PrintWidth *int    `json:"print-width"`
-	TabWidth   *int    `json:"tab-width"`
-	UseTabs    *bool   `json:"use-tabs"`
-	EndOfLine  *string `json:"end-of-line"`
+	// LintOnly marks a config with no [formatter] table: Mago formats with it
+	// all the same, but the project formats PHP some other way.
+	LintOnly bool
 
-	RemoveTrailingCloseTag *bool `json:"remove-trailing-close-tag"`
+	PrintWidth *int
+	TabWidth   *int
+	UseTabs    *bool
+	EndOfLine  *string
 
-	FunctionBraceStyle  *string `json:"function-brace-style"`
-	MethodBraceStyle    *string `json:"method-brace-style"`
-	ClasslikeBraceStyle *string `json:"classlike-brace-style"`
-	ControlBraceStyle   *string `json:"control-brace-style"`
+	RemoveTrailingCloseTag *bool
 
-	ConcatSpace    *bool `json:"space-around-concatenation-binary-operator"`
-	ClosureFnSpace *bool `json:"space-before-arrow-function-parameter-list-parenthesis"`
+	FunctionBraceStyle  *string
+	MethodBraceStyle    *string
+	ClasslikeBraceStyle *string
+	ControlBraceStyle   *string
 
-	BlankLineBeforeReturn *bool `json:"empty-line-before-return"`
-	IndentHeredoc         *bool `json:"indent-heredoc"`
+	ConcatSpace    *bool
+	ClosureFnSpace *bool
 
-	SortUses        *bool `json:"sort-uses"`
-	ExpandUseGroups *bool `json:"expand-use-groups"`
+	BlankLineBeforeReturn *bool
+	IndentHeredoc         *bool
+
+	SortUses        *bool
+	ExpandUseGroups *bool
+
+	InlineEmptyFunctionBodies  *bool
+	InlineEmptyMethodBodies    *bool
+	InlineEmptyClassBodies     *bool
+	InlineEmptyAnonClassBodies *bool
+	InlineEmptyClosureBodies   *bool
 }
 
 var (
@@ -67,8 +116,8 @@ var (
 	}
 )
 
-// A Mago config whose extends chain has no [formatter] table only configures
-// linting or analysis, so it counts as not found.
+// Mago reads only the nearest config, so one without a [formatter] table still
+// ends the search.
 func detectMago(root string) (Mago, bool, error) {
 	path, err := findMagoFile(root, magoProjectNames)
 	if err != nil || path == "" {
@@ -81,23 +130,131 @@ func detectMago(root string) (Mago, bool, error) {
 	}
 
 	if formatter == nil {
-		return Mago{}, false, nil
+		return Mago{Path: path, LintOnly: true}, true, nil
 	}
 
-	encoded, err := json.Marshal(formatter)
+	mago, err := magoFromTable(path, formatter)
 	if err != nil {
-		return Mago{}, false, fmt.Errorf("encode %s formatter: %w", path, err)
+		return Mago{}, false, err
 	}
-
-	var mago Mago
-
-	if err := json.Unmarshal(encoded, &mago); err != nil {
-		return Mago{}, false, fmt.Errorf("parse %s formatter: %w", path, err)
-	}
-
-	mago.Path = path
 
 	return mago, true, nil
+}
+
+// Unknown keys are left alone although Mago refuses them: Mago adds keys
+// between releases, and an older list would refuse a newer config.
+func magoFromTable(path string, table map[string]any) (Mago, error) {
+	mago := Mago{Path: path}
+
+	if value, present := table["preset"]; present {
+		name, ok := value.(string)
+		preset, known := magoPresetNames[strings.ToLower(name)]
+
+		if !ok || !known {
+			return Mago{}, fmt.Errorf("%s: formatter.preset must be one of default, psr-12, pint, tempest, hack or drupal, not %s",
+				path, describeConfigValue(value))
+		}
+
+		mago.Preset = preset
+	}
+
+	err := errors.Join(
+		magoWidth(path, table, "print-width", &mago.PrintWidth),
+		magoWidth(path, table, "tab-width", &mago.TabWidth),
+		magoBool(path, table, "use-tabs", &mago.UseTabs),
+		magoSpelling(path, table, "end-of-line", magoEndOfLines, &mago.EndOfLine),
+		magoBool(path, table, "remove-trailing-close-tag", &mago.RemoveTrailingCloseTag),
+		magoSpelling(path, table, "function-brace-style", magoBraceStyles, &mago.FunctionBraceStyle),
+		magoSpelling(path, table, "method-brace-style", magoBraceStyles, &mago.MethodBraceStyle),
+		magoSpelling(path, table, "classlike-brace-style", magoBraceStyles, &mago.ClasslikeBraceStyle),
+		magoSpelling(path, table, "control-brace-style", magoBraceStyles, &mago.ControlBraceStyle),
+		magoBool(path, table, "space-around-concatenation-binary-operator", &mago.ConcatSpace),
+		magoBool(path, table, "space-before-arrow-function-parameter-list-parenthesis", &mago.ClosureFnSpace),
+		magoBool(path, table, "empty-line-before-return", &mago.BlankLineBeforeReturn),
+		magoBool(path, table, "indent-heredoc", &mago.IndentHeredoc),
+		magoSortUses(path, table, &mago.SortUses),
+		magoBool(path, table, "expand-use-groups", &mago.ExpandUseGroups),
+		magoBool(path, table, "inline-empty-function-braces", &mago.InlineEmptyFunctionBodies),
+		magoBool(path, table, "inline-empty-method-braces", &mago.InlineEmptyMethodBodies),
+		magoBool(path, table, "inline-empty-classlike-braces", &mago.InlineEmptyClassBodies),
+		magoBool(path, table, "inline-empty-anonymous-class-braces", &mago.InlineEmptyAnonClassBodies),
+		magoBool(path, table, "inline-empty-closure-braces", &mago.InlineEmptyClosureBodies),
+	)
+
+	return mago, err
+}
+
+// A width is a usize in Mago.
+func magoWidth(path string, table map[string]any, key string, dst **int) error {
+	value, present := table[key]
+	if !present {
+		return nil
+	}
+
+	n, isNumber := prettierNumber(value)
+	if !isNumber || n < 0 || n != math.Trunc(n) || n > math.MaxInt32 {
+		return fmt.Errorf("%s: formatter.%s must be a whole number, not %s", path, key, describeConfigValue(value))
+	}
+
+	*dst = new(int(n))
+
+	return nil
+}
+
+func magoBool(path string, table map[string]any, key string, dst **bool) error {
+	value, present := table[key]
+	if !present {
+		return nil
+	}
+
+	b, ok := value.(bool)
+	if !ok {
+		return fmt.Errorf("%s: formatter.%s must be true or false, not %s", path, key, describeConfigValue(value))
+	}
+
+	*dst = &b
+
+	return nil
+}
+
+func magoSpelling(path string, table map[string]any, key string, spellings map[string]string, dst **string) error {
+	value, present := table[key]
+	if !present {
+		return nil
+	}
+
+	s, _ := value.(string)
+
+	canonical, ok := spellings[s]
+	if !ok {
+		return fmt.Errorf("%s: formatter.%s cannot be %s", path, key, describeConfigValue(value))
+	}
+
+	*dst = &canonical
+
+	return nil
+}
+
+func magoSortUses(path string, table map[string]any, dst **bool) error {
+	value, present := table["sort-uses"]
+	if !present {
+		return nil
+	}
+
+	switch v := value.(type) {
+	case bool:
+		*dst = &v
+
+		return nil
+	case string:
+		if ascending, ok := magoSortsAscending[v]; ok {
+			*dst = &ascending
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("%s: formatter.sort-uses must be true, false or a sort order, not %s", path, describeConfigValue(value))
 }
 
 func findMagoFile(dir string, names []string) (string, error) {
@@ -278,8 +435,7 @@ func mergeMagoTables(base, overlay map[string]any) map[string]any {
 	return base
 }
 
-// An unknown preset gets Mago's defaults, since Mago has no unformatted state.
-// Snapshot of Mago's crates/formatter/src/presets.rs.
+// name is a canonical preset name, or empty for Mago's defaults.
 func presetMago(name string) Mago {
 	m := magoDefaultPreset()
 
@@ -288,11 +444,30 @@ func presetMago(name string) Mago {
 		m.EndOfLine = new(magoEndOfLineLF)
 		m.SortUses = new(false)
 		m.ExpandUseGroups = new(false)
-	case magoPresetLaravel:
+		m.InlineEmptyFunctionBodies = new(false)
+		m.InlineEmptyMethodBodies = new(false)
+		m.InlineEmptyClassBodies = new(false)
+	case magoPresetPint:
 		m.EndOfLine = new(magoEndOfLineLF)
 		m.ConcatSpace = new(false)
 		m.ClosureFnSpace = new(true)
 		m.BlankLineBeforeReturn = new(true)
+	case magoPresetTempest:
+		m.PrintWidth = new(180)
+		m.ClosureFnSpace = new(true)
+		m.IndentHeredoc = new(false)
+		m.InlineEmptyFunctionBodies = new(false)
+		m.InlineEmptyMethodBodies = new(false)
+	case magoPresetHack:
+		m.PrintWidth = new(80)
+		m.TabWidth = new(2)
+		m.EndOfLine = new(magoEndOfLineLF)
+		m.FunctionBraceStyle = new(magoBraceSameLine)
+		m.MethodBraceStyle = new(magoBraceSameLine)
+		m.ClasslikeBraceStyle = new(magoBraceSameLine)
+		m.ClosureFnSpace = new(true)
+		m.BlankLineBeforeReturn = new(true)
+		m.IndentHeredoc = new(false)
 	case magoPresetDrupal:
 		m.EndOfLine = new(magoEndOfLineLF)
 		m.TabWidth = new(2)
@@ -300,6 +475,8 @@ func presetMago(name string) Mago {
 		m.MethodBraceStyle = new(magoBraceSameLine)
 		m.ClasslikeBraceStyle = new(magoBraceSameLine)
 		m.ClosureFnSpace = new(true)
+		m.InlineEmptyFunctionBodies = new(false)
+		m.InlineEmptyMethodBodies = new(false)
 	}
 
 	return m
@@ -323,12 +500,22 @@ func magoDefaultPreset() Mago {
 		IndentHeredoc:          new(true),
 		SortUses:               new(true),
 		ExpandUseGroups:        new(true),
+
+		InlineEmptyFunctionBodies:  new(true),
+		InlineEmptyMethodBodies:    new(true),
+		InlineEmptyClassBodies:     new(true),
+		InlineEmptyAnonClassBodies: new(true),
+		InlineEmptyClosureBodies:   new(true),
 	}
 }
 
 // presetMago sets every modeled option, so detecting Mago moves PHP output to
 // Mago's whole style, not only the keys mago.toml writes.
 func applyMago(cfg *config.File, m *Mago) {
+	if m.LintOnly {
+		return
+	}
+
 	effective := presetMago(m.Preset)
 	mergeMago(&effective, m)
 
@@ -349,6 +536,14 @@ func applyMago(cfg *config.File, m *Mago) {
 	setIfPresent(&cfg.PHP.RemoveTrailingCloseTag, effective.RemoveTrailingCloseTag)
 	setIfPresent(&cfg.PHP.SortUses, effective.SortUses)
 	setIfPresent(&cfg.PHP.ExpandUseGroups, effective.ExpandUseGroups)
+	setIfPresent(&cfg.PHP.InlineEmptyFunctionBodies, effective.InlineEmptyFunctionBodies)
+	setIfPresent(&cfg.PHP.InlineEmptyMethodBodies, effective.InlineEmptyMethodBodies)
+	setIfPresent(&cfg.PHP.InlineEmptyClassBodies, effective.InlineEmptyClassBodies)
+	setIfPresent(&cfg.PHP.InlineEmptyAnonClassBodies, effective.InlineEmptyAnonClassBodies)
+	setIfPresent(&cfg.PHP.InlineEmptyClosureBodies, effective.InlineEmptyClosureBodies)
+
+	// Mago has no setting for it and writes `new class(`.
+	cfg.PHP.AnonClassParenSpace = false
 	setIfPresent(&cfg.PHP.ConcatSpace, effective.ConcatSpace)
 	setIfPresent(&cfg.PHP.ClosureFnSpace, effective.ClosureFnSpace)
 	applyMagoBlankLineBeforeReturn(cfg, effective.BlankLineBeforeReturn)
@@ -396,6 +591,11 @@ func mergeMago(base, overlay *Mago) {
 	overlayPtr(&base.IndentHeredoc, overlay.IndentHeredoc)
 	overlayPtr(&base.SortUses, overlay.SortUses)
 	overlayPtr(&base.ExpandUseGroups, overlay.ExpandUseGroups)
+	overlayPtr(&base.InlineEmptyFunctionBodies, overlay.InlineEmptyFunctionBodies)
+	overlayPtr(&base.InlineEmptyMethodBodies, overlay.InlineEmptyMethodBodies)
+	overlayPtr(&base.InlineEmptyClassBodies, overlay.InlineEmptyClassBodies)
+	overlayPtr(&base.InlineEmptyAnonClassBodies, overlay.InlineEmptyAnonClassBodies)
+	overlayPtr(&base.InlineEmptyClosureBodies, overlay.InlineEmptyClosureBodies)
 }
 
 func applyMagoEndOfLine(cfg *config.File, value *string) {

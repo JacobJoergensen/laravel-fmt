@@ -172,6 +172,16 @@ type PHP struct {
 	// rule has group_to_single_imports off: a `use A\{B, C};` group stays one
 	// statement while ExpandUseGroups still splits a comma list.
 	KeepBracedUseGroups bool `json:"-"`
+	// The InlineEmpty fields are off only where the project's PHP-CS-Fixer rules
+	// put an empty body's braces on lines of their own (braces_position without
+	// single_line_empty_body).
+	InlineEmptyFunctionBodies  bool `json:"-"`
+	InlineEmptyMethodBodies    bool `json:"-"`
+	InlineEmptyClassBodies     bool `json:"-"`
+	InlineEmptyAnonClassBodies bool `json:"-"`
+	InlineEmptyClosureBodies   bool `json:"-"`
+	// AnonClassParenSpace is set by class_definition's space_before_parenthesis.
+	AnonClassParenSpace bool `json:"-"`
 }
 
 // Blade holds Blade formatter options.
@@ -331,6 +341,12 @@ func Default() *File {
 			BlankLineBeforeStatements: []string{StmtContinue, StmtReturn},
 			HeredocIndentation:        HeredocIndentNone,
 			ImportOrder:               []string{ImportKindConst, ImportKindClass, ImportKindFunction},
+
+			InlineEmptyFunctionBodies:  true,
+			InlineEmptyMethodBodies:    true,
+			InlineEmptyClassBodies:     true,
+			InlineEmptyAnonClassBodies: true,
+			InlineEmptyClosureBodies:   true,
 		},
 		Markdown: Markdown{
 			ProseWrap: ProseWrapPreserve,

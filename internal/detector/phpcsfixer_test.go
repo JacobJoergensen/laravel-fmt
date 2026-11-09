@@ -64,7 +64,7 @@ return (new PhpCsFixer\Config())
 	}
 }
 
-func TestDetectPhpCsFixerRuleSetsOnlyNotDetected(t *testing.T) {
+func TestDetectPhpCsFixerExpandsRuleSetsInOrder(t *testing.T) {
 	dir := t.TempDir()
 	src := `<?php
 
@@ -72,13 +72,13 @@ return (new PhpCsFixer\Config())->setRules(['@PSR12' => true, '@Symfony' => true
 `
 	seedFileAt(t, dir, ".php-cs-fixer.dist.php", src)
 
-	_, found, err := detectPhpCsFixer(dir)
-	if err != nil {
-		t.Fatalf("detectPhpCsFixer: %v", err)
+	pint, found, err := detectPhpCsFixer(dir)
+	if err != nil || !found {
+		t.Fatalf("detectPhpCsFixer: found = %v, err = %v", found, err)
 	}
 
-	if found {
-		t.Fatal("detectPhpCsFixer reported found for an @-rule-set-only config, want not found")
+	if pint.OrderedImports == nil || pint.OrderedImports.SortAlgorithm != pintSortAlpha {
+		t.Errorf("OrderedImports = %+v, want @Symfony's alpha sort over @PSR12's none", pint.OrderedImports)
 	}
 }
 

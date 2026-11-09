@@ -98,9 +98,7 @@ func TestDetectPintToleratesNonObjectRuleBody(t *testing.T) {
 		name string
 		raw  string
 	}{
-		{"rule set to true", `{"rules":{"curly_braces_position":true}}`},
-		{"rule set to false", `{"rules":{"curly_braces_position":false}}`},
-		{"rule set to string", `{"rules":{"curly_braces_position":"default"}}`},
+		{"rule set to string", `{"preset":"empty","rules":{"curly_braces_position":"default"}}`},
 	}
 
 	for _, tc := range cases {
@@ -130,9 +128,8 @@ func TestDetectPintNilWhenRuleAbsent(t *testing.T) {
 		name string
 		raw  string
 	}{
-		{"rules present without curly_braces_position", `{"rules":{"binary_operator_spaces":true}}`},
-		{"no rules key", `{"preset":"laravel"}`},
-		{"empty object", `{}`},
+		{"rules present without braces_position", `{"preset":"empty","rules":{"binary_operator_spaces":true}}`},
+		{"no rules key", `{"preset":"empty"}`},
 	}
 
 	for _, tc := range cases {
@@ -357,17 +354,6 @@ func TestPresetPintLaravelDefaults(t *testing.T) {
 	}
 }
 
-func TestPresetPintUnknownReturnsZero(t *testing.T) {
-	got := presetPint("not-a-real-preset")
-
-	if got.ConcatSpace != nil || got.NotOperatorWithSuccessorSpace != nil ||
-		got.FunctionDeclaration != nil || got.BinaryOperatorSpaces != nil ||
-		got.BlankLineBeforeStatement != nil || got.CurlyBracesPosition != nil ||
-		got.OrderedImports != nil {
-		t.Fatalf("unknown preset returned non-zero Pint: %+v", got)
-	}
-}
-
 func TestDetectPintMalformedJSONErrors(t *testing.T) {
 	dir := t.TempDir()
 
@@ -528,9 +514,15 @@ func TestDetectPintMergesPintJSONOverTheExtendedFile(t *testing.T) {
 		t.Errorf("ConcatSpace = %+v, want the base's spacing=one", pint.ConcatSpace)
 	}
 
+	// The options neither file sets take the fixer's defaults.
 	wantBraces := &CurlyBracesPosition{
-		FunctionsOpeningBrace: pintBraceSameLine,
-		ClassesOpeningBrace:   pintBraceNextLine,
+		FunctionsOpeningBrace:         pintBraceSameLine,
+		ClassesOpeningBrace:           pintBraceNextLine,
+		AnonymousClassesOpeningBrace:  pintBraceSameLine,
+		ControlStructuresOpeningBrace: pintBraceSameLine,
+
+		AllowSingleLineEmptyAnonClasses: true,
+		AllowSingleLineAnonFunctions:    true,
 	}
 
 	if !reflect.DeepEqual(pint.CurlyBracesPosition, wantBraces) {
@@ -948,15 +940,24 @@ func TestApplyPintCurlyBracesPosition(t *testing.T) {
 		}
 	})
 
-	t.Run("empty CurlyBracesPosition leaves baseline", func(t *testing.T) {
+	t.Run("empty CurlyBracesPosition leaves the brace styles", func(t *testing.T) {
 		cfg := config.Default()
 		original := cfg.PHP
 		pint := &Pint{CurlyBracesPosition: &CurlyBracesPosition{}}
 
 		applyPint(cfg, pint)
 
-		if !reflect.DeepEqual(cfg.PHP, original) {
-			t.Fatalf("PHP config changed with empty CurlyBracesPosition: got %+v, want %+v", cfg.PHP, original)
+		got := []string{
+			cfg.PHP.FunctionBraceStyle, cfg.PHP.MethodBraceStyle, cfg.PHP.ClasslikeBraceStyle,
+			cfg.PHP.AnonClassBraceStyle, cfg.PHP.ControlBraceStyle,
+		}
+		want := []string{
+			original.FunctionBraceStyle, original.MethodBraceStyle, original.ClasslikeBraceStyle,
+			original.AnonClassBraceStyle, original.ControlBraceStyle,
+		}
+
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("brace styles changed with empty CurlyBracesPosition: got %v, want %v", got, want)
 		}
 	})
 }
@@ -987,7 +988,6 @@ func TestApplyPintDisabledRuleSwitchesItsBehaviorOff(t *testing.T) {
 			}
 
 			pint := rulesToPint(rules)
-			pint.Preset = "laravel"
 
 			cfg := config.Default()
 			applyPint(cfg, &pint)
@@ -996,35 +996,6 @@ func TestApplyPintDisabledRuleSwitchesItsBehaviorOff(t *testing.T) {
 				t.Fatalf("rules %s gave %+v", tc.rules, cfg.PHP)
 			}
 		})
-	}
-}
-
-func TestApplyPintExplicitOverridesPreset(t *testing.T) {
-	disabled := false
-	cfg := config.Default()
-
-	applyPint(cfg, &Pint{
-		Preset:                        "laravel",
-		ConcatSpace:                   &ConcatSpace{Spacing: pintSpacingOne},
-		NotOperatorWithSuccessorSpace: &disabled,
-		FunctionDeclaration:           &FunctionDeclaration{ClosureFnSpacing: pintSpacingNone},
-		BlankLineBeforeStatement:      &BlankLineBeforeStatement{Statements: []string{}},
-	})
-
-	if !cfg.PHP.ConcatSpace {
-		t.Errorf("ConcatSpace = false, want true (explicit concat_space=one overrides preset none)")
-	}
-
-	if cfg.PHP.NotOperatorSpace {
-		t.Errorf("NotOperatorSpace = true, want false (explicit false overrides preset true)")
-	}
-
-	if cfg.PHP.ClosureFnSpace {
-		t.Errorf("ClosureFnSpace = true, want false (explicit none overrides preset one)")
-	}
-
-	if len(cfg.PHP.BlankLineBeforeStatements) != 0 {
-		t.Errorf("BlankLineBeforeStatements = %v, want empty (explicit empty list overrides preset)", cfg.PHP.BlankLineBeforeStatements)
 	}
 }
 
@@ -1065,7 +1036,7 @@ func TestApplyPintHeredocIndentation(t *testing.T) {
 			cfg := config.Default()
 			cfg.PHP.HeredocIndentation = config.HeredocIndentStartPlusOne
 
-			applyPint(cfg, &Pint{Preset: preset})
+			applyPint(cfg, new(presetPint(preset)))
 
 			if cfg.PHP.HeredocIndentation != config.HeredocIndentNone {
 				t.Errorf("%s HeredocIndentation = %q, want none", preset, cfg.PHP.HeredocIndentation)
@@ -1076,7 +1047,7 @@ func TestApplyPintHeredocIndentation(t *testing.T) {
 
 func TestApplyPintLaravelPresetWithoutOverrides(t *testing.T) {
 	cfg := config.Default()
-	applyPint(cfg, &Pint{Preset: "laravel"})
+	applyPint(cfg, new(presetPint("laravel")))
 
 	if cfg.PHP.ConcatSpace {
 		t.Errorf("ConcatSpace = true, want false (laravel preset uses concat_space none)")
@@ -1155,31 +1126,31 @@ func TestApplyPintOrderedImports(t *testing.T) {
 		}
 	})
 
-	t.Run("empty order keeps the baseline", func(t *testing.T) {
+	t.Run("null order groups no kind apart", func(t *testing.T) {
 		cfg := config.Default()
 
-		applyPint(cfg, &Pint{OrderedImports: &OrderedImports{ImportsOrder: []string{}}})
+		applyPint(cfg, &Pint{OrderedImports: &OrderedImports{SortAlgorithm: pintSortAlpha}})
 
-		if !reflect.DeepEqual(cfg.PHP.ImportOrder, baseline) {
-			t.Errorf("ImportOrder = %v, want baseline %v", cfg.PHP.ImportOrder, baseline)
+		if len(cfg.PHP.ImportOrder) != 0 {
+			t.Errorf("ImportOrder = %v, want none", cfg.PHP.ImportOrder)
 		}
 	})
 
 	t.Run("laravel preset reproduces the baseline", func(t *testing.T) {
 		cfg := config.Default()
 
-		applyPint(cfg, &Pint{Preset: "laravel"})
+		applyPint(cfg, new(presetPint("laravel")))
 
 		if !reflect.DeepEqual(cfg.PHP.ImportOrder, baseline) {
 			t.Errorf("laravel ImportOrder = %v, want %v", cfg.PHP.ImportOrder, baseline)
 		}
 	})
 
-	t.Run("explicit order overrides preset", func(t *testing.T) {
+	t.Run("an explicit order is applied", func(t *testing.T) {
 		cfg := config.Default()
 		order := []string{config.ImportKindClass, config.ImportKindFunction, config.ImportKindConst}
 
-		applyPint(cfg, &Pint{Preset: "laravel", OrderedImports: &OrderedImports{ImportsOrder: order}})
+		applyPint(cfg, &Pint{OrderedImports: &OrderedImports{ImportsOrder: order}})
 
 		if !reflect.DeepEqual(cfg.PHP.ImportOrder, order) {
 			t.Errorf("ImportOrder = %v, want %v (explicit overrides laravel preset)", cfg.PHP.ImportOrder, order)
@@ -1190,7 +1161,7 @@ func TestApplyPintOrderedImports(t *testing.T) {
 func TestDefaultMatchesLaravelPreset(t *testing.T) {
 	cfg := config.Default()
 
-	applyPint(cfg, &Pint{Preset: "laravel"})
+	applyPint(cfg, new(presetPint("laravel")))
 
 	// What Pint itself will rewrite is a fact about a project running Pint, not
 	// a default laravel-fmt shares with the preset.
@@ -1434,6 +1405,248 @@ func TestApplyPintKeepsBracedUseGroupsWhenTheOptionIsOff(t *testing.T) {
 			if cfg.PHP.ExpandUseGroups != tc.splitLists || cfg.PHP.KeepBracedUseGroups != tc.keepGroups {
 				t.Errorf("ExpandUseGroups = %v, KeepBracedUseGroups = %v; want %v, %v",
 					cfg.PHP.ExpandUseGroups, cfg.PHP.KeepBracedUseGroups, tc.splitLists, tc.keepGroups)
+			}
+		})
+	}
+}
+
+func presetPint(name string) Pint {
+	return resolvePintRules(pintPresets[name])
+}
+
+func TestDetectPintExpandsARuleSetWrittenInRules(t *testing.T) {
+	dir := t.TempDir()
+	seedFileAt(t, dir, "pint.json", `{"rules":{"@PER-CS":true}}`)
+
+	pint, _, err := detectPint(dir)
+	if err != nil {
+		t.Fatalf("detectPint: %v", err)
+	}
+
+	if pint.ConcatSpace == nil || pint.ConcatSpace.Spacing != pintSpacingOne ||
+		pint.FunctionDeclaration == nil || pint.FunctionDeclaration.ClosureFnSpacing != pintSpacingNone {
+		t.Fatalf("ConcatSpace = %+v, FunctionDeclaration = %+v, want @PER-CS over laravel", pint.ConcatSpace, pint.FunctionDeclaration)
+	}
+}
+
+func TestDetectPintFillsAPartialRuleWithTheFixerDefaults(t *testing.T) {
+	cases := []struct {
+		name  string
+		rules string
+		check func(config.PHP) bool
+	}{
+		{"true body", `{"blank_line_before_statement":true}`, func(p config.PHP) bool {
+			return reflect.DeepEqual(p.BlankLineBeforeStatements, []string{"break", "continue", "declare", "return", "throw", "try"})
+		}},
+		{"partial body", `{"braces_position":{"classes_opening_brace":"same_line"}}`, func(p config.PHP) bool {
+			return p.ClasslikeBraceStyle == config.BraceStyleSameLine && p.AnonClassBraceStyle == config.BraceStyleSameLine
+		}},
+		{"default operator strategy", `{"binary_operator_spaces":{"default":"align_single_space_minimal"}}`, func(p config.PHP) bool {
+			return p.AlignFatArrow
+		}},
+		{"unsorted imports", `{"ordered_imports":{"sort_algorithm":"none"}}`, func(p config.PHP) bool {
+			return !p.SortUses
+		}},
+		{"imports without an order", `{"ordered_imports":true}`, func(p config.PHP) bool {
+			return p.SortUses && len(p.ImportOrder) == 0
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			seedFileAt(t, dir, "pint.json", `{"rules":`+tc.rules+`}`)
+
+			pint, _, err := detectPint(dir)
+			if err != nil {
+				t.Fatalf("detectPint: %v", err)
+			}
+
+			cfg := config.Default()
+			applyPint(cfg, &pint)
+
+			if !tc.check(cfg.PHP) {
+				t.Fatalf("rules %s gave %+v", tc.rules, cfg.PHP)
+			}
+		})
+	}
+}
+
+func TestDetectPintAcceptsAndRejectsWhatPintDoes(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		wantErr bool
+	}{
+		{"empty rules list", `{"rules":[]}`, false},
+		{"top-level list", `[]`, false},
+		{"null", `null`, true},
+		{"unknown preset", `{"preset":"psr2"}`, true},
+		{"empty preset", `{"preset":""}`, true},
+		{"rules as a list of rules", `{"rules":["concat_space"]}`, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			seedFileAt(t, dir, "pint.json", tc.raw)
+
+			if _, _, err := detectPint(dir); (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDetectPintKeepsTheBaseRulesUnderAnEmptyRulesList(t *testing.T) {
+	dir := t.TempDir()
+	seedFileAt(t, dir, "base.json", `{"rules":{"concat_space":{"spacing":"one"}}}`)
+	seedFileAt(t, dir, "pint.json", `{"extend":"base.json","rules":[]}`)
+
+	pint, _, err := detectPint(dir)
+	if err != nil {
+		t.Fatalf("detectPint: %v", err)
+	}
+
+	if pint.ConcatSpace == nil || pint.ConcatSpace.Spacing != pintSpacingOne {
+		t.Fatalf("ConcatSpace = %+v, want the base's one", pint.ConcatSpace)
+	}
+}
+
+func TestLastKeyWinsKeepsTheFirstPlaceOfARepeatedKey(t *testing.T) {
+	for range 20 {
+		got, err := lastKeyWins([]byte(`{"d":1,"c":2,"b":3,"a":4,"d":5}`))
+		if err != nil {
+			t.Fatalf("lastKeyWins: %v", err)
+		}
+
+		if string(got) != `{"d":5,"c":2,"b":3,"a":4}` {
+			t.Fatalf("got %s, want the written order with d's last value", got)
+		}
+	}
+}
+
+// Rule order decides what an @ set overrides, so it must come out the same on
+// every run, in the order PHP's array functions give.
+func TestDetectPintOrdersRulesAsPint(t *testing.T) {
+	cases := []struct {
+		name  string
+		files map[string]string
+		check func(config.PHP) bool
+	}{
+		{
+			"a preset rule keeps its place under a set written after it",
+			map[string]string{"pint.json": `{"preset":"laravel","rules":{"@PER-CS":true,"concat_space":{"spacing":"none"}}}`},
+			func(p config.PHP) bool { return p.ConcatSpace },
+		},
+		{
+			"an extended file's rules come before new ones",
+			map[string]string{
+				"base.json": `{"preset":"empty","rules":{"single_trait_insert_per_statement":false}}`,
+				"pint.json": `{"extend":"base.json","rules":{"@PSR12":true}}`,
+			},
+			func(p config.PHP) bool { return p.SplitTraitUses },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, content := range tc.files {
+				seedFileAt(t, dir, name, content)
+			}
+
+			for range 20 {
+				pint, _, err := detectPint(dir)
+				if err != nil {
+					t.Fatalf("detectPint: %v", err)
+				}
+
+				cfg := config.Default()
+				applyPint(cfg, &pint)
+
+				if !tc.check(cfg.PHP) {
+					t.Fatalf("the earlier rule won: %+v", cfg.PHP)
+				}
+			}
+		})
+	}
+}
+
+// The values each preset gives are what Pint's own output shows for it.
+func TestPintPresetsMatchPint(t *testing.T) {
+	sortedOrder := []string{config.ImportKindClass, config.ImportKindFunction, config.ImportKindConst}
+
+	cases := []struct {
+		preset string
+		check  func(config.PHP) bool
+	}{
+		{"per", func(p config.PHP) bool {
+			return p.ConcatSpace && !p.ClosureFnSpace && p.AnonClassBraceStyle == config.BraceStyleSameLine &&
+				!p.SortUses && p.KeepBracedUseGroups && reflect.DeepEqual(p.ImportOrder, sortedOrder)
+		}},
+		{"psr12", func(p config.PHP) bool {
+			return p.ClosureFnSpace && p.AnonClassBraceStyle == config.BraceStyleSameLine &&
+				!p.SortUses && p.KeepBracedUseGroups && reflect.DeepEqual(p.ImportOrder, sortedOrder)
+		}},
+		{"symfony", func(p config.PHP) bool {
+			return !p.ConcatSpace && p.ClosureFnSpace && !p.NotOperatorSpace && !p.KeepBracedUseGroups &&
+				p.AnonClassBraceStyle == config.BraceStyleSameLine && p.SortUses &&
+				reflect.DeepEqual(p.ImportOrder, sortedOrder) &&
+				reflect.DeepEqual(p.BlankLineBeforeStatements, []string{config.StmtReturn})
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.preset, func(t *testing.T) {
+			cfg := config.Default()
+			applyPint(cfg, new(presetPint(tc.preset)))
+
+			if !tc.check(cfg.PHP) {
+				t.Fatalf("%s preset gave %+v", tc.preset, cfg.PHP)
+			}
+		})
+	}
+}
+
+func TestRuleSetSetToFalseSwitchesItsRulesOff(t *testing.T) {
+	pint := resolvePintRules([]pintRule{
+		{"@PSR12", ruleOn},
+		{"@PSR12", jsontext.Value("false")},
+	})
+
+	if pint.SingleTraitInsertPerStatement == nil || *pint.SingleTraitInsertPerStatement {
+		t.Fatalf("SingleTraitInsertPerStatement = %v, want false", pint.SingleTraitInsertPerStatement)
+	}
+}
+
+func TestPintPresetsLayEmptyBodiesOutAsPint(t *testing.T) {
+	cases := []struct {
+		preset                             string
+		functions, classes, anon, closures bool
+		parenSpace                         bool
+	}{
+		{"laravel", true, true, true, true, false},
+		{"per", true, true, true, true, true},
+		{"psr12", false, false, true, false, true},
+		{"symfony", false, false, true, true, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.preset, func(t *testing.T) {
+			cfg := config.Default()
+			applyPint(cfg, new(presetPint(tc.preset)))
+
+			p := cfg.PHP
+			got := []bool{
+				p.InlineEmptyFunctionBodies, p.InlineEmptyMethodBodies, p.InlineEmptyClassBodies, p.InlineEmptyAnonClassBodies,
+				p.InlineEmptyClosureBodies, p.AnonClassParenSpace,
+			}
+			// Pint lays methods out with the functions rule.
+			want := []bool{tc.functions, tc.functions, tc.classes, tc.anon, tc.closures, tc.parenSpace}
+
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("functions, methods, classes, anonymous classes, closures inline and paren space = %v, want %v", got, want)
 			}
 		})
 	}

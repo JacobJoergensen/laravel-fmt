@@ -1,14 +1,18 @@
 package detector
 
 import (
+	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -19,12 +23,14 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/tailwind"
 	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
+	"github.com/JacobJoergensen/laravel-fmt/internal/walk"
 )
 
 const (
 	prettierKindPackageJSON = iota
 	prettierKindPackageYAML
 	prettierKindConfig
+	prettierKindJSON
 	prettierKindTOML
 	prettierKindUnsupported
 )
@@ -39,7 +45,7 @@ var prettierCandidates = []struct {
 	{"package.json", prettierKindPackageJSON},
 	{"package.yaml", prettierKindPackageYAML},
 	{".prettierrc", prettierKindConfig},
-	{".prettierrc.json", prettierKindConfig},
+	{".prettierrc.json", prettierKindJSON},
 	{".prettierrc.yml", prettierKindConfig},
 	{".prettierrc.yaml", prettierKindConfig},
 	{".prettierrc.json5", prettierKindUnsupported},
@@ -187,44 +193,24 @@ func (p *Prettier) formats(lang formatter.Language) bool {
 }
 
 type prettierOptions struct {
-	PrintWidth  *int    `yaml:"printWidth"`
-	TabWidth    *int    `yaml:"tabWidth"`
-	UseTabs     *bool   `yaml:"useTabs"`
-	EndOfLine   *string `yaml:"endOfLine"`
-	SingleQuote *bool   `yaml:"singleQuote"`
-	ProseWrap   *string `yaml:"proseWrap"`
+	PrintWidth  *int
+	TabWidth    *int
+	UseTabs     *bool
+	EndOfLine   *string
+	SingleQuote *bool
+	ProseWrap   *string
 	// TailwindStylesheet belongs to prettier-plugin-tailwindcss, not Prettier.
-	TailwindStylesheet *string `yaml:"tailwindStylesheet"`
+	TailwindStylesheet *string
 }
 
 type prettierOverride struct {
-	Files        stringOrSlice   `yaml:"files"`
-	ExcludeFiles stringOrSlice   `yaml:"excludeFiles"`
-	Options      prettierOptions `yaml:"options"`
+	Files        stringOrSlice
+	ExcludeFiles stringOrSlice
+	Options      prettierOptions
 }
 
 // stringOrSlice is Prettier's overrides[].files: one glob or many.
 type stringOrSlice []string
-
-func (s *stringOrSlice) UnmarshalYAML(unmarshal func(any) error) error {
-	var single string
-
-	if err := unmarshal(&single); err == nil {
-		*s = stringOrSlice{single}
-
-		return nil
-	}
-
-	var many []string
-
-	if err := unmarshal(&many); err != nil {
-		return err
-	}
-
-	*s = many
-
-	return nil
-}
 
 func detectPrettier(root string) (Prettier, bool, error) {
 	present, err := dirNames(root, prettierCandidateNames)
@@ -264,7 +250,7 @@ func detectPrettier(root string) (Prettier, bool, error) {
 			}
 
 			return prettier, true, nil
-		case prettierKindConfig, prettierKindTOML:
+		case prettierKindConfig, prettierKindJSON, prettierKindTOML:
 			return loadPrettierConfig(path, candidate.kind)
 		default:
 			// Prettier uses this file, which laravel-fmt cannot evaluate. It
@@ -354,14 +340,12 @@ func loadPrettierConfig(path string, kind int) (Prettier, bool, error) {
 		return Prettier{}, false, fmt.Errorf("read %s: %w", path, err)
 	}
 
-	if kind == prettierKindTOML {
-		raw, err = prettierTOMLAsJSON(path, raw)
-		if err != nil {
-			return Prettier{}, false, err
-		}
+	value, err := decodePrettierConfig(path, raw, kind)
+	if err != nil {
+		return Prettier{}, false, err
 	}
 
-	prettier, err := parsePrettierConfig(path, raw)
+	prettier, err := prettierFromValue(path, value)
 	if err != nil {
 		return Prettier{}, false, err
 	}
@@ -369,21 +353,39 @@ func loadPrettierConfig(path string, kind int) (Prettier, bool, error) {
 	return prettier, true, nil
 }
 
-func prettierTOMLAsJSON(path string, raw []byte) ([]byte, error) {
-	var parsed map[string]any
+// Node keeps a byte order mark, which the YAML parser accepts and JSON.parse
+// refuses.
+func decodePrettierConfig(path string, raw []byte, kind int) (any, error) {
+	var value any
 
-	if err := toml.Unmarshal(raw, &parsed); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+	switch kind {
+	case prettierKindJSON:
+		kept, err := lastKeyWins(raw)
+		if err != nil {
+			return nil, config.ParseJSONError(path, raw, err)
+		}
+
+		if err := json.Unmarshal(kept, &value); err != nil {
+			return nil, config.ParseJSONError(path, kept, err)
+		}
+	case prettierKindTOML:
+		var table map[string]any
+
+		if err := toml.Unmarshal(raw, &table); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+
+		value = table
+	default:
+		if err := yaml.Unmarshal(bytes.TrimPrefix(raw, []byte(walk.UTF8BOM)), &value); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
 	}
 
-	encoded, err := json.Marshal(parsed)
-	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-
-	return encoded, nil
+	return value, nil
 }
 
+// Prettier passes over a manifest whose "prettier" value is falsy.
 func loadPrettierFromPackage(path string, kind int) (Prettier, bool, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -395,7 +397,7 @@ func loadPrettierFromPackage(path string, kind int) (Prettier, bool, error) {
 	}
 
 	if kind == prettierKindPackageYAML {
-		err = yaml.Unmarshal(raw, &pkg)
+		err = yaml.Unmarshal(bytes.TrimPrefix(raw, []byte(walk.UTF8BOM)), &pkg)
 	} else {
 		// Node decodes the file as UTF-8 before parsing it, replacing bytes that
 		// do not decode instead of failing.
@@ -407,25 +409,11 @@ func loadPrettierFromPackage(path string, kind int) (Prettier, bool, error) {
 		}
 	}
 
-	if err != nil {
+	if err != nil || isFalsy(pkg.Prettier) {
 		return Prettier{}, false, nil //nolint:nilerr // Prettier skips a manifest it cannot parse; formatting the file reports it
 	}
 
-	switch pkg.Prettier.(type) {
-	case nil:
-		return Prettier{}, false, nil
-	case string:
-		// A shared config Prettier resolves as a Node module, which laravel-fmt
-		// cannot. Prettier stops here, so the search does too.
-		return Prettier{Path: path, Unread: true}, true, nil
-	}
-
-	encoded, err := json.Marshal(pkg.Prettier)
-	if err != nil {
-		return Prettier{}, false, fmt.Errorf("parse %s: %w", path, err)
-	}
-
-	prettier, err := parsePrettierConfig(path, encoded)
+	prettier, err := prettierFromValue(path, pkg.Prettier)
 	if err != nil {
 		return Prettier{}, false, err
 	}
@@ -433,30 +421,242 @@ func loadPrettierFromPackage(path string, kind int) (Prettier, bool, error) {
 	return prettier, true, nil
 }
 
-// Options and overrides are decoded in two passes because goccy cannot set an
-// unexported embedded struct (JSON parses fine, being a YAML subset).
-func parsePrettierConfig(path string, raw []byte) (Prettier, error) {
-	var options prettierOptions
-
-	if err := yaml.Unmarshal(raw, &options); err != nil {
-		return Prettier{}, fmt.Errorf("parse %s: %w", path, err)
+func isFalsy(value any) bool {
+	switch v := value.(type) {
+	case nil:
+		return true
+	case bool:
+		return !v
+	case string:
+		return v == ""
 	}
 
-	var wrapper struct {
-		Overrides []prettierOverride `yaml:"overrides"`
-		Plugins   []string           `yaml:"plugins"`
+	n, isNumber := prettierNumber(value)
+
+	return isNumber && n == 0
+}
+
+// A string is a shared config, which Prettier loads as a Node module and
+// laravel-fmt cannot; Prettier stops at it, so the search does too.
+func prettierFromValue(path string, value any) (Prettier, error) {
+	switch v := value.(type) {
+	case nil:
+		return Prettier{Path: path}, nil
+	case string:
+		return Prettier{Path: path, Unread: true}, nil
+	case map[string]any:
+		return buildPrettier(path, v)
 	}
 
-	if err := yaml.Unmarshal(raw, &wrapper); err != nil {
-		return Prettier{}, fmt.Errorf("parse %s: %w", path, err)
+	return Prettier{}, fmt.Errorf("%s: the config must be an object, not %s", path, describeConfigValue(value))
+}
+
+func buildPrettier(path string, m map[string]any) (Prettier, error) {
+	options, err := prettierOptionsFrom(path, "", m)
+	if err != nil {
+		return Prettier{}, err
 	}
 
-	return Prettier{
-		Path:      path,
-		options:   options,
-		overrides: wrapper.Overrides,
-		Plugins:   wrapper.Plugins,
-	}, nil
+	overrides, err := prettierOverridesFrom(path, m["overrides"])
+	if err != nil {
+		return Prettier{}, err
+	}
+
+	var plugins []string
+
+	if list, ok := m["plugins"].([]any); ok {
+		for _, entry := range list {
+			if name, ok := entry.(string); ok {
+				plugins = append(plugins, name)
+			}
+		}
+	}
+
+	return Prettier{Path: path, options: options, overrides: overrides, Plugins: plugins}, nil
+}
+
+func prettierOverridesFrom(path string, value any) ([]prettierOverride, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	list, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s: overrides must be a list, not %s", path, describeConfigValue(value))
+	}
+
+	overrides := make([]prettierOverride, 0, len(list))
+
+	for i, entry := range list {
+		key := fmt.Sprintf("overrides[%d]", i)
+
+		m, ok := entry.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s: %s must be an object, not %s", path, key, describeConfigValue(entry))
+		}
+
+		override, err := prettierOverrideFrom(path, key, m)
+		if err != nil {
+			return nil, err
+		}
+
+		overrides = append(overrides, override)
+	}
+
+	return overrides, nil
+}
+
+func prettierOverrideFrom(path, key string, m map[string]any) (prettierOverride, error) {
+	files, err := prettierGlobs(path, key+".files", m["files"])
+	if err != nil {
+		return prettierOverride{}, err
+	}
+
+	excludes, err := prettierGlobs(path, key+".excludeFiles", m["excludeFiles"])
+	if err != nil {
+		return prettierOverride{}, err
+	}
+
+	override := prettierOverride{Files: files, ExcludeFiles: excludes}
+
+	raw := m["options"]
+	if raw == nil {
+		return override, nil
+	}
+
+	table, ok := raw.(map[string]any)
+	if !ok {
+		return prettierOverride{}, fmt.Errorf("%s: %s.options must be an object, not %s", path, key, describeConfigValue(raw))
+	}
+
+	override.Options, err = prettierOptionsFrom(path, key+".options.", table)
+
+	return override, err
+}
+
+func prettierGlobs(path, key string, value any) (stringOrSlice, error) {
+	switch v := value.(type) {
+	case nil:
+		return nil, nil
+	case string:
+		return stringOrSlice{v}, nil
+	case []any:
+		globs := make(stringOrSlice, 0, len(v))
+
+		for _, entry := range v {
+			glob, ok := entry.(string)
+			if !ok {
+				return nil, fmt.Errorf("%s: %s must hold strings, not %s", path, key, describeConfigValue(entry))
+			}
+
+			globs = append(globs, glob)
+		}
+
+		return globs, nil
+	}
+
+	return nil, fmt.Errorf("%s: %s must be a string or a list, not %s", path, key, describeConfigValue(value))
+}
+
+// The options are checked as Prettier's own option schema checks them, so a
+// value Prettier refuses is an error here too rather than quietly ignored.
+func prettierOptionsFrom(path, prefix string, m map[string]any) (prettierOptions, error) {
+	var o prettierOptions
+
+	err := errors.Join(
+		prettierInt(path, prefix, m, "printWidth", &o.PrintWidth),
+		prettierInt(path, prefix, m, "tabWidth", &o.TabWidth),
+		prettierBool(path, prefix, m, "useTabs", &o.UseTabs),
+		prettierBool(path, prefix, m, "singleQuote", &o.SingleQuote),
+		prettierChoice(path, prefix, m, "endOfLine", &o.EndOfLine, "lf", "crlf", "cr", "auto"),
+		prettierChoice(path, prefix, m, "proseWrap", &o.ProseWrap,
+			config.ProseWrapAlways, config.ProseWrapNever, config.ProseWrapPreserve),
+	)
+
+	if stylesheet, ok := m["tailwindStylesheet"].(string); ok {
+		o.TailwindStylesheet = &stylesheet
+	}
+
+	return o, err
+}
+
+func prettierInt(path, prefix string, m map[string]any, key string, dst **int) error {
+	value, present := m[key]
+	if !present {
+		return nil
+	}
+
+	n, isNumber := prettierNumber(value)
+	if !isNumber || n != math.Trunc(n) || math.Abs(n) > math.MaxInt32 {
+		return fmt.Errorf("%s: %s%s must be an integer, not %s", path, prefix, key, describeConfigValue(value))
+	}
+
+	*dst = new(int(n))
+
+	return nil
+}
+
+func prettierBool(path, prefix string, m map[string]any, key string, dst **bool) error {
+	value, present := m[key]
+	if !present {
+		return nil
+	}
+
+	b, ok := value.(bool)
+	if !ok {
+		return fmt.Errorf("%s: %s%s must be true or false, not %s", path, prefix, key, describeConfigValue(value))
+	}
+
+	*dst = &b
+
+	return nil
+}
+
+func prettierChoice(path, prefix string, m map[string]any, key string, dst **string, choices ...string) error {
+	value, present := m[key]
+	if !present {
+		return nil
+	}
+
+	s, ok := value.(string)
+	if !ok || !slices.Contains(choices, s) {
+		return fmt.Errorf("%s: %s%s must be one of %s, not %s",
+			path, prefix, key, strings.Join(choices, ", "), describeConfigValue(value))
+	}
+
+	*dst = &s
+
+	return nil
+}
+
+func prettierNumber(value any) (float64, bool) {
+	switch n := value.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	}
+
+	return 0, false
+}
+
+func describeConfigValue(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return "null"
+	case string:
+		return strconv.Quote(v)
+	case []any:
+		return "a list"
+	case map[string]any:
+		return "an object"
+	}
+
+	return fmt.Sprint(value)
 }
 
 // resolveForFile merges every override matching rel over the top-level
@@ -466,7 +666,7 @@ func (p *Prettier) resolveForFile(rel string) prettierOptions {
 	merged := p.options
 
 	for _, override := range p.overrides {
-		if prettierFilesMatch(override.Files, rel) && !prettierFilesMatch(override.ExcludeFiles, rel) {
+		if prettierOverrideMatches(rel, override.Files, override.ExcludeFiles) {
 			mergePrettierOptions(&merged, override.Options)
 		}
 	}
@@ -474,14 +674,43 @@ func (p *Prettier) resolveForFile(rel string) prettierOptions {
 	return merged
 }
 
-func prettierFilesMatch(patterns stringOrSlice, rel string) bool {
-	for _, pattern := range patterns {
-		if editorConfigGlobMatches(pattern, rel) {
+// Prettier's pathMatchesGlobs: patterns without a slash match the base name,
+// patterns with one the path, and excludeFiles is read the same way as the
+// group it filters.
+func prettierOverrideMatches(rel string, files, excludes []string) bool {
+	for _, baseName := range []bool{true, false} {
+		matches := func(pattern string) bool { return micromatchGlob(pattern, rel, baseName) }
+
+		inGroup := func(pattern string) bool {
+			return strings.Contains(pattern, "/") != baseName && matches(pattern)
+		}
+
+		if slices.ContainsFunc(files, inGroup) && !slices.ContainsFunc(excludes, matches) {
 			return true
 		}
 	}
 
 	return false
+}
+
+func micromatchGlob(pattern, rel string, baseName bool) bool {
+	if pattern == rel {
+		return true
+	}
+
+	pattern = strings.TrimPrefix(pattern, "./")
+
+	negated := strings.HasPrefix(pattern, "!") && !strings.HasPrefix(pattern, "!(")
+	if negated {
+		pattern = pattern[1:]
+	}
+
+	subject := rel
+	if baseName {
+		subject = path.Base(rel)
+	}
+
+	return matchEditorConfigGlob(pattern, subject) != negated
 }
 
 func mergePrettierOptions(base *prettierOptions, overlay prettierOptions) {

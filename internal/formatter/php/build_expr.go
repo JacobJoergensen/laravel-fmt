@@ -1976,9 +1976,18 @@ func (b *builder) closure(n *parser.ClosureExpr) *document.Doc {
 		}
 	}
 
-	parts = append(parts, b.returnType(n.ReturnColon, n.ReturnType), document.Text(" "), b.block(n.Body))
+	parts = append(parts, b.returnType(n.ReturnColon, n.ReturnType), document.Text(" "), b.closureBody(n.Body))
 
 	return document.Concat(parts...)
+}
+
+func (b *builder) closureBody(blk *parser.BlockStmt) *document.Doc {
+	empty := blk != nil && len(blk.Stmts) == 0 && b.danglingComments(blk.RBrace) == nil
+	if empty && !b.cfg.PHP.InlineEmptyClosureBodies {
+		return emptyBracesOnTwoLines()
+	}
+
+	return b.block(blk)
 }
 
 // `(\n    $x,\n)` saves no width, so a single parameter stays on the line.

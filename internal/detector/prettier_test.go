@@ -9,6 +9,7 @@ import (
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
+	"github.com/JacobJoergensen/laravel-fmt/internal/walk"
 )
 
 func TestDetectPrettierParsesJSON(t *testing.T) {
@@ -597,6 +598,84 @@ func TestDetectPrettierFollowsPrettiersSearchOrder(t *testing.T) {
 
 			if tc.wantWidth != 0 {
 				wantIntPtr(t, got.options.PrintWidth, tc.wantWidth, "PrintWidth")
+			}
+		})
+	}
+}
+
+func TestDetectPrettierReadsAConfigAsPrettierDoes(t *testing.T) {
+	const bom = walk.UTF8BOM
+
+	cases := []struct {
+		name       string
+		files      map[string]string
+		wantUnread bool
+		wantWidth  int
+		wantErr    bool
+	}{
+		{"an empty prettier key is passed over", map[string]string{"package.json": `{"prettier": ""}`, ".prettierrc": `printWidth: 90`}, false, 90, false},
+		{"a false prettier key is passed over", map[string]string{"package.json": `{"prettier": false}`, ".prettierrc": `printWidth: 90`}, false, 90, false},
+		{"a manifest with a byte order mark is passed over", map[string]string{"package.json": bom + `{"prettier": {"printWidth": 70}}`, ".prettierrc": `printWidth: 90`}, false, 90, false},
+		{"a string is a shared config", map[string]string{".prettierrc": `"@company/prettier-config"`}, true, 0, false},
+		{"YAML in a .json config", map[string]string{".prettierrc.json": `printWidth: 100`}, false, 0, true},
+		{"a key written twice in JSON keeps the last", map[string]string{".prettierrc.json": `{"printWidth": 80, "printWidth": 120}`}, false, 120, false},
+		{"a byte order mark before YAML", map[string]string{".prettierrc": bom + `printWidth: 100`}, false, 100, false},
+		{"a byte order mark before JSON", map[string]string{".prettierrc.json": bom + `{"printWidth": 100}`}, false, 0, true},
+		{"a whole number written with a fraction", map[string]string{".prettierrc.json": `{"printWidth": 80.0}`}, false, 80, false},
+		{"a number written as a string", map[string]string{".prettierrc.json": `{"tabWidth": "4"}`}, false, 0, true},
+		{"a choice in the wrong case", map[string]string{".prettierrc": `proseWrap: Always`}, false, 0, true},
+		{"a choice laravel-fmt has no use for", map[string]string{".prettierrc": "printWidth: 100\nendOfLine: cr"}, false, 100, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, content := range tc.files {
+				seedFileAt(t, dir, name, content)
+			}
+
+			prettier, _, err := detectPrettier(dir)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
+			}
+
+			if tc.wantErr {
+				return
+			}
+
+			if prettier.Unread != tc.wantUnread {
+				t.Fatalf("Unread = %v, want %v", prettier.Unread, tc.wantUnread)
+			}
+
+			if tc.wantWidth != 0 {
+				wantIntPtr(t, prettier.options.PrintWidth, tc.wantWidth, "PrintWidth")
+			}
+		})
+	}
+}
+
+func TestPrettierOverrideMatchesAsMicromatchDoes(t *testing.T) {
+	cases := []struct {
+		name     string
+		files    []string
+		excludes []string
+		rel      string
+		want     bool
+	}{
+		{"a base name pattern matches in any folder", []string{"*.php"}, nil, "app/a.php", true},
+		{"a base name exclusion leaves a path group alone", []string{"resources/**/*.php"}, []string{"*.blade.php"}, "resources/views/a.blade.php", true},
+		{"a path exclusion leaves a base name group alone", []string{"*.md"}, []string{"docs/**"}, "docs/a.md", true},
+		{"an exclusion of the same kind applies", []string{"*.md"}, []string{"CHANGELOG.md"}, "CHANGELOG.md", false},
+		{"a leading slash matches nothing", []string{"/src/*.php"}, nil, "src/a.php", false},
+		{"a leading ./ is dropped", []string{"./src/*.php"}, nil, "src/a.php", true},
+		{"a leading ! negates", []string{"!*.md"}, nil, "a.php", true},
+		{"a negated pattern skips what it names", []string{"!*.md"}, nil, "a.md", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := prettierOverrideMatches(tc.rel, tc.files, tc.excludes); got != tc.want {
+				t.Fatalf("prettierOverrideMatches(%q, %q, %q) = %v, want %v", tc.rel, tc.files, tc.excludes, got, tc.want)
 			}
 		})
 	}

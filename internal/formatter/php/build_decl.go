@@ -22,7 +22,7 @@ func (b *builder) functionDecl(n *parser.FunctionDecl) *document.Doc {
 		b.returnType(n.ReturnColon, n.ReturnType),
 	)
 
-	return document.Concat(sig, b.signatureBlock(b.cfg.PHP.FunctionBraceStyle, paramsID, n.Body))
+	return document.Concat(sig, b.signatureBlock(b.cfg.PHP.FunctionBraceStyle, b.cfg.PHP.InlineEmptyFunctionBodies, paramsID, n.Body))
 }
 
 // signatureBlock is braceBlock for a function or method, where the brace hugs
@@ -30,16 +30,20 @@ func (b *builder) functionDecl(n *parser.FunctionDecl) *document.Doc {
 // next_line_unless_newline_at_signature_end). paramsID is the group holding
 // the parameter list, or 0 when no list could break. always-next-line is the
 // style that never hugs.
-func (b *builder) signatureBlock(style string, paramsID int32, blk *parser.BlockStmt) *document.Doc {
+func (b *builder) signatureBlock(style string, inlineEmpty bool, paramsID int32, blk *parser.BlockStmt) *document.Doc {
 	if style != config.BraceStyleNextLine || paramsID == 0 {
-		return b.braceBlock(style, blk)
-	}
-
-	if blk == nil || (len(blk.Stmts) == 0 && b.danglingComments(blk.RBrace) == nil) {
-		return document.Text(" {}")
+		return b.braceBlock(style, blk, inlineEmpty)
 	}
 
 	lead := document.IfBreakOf(paramsID, document.Text(" "), document.HardLine())
+
+	if blk == nil || (len(blk.Stmts) == 0 && b.danglingComments(blk.RBrace) == nil) {
+		if blk == nil || inlineEmpty {
+			return document.Text(" {}")
+		}
+
+		return document.Concat(lead, emptyBracesOnTwoLines())
+	}
 
 	if len(blk.Stmts) == 0 {
 		return document.Concat(lead, b.danglingComments(blk.RBrace))
@@ -293,7 +297,7 @@ func (b *builder) classStmt(n *parser.ClassStmt) *document.Doc {
 		head = append(head, document.Text(" implements "), b.joinNames(n.ImplementsNames))
 	}
 
-	return document.Concat(document.Concat(head...), b.braceMembers(b.cfg.PHP.ClasslikeBraceStyle, n.Members, n.RBrace))
+	return document.Concat(document.Concat(head...), b.braceMembers(b.cfg.PHP.ClasslikeBraceStyle, n.Members, n.RBrace, b.cfg.PHP.InlineEmptyClassBodies))
 }
 
 func (b *builder) anonClass(n *parser.AnonClassExpr) *document.Doc {
@@ -307,6 +311,10 @@ func (b *builder) anonClass(n *parser.AnonClassExpr) *document.Doc {
 	head = append(head, b.modifiers(n.Modifiers), document.Text("class"))
 
 	if has(n.LParen) {
+		if b.cfg.PHP.AnonClassParenSpace {
+			head = append(head, document.Text(" "))
+		}
+
 		head = append(head, b.argList(n.Args, withTrailingComma))
 	}
 
@@ -318,7 +326,7 @@ func (b *builder) anonClass(n *parser.AnonClassExpr) *document.Doc {
 		head = append(head, document.Text(" implements "), b.joinNames(n.ImplementsNames))
 	}
 
-	return document.Concat(document.Concat(head...), b.braceMembers(b.cfg.PHP.AnonClassBraceStyle, n.Members, n.RBrace))
+	return document.Concat(document.Concat(head...), b.braceMembers(b.cfg.PHP.AnonClassBraceStyle, n.Members, n.RBrace, b.cfg.PHP.InlineEmptyAnonClassBodies))
 }
 
 func (b *builder) interfaceStmt(n *parser.InterfaceStmt) *document.Doc {
@@ -328,13 +336,13 @@ func (b *builder) interfaceStmt(n *parser.InterfaceStmt) *document.Doc {
 		head = document.Concat(head, document.Text(" extends "), b.joinNames(n.ExtendsNames))
 	}
 
-	return document.Concat(head, b.braceMembers(b.cfg.PHP.ClasslikeBraceStyle, n.Members, n.RBrace))
+	return document.Concat(head, b.braceMembers(b.cfg.PHP.ClasslikeBraceStyle, n.Members, n.RBrace, b.cfg.PHP.InlineEmptyClassBodies))
 }
 
 func (b *builder) traitStmt(n *parser.TraitStmt) *document.Doc {
 	head := document.Concat(b.attributes(n.Attributes), document.Text("trait "), b.tok(n.Name))
 
-	return document.Concat(head, b.braceMembers(b.cfg.PHP.ClasslikeBraceStyle, n.Members, n.RBrace))
+	return document.Concat(head, b.braceMembers(b.cfg.PHP.ClasslikeBraceStyle, n.Members, n.RBrace, b.cfg.PHP.InlineEmptyClassBodies))
 }
 
 func (b *builder) enumStmt(n *parser.EnumStmt) *document.Doc {
@@ -348,7 +356,7 @@ func (b *builder) enumStmt(n *parser.EnumStmt) *document.Doc {
 		head = document.Concat(head, document.Text(" implements "), b.joinNames(n.ImplementsNames))
 	}
 
-	return document.Concat(head, b.braceMembers(b.cfg.PHP.ClasslikeBraceStyle, n.Members, n.RBrace))
+	return document.Concat(head, b.braceMembers(b.cfg.PHP.ClasslikeBraceStyle, n.Members, n.RBrace, b.cfg.PHP.InlineEmptyClassBodies))
 }
 
 func (b *builder) joinNames(names []*parser.Name) *document.Doc {
@@ -384,10 +392,14 @@ func (b *builder) classBody(members []parser.ClassMember, rbrace parser.Token) *
 	return document.Concat(document.Text("{"), document.Indent(body), document.HardLine(), document.Text("}"))
 }
 
-func (b *builder) braceMembers(style string, members []parser.ClassMember, rbrace parser.Token) *document.Doc {
+func (b *builder) braceMembers(style string, members []parser.ClassMember, rbrace parser.Token, inlineEmpty bool) *document.Doc {
 	if len(members) == 0 {
 		if dangling := b.danglingComments(rbrace); dangling != nil {
 			return b.braceBody(style, dangling)
+		}
+
+		if !inlineEmpty {
+			return b.braceBody(style, emptyBracesOnTwoLines())
 		}
 
 		return document.Text(" {}")
@@ -434,7 +446,7 @@ func (b *builder) methodDecl(n *parser.MethodDecl) *document.Doc {
 		return document.Concat(sig, document.Text(";"))
 	}
 
-	return document.Concat(sig, b.signatureBlock(b.cfg.PHP.MethodBraceStyle, paramsID, n.Body))
+	return document.Concat(sig, b.signatureBlock(b.cfg.PHP.MethodBraceStyle, b.cfg.PHP.InlineEmptyMethodBodies, paramsID, n.Body))
 }
 
 func (b *builder) propertyDecl(n *parser.PropertyDecl) *document.Doc {

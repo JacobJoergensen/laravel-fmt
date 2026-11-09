@@ -1,6 +1,7 @@
 package php
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -423,5 +424,22 @@ func TestEmptyArrayHeadGluesNoOperator(t *testing.T) {
 				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
 			}
 		})
+	}
+}
+
+func TestEmptyClosureBodyFollowsTheProjectsLayout(t *testing.T) {
+	cfg := config.Default()
+	cfg.PHP.InlineEmptyClosureBodies = false
+
+	src := "<?php\n\n$noop = function () {};\n"
+	want := "<?php\n\n$noop = function () {\n};\n"
+
+	got := mustFormat(t, []byte(src), cfg)
+	if string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if again := mustFormat(t, got, cfg); !bytes.Equal(again, got) {
+		t.Fatalf("not idempotent:\n%s\nthen:\n%s", got, again)
 	}
 }
