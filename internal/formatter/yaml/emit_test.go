@@ -335,6 +335,13 @@ func TestFormatBlockScalarKeepsTrailingSpace(t *testing.T) {
 		"a: |\n \t\nb: 2\n",
 		": >\n \t\n  0\n",
 		"a: |\n  0\n\n  \t\nb: 2\n",
+		"|\n 0\n  \n",
+		"|1\n  \n",
+		"a: |1\n   \nb: 1\n",
+		"|\n 0\n\n  \n",
+		"a: |\n  0\n\n   \nb: 1\n",
+		" >\n 0\n  \n",
+		" |+\n 0\n\n",
 	}
 
 	for _, src := range cases {

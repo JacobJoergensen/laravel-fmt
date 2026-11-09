@@ -65,11 +65,12 @@ func lastLeaf(node parser.Node) parser.Node {
 func emitFrozen(w *formatter.Writer, src []byte, span parser.Span, last parser.Node) {
 	start := span.Start.Offset
 
-	// A leaf's span stops before its final line break unless that break is
-	// value: a `+` block scalar's span runs over the breaks it keeps.
+	// The last leaf's span is value to its end: a block scalar's whitespace-only
+	// lines, and the breaks a `+` keeps, look like the trailing blank lines
+	// trimmed after it.
 	floor := start
 	if leaf := lastLeaf(last); leaf != nil {
-		if end := leaf.Span().End.Offset; end > start && src[end-1] == '\n' {
+		if end := leaf.Span().End.Offset; end > start {
 			floor = end
 		}
 	}

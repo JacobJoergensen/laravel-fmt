@@ -210,6 +210,16 @@ func (p *yamlParser) parseDocBody() Node {
 		p.Pos = saved
 	}
 
+	// A document that is one block scalar belongs to the stream, so its body
+	// need only sit past column 0, wherever the header is, and its
+	// whitespace-only lines are content a value's body would leave out.
+	if blockIndicator(p.Src[p.Pos.Offset:]) != nil {
+		start := p.Pos
+		end := p.consumeValueBlock(0, blockIsScalarBody)
+
+		return &Verbatim{Range: mkspan(start, end), Raw: p.slice(start, end), Bail: true, Indent: ind}
+	}
+
 	return p.bailLine(ind)
 }
 
@@ -751,7 +761,17 @@ func contentIndent(span []byte, ownerIndent int) int {
 }
 
 func hasIndentIndicator(span []byte) bool {
-	return bytes.ContainsAny(blockIndicator(span), "123456789")
+	return indentIndicator(span) > 0
+}
+
+func indentIndicator(span []byte) int {
+	for _, c := range blockIndicator(span) {
+		if c >= '1' && c <= '9' {
+			return int(c - '0')
+		}
+	}
+
+	return 0
 }
 
 func blockIndicator(span []byte) []byte {
@@ -907,6 +927,14 @@ func (p *yamlParser) consumeIndentedBlock(indent int, scalarBody bool) Position 
 	contentEnd := p.consumeLineKeepEnd()
 	bodyIndent := -1
 
+	// An indentation indicator fixes the body indent before any line shows it,
+	// so a whitespace-only first line past it is already content.
+	if scalarBody {
+		if digit := indentIndicator(p.slice(header, contentEnd)); digit > 0 {
+			bodyIndent = indent + digit
+		}
+	}
+
 	var deepestBlank Position
 
 	deepestBlankIndent := -1
@@ -924,7 +952,7 @@ func (p *yamlParser) consumeIndentedBlock(indent int, scalarBody bool) Position 
 				continue
 			}
 
-			if !p.triviaPrecedesDeeperLine(indent, scalarBody) {
+			if !p.triviaPrecedesDeeperLine(indent, bodyIndent, scalarBody) {
 				break
 			}
 
@@ -949,7 +977,7 @@ func (p *yamlParser) consumeIndentedBlock(indent int, scalarBody bool) Position 
 			// part of the block: absorbing it would tie the block extent to the
 			// source indent, which shifts under normalization. Interior
 			// comments (deeper content follows) are still absorbed.
-			if !scalarBody && p.atCommentLine() && !p.triviaPrecedesDeeperLine(indent, scalarBody) {
+			if !scalarBody && p.atCommentLine() && !p.triviaPrecedesDeeperLine(indent, bodyIndent, scalarBody) {
 				break
 			}
 
@@ -1009,11 +1037,18 @@ func (p *yamlParser) consumeLineKeepEnd() Position {
 	return end
 }
 
-func (p *yamlParser) triviaPrecedesDeeperLine(indent int, scalarBody bool) bool {
+func (p *yamlParser) triviaPrecedesDeeperLine(indent, bodyIndent int, scalarBody bool) bool {
 	saved := p.Pos
 
 	for !p.Eof() {
 		tabText := scalarBody && tabOpensScalarBody(p.restOfLine(0), indent)
+
+		// A scalar body's whitespace-only line past its indent is text too.
+		if scalarBody && bodyIndent >= 0 && p.atBlankLine() && p.blankLineHoldsText(indent, bodyIndent) {
+			p.Pos = saved
+
+			return true
+		}
 
 		if !tabText && (p.atBlankLine() || !scalarBody && p.atCommentLine()) {
 			p.consumeLine()

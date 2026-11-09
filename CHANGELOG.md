@@ -10,7 +10,7 @@
 * Fixed a flat JSON array or object before a comma going one column past `printWidth`
 * Fixed JSONC comments around a comma swapping places
 * Fixed invalid YAML like `branches: [main]tags: [v1]`, `-\tname: x` or `--- a: b` being reshaped instead of reported
-* Fixed a YAML block scalar line holding only a tab being removed
+* Fixed YAML block scalar lines holding only tabs or spaces being removed
 * Fixed XML attributes with spaces around `=` being reported as invalid
 * Fixed XML text gaining indent after `laravel-fmt-ignore` or before a close tag
 * Fixed invalid XML like `<a b="1"c="2"/>` or a bare `&` being formatted instead of reported
