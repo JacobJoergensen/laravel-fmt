@@ -191,7 +191,7 @@ func magoWidth(path string, table map[string]any, key string, dst **int) error {
 		return nil
 	}
 
-	n, isNumber := prettierNumber(value)
+	n, isNumber := configNumber(value)
 	if !isNumber || n < 0 || n != math.Trunc(n) || n > math.MaxInt32 {
 		return fmt.Errorf("%s: formatter.%s must be a whole number, not %s", path, key, describeConfigValue(value))
 	}

@@ -10,9 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -263,77 +261,6 @@ func detectPrettier(root string) (Prettier, bool, error) {
 	return Prettier{}, false, nil
 }
 
-// One listing per directory is cheaper than a stat per candidate name, which
-// added 7% to a monorepo run. A directory that can be entered but not listed,
-// like a 0711 home folder, falls back to the stat per candidate.
-func dirNames(dir string, candidates []string) (map[string]bool, error) {
-	f, err := os.Open(dir)
-	if err != nil {
-		switch {
-		case upward.Absent(err):
-			return map[string]bool{}, nil
-		case errors.Is(err, os.ErrPermission):
-			return statNames(dir, candidates)
-		}
-
-		return nil, fmt.Errorf("open %s: %w", dir, err)
-	}
-
-	names, err := f.Readdirnames(-1)
-	if closeErr := f.Close(); err == nil && closeErr != nil {
-		err = closeErr
-	}
-
-	// A Windows ACL can allow opening the folder and deny reading it.
-	if errors.Is(err, os.ErrPermission) {
-		return statNames(dir, candidates)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("list %s: %w", dir, err)
-	}
-
-	set := make(map[string]bool, len(names))
-	for _, name := range names {
-		set[nameKey(name)] = true
-	}
-
-	return set, nil
-}
-
-// Lstat, not Stat, so a dangling symlink counts as present, as a listing
-// reports it.
-func statNames(dir string, candidates []string) (map[string]bool, error) {
-	set := make(map[string]bool, len(candidates))
-
-	for _, name := range candidates {
-		path := filepath.Join(dir, name)
-
-		_, err := os.Lstat(path)
-		if err == nil {
-			set[nameKey(name)] = true
-
-			continue
-		}
-
-		if !upward.Absent(err) {
-			return nil, fmt.Errorf("stat %s: %w", path, err)
-		}
-	}
-
-	return set, nil
-}
-
-// nameKey folds case where the platform's default filesystem does, so a listed
-// name matches exactly the files an os.Stat of the candidate would have found.
-func nameKey(name string) string {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		return strings.ToLower(name)
-	}
-
-	return name
-}
-
 func loadPrettierConfig(path string, kind int) (Prettier, bool, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -431,7 +358,7 @@ func isFalsy(value any) bool {
 		return v == ""
 	}
 
-	n, isNumber := prettierNumber(value)
+	n, isNumber := configNumber(value)
 
 	return isNumber && n == 0
 }
@@ -586,7 +513,7 @@ func prettierInt(path, prefix string, m map[string]any, key string, dst **int) e
 		return nil
 	}
 
-	n, isNumber := prettierNumber(value)
+	n, isNumber := configNumber(value)
 	if !isNumber || n != math.Trunc(n) || math.Abs(n) > math.MaxInt32 {
 		return fmt.Errorf("%s: %s%s must be an integer, not %s", path, prefix, key, describeConfigValue(value))
 	}
@@ -627,36 +554,6 @@ func prettierChoice(path, prefix string, m map[string]any, key string, dst **str
 	*dst = &s
 
 	return nil
-}
-
-func prettierNumber(value any) (float64, bool) {
-	switch n := value.(type) {
-	case float64:
-		return n, true
-	case int:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	case uint64:
-		return float64(n), true
-	}
-
-	return 0, false
-}
-
-func describeConfigValue(value any) string {
-	switch v := value.(type) {
-	case nil:
-		return "null"
-	case string:
-		return strconv.Quote(v)
-	case []any:
-		return "a list"
-	case map[string]any:
-		return "an object"
-	}
-
-	return fmt.Sprint(value)
 }
 
 // resolveForFile merges every override matching rel over the top-level

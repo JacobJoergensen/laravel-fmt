@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/tailwind"
 	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
 )
@@ -52,4 +53,56 @@ func detectTailwind(root string) (Tailwind, bool, error) {
 	}
 
 	return Tailwind{Paths: paths}, true, nil
+}
+
+// Prettier's tailwindStylesheet is honored so both tools sort alike. A
+// configured path resolves against the file that set it and must exist, while
+// discovery finding nothing just means no Tailwind. Several entry points
+// merge: a class the sorter does not know sorts first, so picking one would
+// misplace the others' classes.
+//
+// configDir is the loaded laravel-fmt.json's directory, not ctx.ConfigPath's,
+// which under --config is the auto-detected file.
+func resolveTailwind(cfg *config.File, ctx Context, configDir string) error {
+	var paths []string
+	var base string
+
+	switch {
+	case len(cfg.TailwindCS.Stylesheet) > 0:
+		paths, base = cfg.TailwindCS.Stylesheet, configDir
+	case prettierStylesheet(ctx) != "":
+		paths, base = []string{prettierStylesheet(ctx)}, filepath.Dir(ctx.Prettier.Path)
+	case ctx.Tailwind != nil:
+		paths = ctx.Tailwind.Paths
+	default:
+		return nil
+	}
+
+	resolved := make([]string, 0, len(paths))
+
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(base, path)
+		}
+
+		resolved = append(resolved, path)
+	}
+
+	theme, err := tailwind.LoadTheme(resolved...)
+	if err != nil {
+		return fmt.Errorf("tailwind stylesheet %s: %w", strings.Join(resolved, ", "), err)
+	}
+
+	cfg.Tailwind = true
+	cfg.TailwindTheme = theme
+
+	return nil
+}
+
+func prettierStylesheet(ctx Context) string {
+	if ctx.Prettier == nil || ctx.Prettier.options.TailwindStylesheet == nil {
+		return ""
+	}
+
+	return *ctx.Prettier.options.TailwindStylesheet
 }

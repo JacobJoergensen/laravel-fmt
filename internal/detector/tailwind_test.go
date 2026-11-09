@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/tailwind"
 )
 
 func TestDetectTailwind(t *testing.T) {
@@ -173,4 +175,86 @@ func TestDetectTailwindFindsGeneratedPanelTheme(t *testing.T) {
 	if !slices.Equal(tw.Paths, want) {
 		t.Fatalf("Paths = %q, want %q; a partial that reaches no Tailwind is not an entry point", tw.Paths, want)
 	}
+}
+
+func TestResolveTailwindSilentWithoutTailwind(t *testing.T) {
+	dir := t.TempDir()
+	seedFileAt(t, dir, "composer.json", "{}")
+
+	cfg := loadTailwind(t, dir)
+
+	if cfg.Tailwind || cfg.TailwindTheme != nil {
+		t.Fatalf("Tailwind = %v, TailwindTheme = %v, want off and nil", cfg.Tailwind, cfg.TailwindTheme)
+	}
+}
+
+// Each stylesheet defines its own utility and an unknown class sorts first,
+// so the sorted probe shows which stylesheets built the theme.
+func TestResolveTailwindPrecedence(t *testing.T) {
+	dir := t.TempDir()
+
+	seedFileAt(t, dir, "composer.json", "{}")
+	seedFileAt(t, dir, "artisan", "")
+	seedFileAt(t, dir, "resources/css/app.css", `@import "tailwindcss";`+"\n@utility app-pad { padding: 1rem; }")
+	seedFileAt(t, dir, "assets/css/theme.css", `@import "tailwindcss";`+"\n@utility theme-pad { padding: 1rem; }")
+
+	const (
+		probe      = "app-pad theme-pad flex"
+		discovered = "theme-pad flex app-pad"
+		configured = "app-pad flex theme-pad"
+		bothStyles = "flex app-pad theme-pad"
+	)
+
+	t.Run("discovery when nothing names one", func(t *testing.T) {
+		cfg := loadTailwind(t, dir)
+
+		if got := tailwind.Sort(cfg.TailwindTheme, probe); got != discovered {
+			t.Fatalf("sorted %q, want the discovered stylesheet's %q", got, discovered)
+		}
+	})
+
+	t.Run("prettier names one", func(t *testing.T) {
+		seedFileAt(t, dir, ".prettierrc", `{"tailwindStylesheet": "./assets/css/theme.css"}`)
+
+		cfg := loadTailwind(t, dir)
+
+		if got := tailwind.Sort(cfg.TailwindTheme, probe); got != configured {
+			t.Fatalf("sorted %q, want prettier's stylesheet's %q", got, configured)
+		}
+	})
+
+	t.Run("laravel-fmt.json outranks prettier", func(t *testing.T) {
+		seedFileAt(t, dir, ".prettierrc", `{"tailwindStylesheet": "./resources/css/app.css"}`)
+		seedFileAt(t, dir, "laravel-fmt.json", `{"tailwind": {"stylesheet": "assets/css/theme.css"}}`)
+
+		cfg := loadTailwind(t, dir)
+
+		if got := tailwind.Sort(cfg.TailwindTheme, probe); got != configured {
+			t.Fatalf("sorted %q, want laravel-fmt.json's stylesheet's %q", got, configured)
+		}
+	})
+
+	t.Run("laravel-fmt.json names several", func(t *testing.T) {
+		seedFileAt(t, dir, "laravel-fmt.json",
+			`{"tailwind": {"stylesheet": ["resources/css/app.css", "assets/css/theme.css"]}}`)
+
+		cfg := loadTailwind(t, dir)
+
+		if got := tailwind.Sort(cfg.TailwindTheme, probe); got != bothStyles {
+			t.Fatalf("sorted %q, want both stylesheets' %q", got, bothStyles)
+		}
+	})
+
+	t.Run("a configured path that is not there is an error", func(t *testing.T) {
+		seedFileAt(t, dir, "laravel-fmt.json", `{"tailwind": {"stylesheet": "nope.css"}}`)
+
+		ctx, err := Detect(dir)
+		if err != nil {
+			t.Fatalf("Detect: %v", err)
+		}
+
+		if _, err := LoadConfig(dir, ctx); err == nil {
+			t.Fatal("LoadConfig accepted a stylesheet that does not exist")
+		}
+	})
 }

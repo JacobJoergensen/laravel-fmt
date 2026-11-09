@@ -1,7 +1,12 @@
 package detector
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
@@ -88,4 +93,74 @@ func (memo *probeMemo) statExists(path string) (bool, error) {
 	shared, _ := stored.(statEntry)
 
 	return shared.exists, shared.err
+}
+
+// One listing per directory is cheaper than a stat per candidate name, which
+// added 7% to a monorepo run. A directory that can be entered but not listed,
+// like a 0711 home folder, falls back to the stat per candidate.
+func dirNames(dir string, candidates []string) (map[string]bool, error) {
+	f, err := os.Open(dir)
+	if err != nil {
+		switch {
+		case upward.Absent(err):
+			return map[string]bool{}, nil
+		case errors.Is(err, os.ErrPermission):
+			return statNames(dir, candidates)
+		}
+
+		return nil, fmt.Errorf("open %s: %w", dir, err)
+	}
+
+	names, err := f.Readdirnames(-1)
+	if closeErr := f.Close(); err == nil && closeErr != nil {
+		err = closeErr
+	}
+
+	// A Windows ACL can allow opening the folder and deny reading it.
+	if errors.Is(err, os.ErrPermission) {
+		return statNames(dir, candidates)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("list %s: %w", dir, err)
+	}
+
+	set := make(map[string]bool, len(names))
+	for _, name := range names {
+		set[nameKey(name)] = true
+	}
+
+	return set, nil
+}
+
+// Lstat, not Stat, so a dangling symlink counts as present, as a listing
+// reports it.
+func statNames(dir string, candidates []string) (map[string]bool, error) {
+	set := make(map[string]bool, len(candidates))
+
+	for _, name := range candidates {
+		path := filepath.Join(dir, name)
+
+		_, err := os.Lstat(path)
+		if err == nil {
+			set[nameKey(name)] = true
+
+			continue
+		}
+
+		if !upward.Absent(err) {
+			return nil, fmt.Errorf("stat %s: %w", path, err)
+		}
+	}
+
+	return set, nil
+}
+
+// A listed name has to match exactly the files an os.Stat of the candidate finds.
+func nameKey(name string) string {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.ToLower(name)
+	}
+
+	return name
 }
