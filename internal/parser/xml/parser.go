@@ -11,9 +11,10 @@ import (
 type xmlParser struct {
 	parserpkg.Cursor
 
-	errors        []Error
-	depth         int
-	depthExceeded bool
+	errors           []Error
+	depth            int
+	depthExceeded    bool
+	declaresEntities bool
 }
 
 // maxNestingDepth caps element recursion: deeper, a pathological file
@@ -120,12 +121,21 @@ func (p *xmlParser) parseText() Node {
 	start := p.Pos
 
 	for !p.Eof() {
-		if p.Peek() == '<' {
+		switch p.Peek() {
+		case '&':
+			p.skipReference()
+
+			continue
+		case '<':
 			if p.atMarkupBoundary() {
-				break
+				return &Text{Start: start, End: p.Pos, Text: p.Src[start.Offset:p.Pos.Offset]}
 			}
 
 			p.addError(p.Pos, "unescaped < in text")
+		case ']':
+			if p.StartsWith("]]>") {
+				p.addError(p.Pos, "]]> in text must be written ]]&gt;")
+			}
 		}
 
 		p.Advance()
@@ -147,8 +157,15 @@ func (p *xmlParser) parseComment() Node {
 
 	text := p.Src[contentOffset:p.Pos.Offset]
 	closeStart := p.Pos
+	terminated := p.StartsWith("-->")
 
-	if p.StartsWith("-->") {
+	if at := bytes.Index(text, []byte("--")); at >= 0 {
+		p.addError(p.positionFrom(open.End, contentOffset+at), "-- is not allowed inside a comment")
+	} else if terminated && bytes.HasSuffix(text, []byte("-")) {
+		p.addError(p.positionFrom(open.End, closeStart.Offset-1), "a comment cannot end in --->")
+	}
+
+	if terminated {
 		p.AdvanceN(3)
 	} else {
 		p.addError(openStart, "unterminated comment")
@@ -182,14 +199,28 @@ func (p *xmlParser) parseCDATA() Node {
 
 func (p *xmlParser) parseDoctype() Node {
 	openStart := p.Pos
+
+	if !p.StartsWith("<!DOCTYPE") {
+		p.addError(openStart, "DOCTYPE must be written in capitals")
+	}
+
+	if p.depth > 0 {
+		p.addError(openStart, "DOCTYPE must come before the root element")
+	}
+
 	p.AdvanceN(len("<!doctype"))
 	open := Span{Start: openStart, End: p.Pos}
+
+	if !isSpaceByte(p.Peek()) {
+		p.addError(p.Pos, "expected a space after DOCTYPE")
+	}
 
 	contentOffset := p.Pos.Offset
 	p.skipDoctypeBody()
 
 	text := p.Src[contentOffset:p.Pos.Offset]
 	closeStart := p.Pos
+	p.declaresEntities = declaresEntities(text)
 
 	if p.Peek() == '>' {
 		p.Advance()
@@ -237,6 +268,15 @@ func (p *xmlParser) parseProcessingInstruction() Node {
 	open := Span{Start: openStart, End: p.Pos}
 
 	contentOffset := p.Pos.Offset
+	target := p.readName()
+	afterTarget := p.Pos.Offset
+
+	switch {
+	case len(target) == 0:
+		p.addError(p.Pos, "expected a name after <?")
+	case !p.StartsWith("?>") && !isSpaceByte(p.Peek()):
+		p.addError(p.Pos, "expected a space after the processing instruction name")
+	}
 
 	for !p.Eof() && !p.StartsWith("?>") {
 		p.Advance()
@@ -244,6 +284,10 @@ func (p *xmlParser) parseProcessingInstruction() Node {
 
 	text := p.Src[contentOffset:p.Pos.Offset]
 	closeStart := p.Pos
+
+	if bytes.EqualFold(target, []byte("xml")) {
+		p.checkDeclaration(openStart, target, p.Src[afterTarget:closeStart.Offset])
+	}
 
 	if p.StartsWith("?>") {
 		p.AdvanceN(2)
@@ -366,7 +410,7 @@ func (p *xmlParser) readAttrs() []*Attr {
 	var attrs []*Attr
 
 	for !p.Eof() {
-		p.skipTagWhitespace()
+		spaced := p.skipTagWhitespace()
 
 		c := p.Peek()
 
@@ -381,6 +425,14 @@ func (p *xmlParser) readAttrs() []*Attr {
 			p.Advance()
 
 			continue
+		}
+
+		if !spaced {
+			p.addError(a.Start, "expected a space before the attribute")
+		}
+
+		if slices.ContainsFunc(attrs, func(prev *Attr) bool { return bytes.Equal(prev.Name, a.Name) }) {
+			p.addError(a.Start, "duplicate attribute "+string(a.Name))
 		}
 
 		attrs = append(attrs, a)
@@ -401,8 +453,11 @@ func (p *xmlParser) readAttr() *Attr {
 
 	attr := &Attr{Start: start, Name: name}
 
+	p.skipTagWhitespace()
+
 	if p.Peek() == '=' {
 		p.Advance()
+		p.skipTagWhitespace()
 		p.readAttrValue(attr)
 	} else {
 		p.addError(p.Pos, "expected = after attribute name")
@@ -423,6 +478,15 @@ func (p *xmlParser) readAttrValue(attr *Attr) {
 		contentOffset := p.Pos.Offset
 
 		for !p.Eof() && p.Peek() != c {
+			switch p.Peek() {
+			case '&':
+				p.skipReference()
+
+				continue
+			case '<':
+				p.addError(p.Pos, "unescaped < in attribute value")
+			}
+
 			p.Advance()
 		}
 
@@ -466,6 +530,10 @@ var asciiNameChar = func() (table [utf8.RuneSelf]bool) {
 }()
 
 func (p *xmlParser) readName() []byte {
+	if !isNameStart(p.runeAt(0)) {
+		return nil
+	}
+
 	start := p.Pos.Offset
 	end := start
 
@@ -512,10 +580,14 @@ func (p *xmlParser) runeAt(n int) rune {
 	return r
 }
 
-func (p *xmlParser) skipTagWhitespace() {
+func (p *xmlParser) skipTagWhitespace() bool {
+	start := p.Pos.Offset
+
 	for !p.Eof() && isSpaceByte(p.Peek()) {
 		p.Advance()
 	}
+
+	return p.Pos.Offset > start
 }
 
 // isNameStart is XML 1.0 (fifth edition) production [4] NameStartChar.

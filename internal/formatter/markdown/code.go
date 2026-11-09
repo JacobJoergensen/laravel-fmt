@@ -10,6 +10,7 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/language"
 	phpfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/php"
+	xmlfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/xml"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/markdown"
 )
 
@@ -59,9 +60,12 @@ func formatCode(b *parser.FencedCodeBlock, cfg *config.File) ([]byte, bool) {
 		err error
 	)
 
-	if lang == formatter.LangPHP {
+	switch lang {
+	case formatter.LangPHP:
 		out, err = formatPHPSnippet(src, &codeCfg)
-	} else {
+	case formatter.LangXML:
+		out, err = xmlfmt.FormatFragment(src, &codeCfg)
+	default:
 		out, err = language.Format(lang, path, src, &codeCfg)
 	}
 

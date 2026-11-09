@@ -8,10 +8,6 @@ import (
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/xml"
 )
 
-// xmlSpace is XML 1.0's S production. bytes.TrimSpace would also strip a
-// no-break space or NEL, which is character data.
-const xmlSpace = " \t\r\n"
-
 func emitFile(w *formatter.Writer, file *parser.File, cfg *config.File) {
 	first := true
 
@@ -81,10 +77,15 @@ func emitElement(w *formatter.Writer, src []byte, el *parser.Element, cfg *confi
 		// are the value: the span goes out byte for byte at no indent. Only
 		// the line terminator follows the configured end of line, the one
 		// rewrite an XML processor makes itself (XML 1.0 section 2.11).
+		// An indent before the close tag would become part of a text that ends
+		// in a newline.
 		w.WithoutIndent(func() {
 			start, end := el.OpenClose.End.Offset, el.CloseOpen.Start.Offset
 			formatter.EmitVerbatimStrippingKeepTrailing(w, src[start:end], 0)
+			emitCloseTag(w, el)
 		})
+
+		return
 	}
 
 	emitCloseTag(w, el)
@@ -212,8 +213,8 @@ func emitVerbatimRange(w *formatter.Writer, src []byte, startOffset, endOffset i
 func emitTopLevelText(w *formatter.Writer, src []byte, t *parser.Text) {
 	start, end := t.Start.Offset, t.End.Offset
 	raw := src[start:end]
-	start += len(raw) - len(bytes.TrimLeft(raw, xmlSpace))
-	end = start + len(bytes.Trim(raw, xmlSpace))
+	start += len(raw) - len(bytes.TrimLeft(raw, parser.Whitespace))
+	end = start + len(bytes.Trim(raw, parser.Whitespace))
 	emitVerbatimRange(w, src, start, end)
 }
 
@@ -227,7 +228,7 @@ func isStructuralContent(children []parser.Node) bool {
 		case *parser.CDATA:
 			return false
 		case *parser.Text:
-			if len(bytes.Trim(n.Text, xmlSpace)) > 0 {
+			if len(bytes.Trim(n.Text, parser.Whitespace)) > 0 {
 				return false
 			}
 		}
@@ -242,7 +243,7 @@ func isWhitespaceText(node parser.Node) bool {
 		return false
 	}
 
-	return len(bytes.Trim(t.Text, xmlSpace)) == 0
+	return len(bytes.Trim(t.Text, parser.Whitespace)) == 0
 }
 
 func blankLineInText(node parser.Node) bool {

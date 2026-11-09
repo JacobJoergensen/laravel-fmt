@@ -106,6 +106,14 @@ func TestAttrQuoteStyle(t *testing.T) {
 	}
 }
 
+func TestAttrDropsSpacesAroundEquals(t *testing.T) {
+	got := mustFormat(t, []byte("<a b = \"1\" c\n=\n'2'/>"), config.Default())
+
+	if want := "<a b=\"1\" c=\"2\"/>\n"; string(got) != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func mustFormat(t *testing.T, src []byte, cfg *config.File) []byte {
 	t.Helper()
 
@@ -144,6 +152,7 @@ func TestCharacterDataIsByteExact(t *testing.T) {
 		{"xml:space with elements", "<root xml:space=\"preserve\">\n  <a>x</a>\n     <b>y</b>\n</root>\n"},
 		{"trailing spaces in content", "<root>\n    <t>one   \ntwo</t>\n</root>\n"},
 		{"no-break space between elements", "<root>\n    <a>x</a>\u00a0<b>y</b>\n</root>\n"},
+		{"text ending in a newline", "<root>\n    <b>x\n</b>\n</root>\n"},
 	}
 
 	for _, tc := range cases {

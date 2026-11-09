@@ -212,3 +212,79 @@ func TestUnterminatedConstructIsReportedAtItsOpener(t *testing.T) {
 		})
 	}
 }
+
+func TestDoubleHyphenIsReportedWhereItIs(t *testing.T) {
+	_, errs := Parse([]byte("<a>\n  <!-- x -- y -->\n</a>\n"))
+
+	if len(errs) != 1 || errs[0].Pos.Line != 2 || errs[0].Pos.Column != 10 {
+		t.Fatalf("errors = %v, want one at 2:10", errs)
+	}
+}
+
+func TestUnterminatedCommentEndingInAHyphenReportsOnlyThat(t *testing.T) {
+	_, errs := Parse([]byte("<a><!-- note -"))
+
+	for _, err := range errs {
+		if err.Msg != "unterminated comment" && err.Msg != "unclosed element" {
+			t.Fatalf("errors = %v, want only the unterminated comment and the element it leaves open", errs)
+		}
+	}
+}
+
+func TestAttributeFollowsXMLSyntax(t *testing.T) {
+	cases := []struct {
+		name    string
+		src     string
+		wantErr bool
+	}{
+		{"spaces around the equals sign", "<a x = \"1\" y\n=\n'2'/>", false},
+		{"no space between attributes", `<a x="1"y="2"/>`, true},
+		{"duplicate attribute", `<a x="1" x="2"/>`, true},
+		{"same local name, other prefix", `<a x="1" b:x="2"/>`, false},
+		{"less-than in a value", `<a x="<"/>`, true},
+		{"name starting with a digit", `<a 0x="1"/>`, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errs := Parse([]byte(tc.src))
+
+			if gotErr := len(errs) > 0; gotErr != tc.wantErr {
+				t.Fatalf("errors = %v, want error %v", errs, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestMarkupFollowsXMLSyntax(t *testing.T) {
+	cases := []struct {
+		name    string
+		src     string
+		wantErr bool
+	}{
+		{"single hyphens in a comment", "<!-- a - b --><a/>", false},
+		{"double hyphen in a comment", "<!-- a -- b --><a/>", true},
+		{"comment ending in a hyphen", "<!-- a ---><a/>", true},
+		{"close of CDATA in text", "<a>]]></a>", true},
+		{"lowercase doctype", "<!doctype a><a/>", true},
+		{"doctype without a space", "<!DOCTYPEa><a/>", true},
+		{"doctype inside an element", "<a><!DOCTYPE a></a>", true},
+		{"declaration after an element", "<a/><?xml version=\"1.0\"?>", true},
+		{"full declaration", "<?xml version='1.0' encoding=\"UTF-8\" standalone=\"yes\" ?><a/>", false},
+		{"declaration without a version", "<?xml encoding=\"UTF-8\"?><a/>", true},
+		{"declaration in capitals", "<?XML version=\"1.0\"?><a/>", true},
+		{"processing instruction without a name", "<a><? x?></a>", true},
+		{"processing instruction without a space after its name", "<a><?foo\"bar\"?></a>", true},
+		{"processing instruction with a name only", "<a><?foo?></a>", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errs := Parse([]byte(tc.src))
+
+			if gotErr := len(errs) > 0; gotErr != tc.wantErr {
+				t.Fatalf("errors = %v, want error %v", errs, tc.wantErr)
+			}
+		})
+	}
+}

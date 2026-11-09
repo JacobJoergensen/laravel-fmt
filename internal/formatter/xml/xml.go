@@ -18,8 +18,17 @@ import (
 // diagnostic. Indentation follows cfg, since XML has no tool-owned indent
 // convention.
 func Format(src []byte, cfg *config.File) ([]byte, error) {
+	return format(src, cfg, parser.Parse)
+}
+
+// FormatFragment is Format without the one-root rule, for snippets in documentation.
+func FormatFragment(src []byte, cfg *config.File) ([]byte, error) {
+	return format(src, cfg, parser.ParseFragment)
+}
+
+func format(src []byte, cfg *config.File, parse func([]byte) (*parser.File, []parser.Error)) ([]byte, error) {
 	src = formatter.NormalizeLoneCR(src)
-	file, errs := parser.Parse(src)
+	file, errs := parse(src)
 
 	if err := formatter.JoinErrors(errs); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
