@@ -54,6 +54,8 @@ func (p *parser) parseMemberName() Expr {
 		rb := p.expect(KindRBrace)
 
 		return &DynamicName{LBrace: lb, Expr: expr, RBrace: rb}
+	case KindDollar:
+		return parseVarVar(p)
 	default:
 		if isMemberNameToken(p.peekKind()) {
 			return &IdentExpr{Token: p.advance()}

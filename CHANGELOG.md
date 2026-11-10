@@ -4,6 +4,9 @@
 * Fixed an unreadable folder stopping the whole run; it is now reported and the rest formatted
 * Fixed error messages naming the same path twice, like `stat x: stat x: permission denied`
 * Fixed range formatting dropping an HTML element or breaking a Markdown fence, list item or YAML block scalar
+* Fixed PHPDoc text like `string [optional]` or `array {a: int}` being joined into the type
+* Fixed an empty PHPDoc `array{}` becoming `array{,` when its line breaks
+* Fixed `$item::$$property` and `self::${$name}` being reported as invalid PHP
 
 ## Version 0.10.0 (2026-11-10)
 * Improved `laravel-fmt.json` to reject duplicate keys, wrong-case keys like `PrintWidth`, `null` and invalid UTF-8

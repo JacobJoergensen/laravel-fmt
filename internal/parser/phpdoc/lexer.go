@@ -33,6 +33,7 @@ type token struct {
 	kind          tokKind
 	raw           []byte
 	end           int // byte offset in src immediately after raw
+	spaceBefore   bool
 	newlineBefore bool
 }
 
@@ -49,7 +50,7 @@ func lex(src []byte) []token {
 	var toks []token
 
 	for {
-		newline := l.skipSpace()
+		newline, spaced := l.skipSpace()
 
 		if l.pos >= len(l.src) {
 			return append(toks, token{kind: tokEOF, end: l.pos, newlineBefore: newline})
@@ -57,27 +58,29 @@ func lex(src []byte) []token {
 
 		tok := l.next()
 		tok.end = l.pos
+		tok.spaceBefore = spaced
 		tok.newlineBefore = newline
 		toks = append(toks, tok)
 	}
 }
 
-func (l *lexer) skipSpace() bool {
-	newline := false
-
+// spaced counts only spaces and tabs after the last line break, as PHPStan's
+// horizontal-whitespace check does.
+func (l *lexer) skipSpace() (newline, spaced bool) {
 	for l.pos < len(l.src) {
 		switch l.src[l.pos] {
 		case ' ', '\t':
-			l.pos++
+			spaced = true
 		case '\r', '\n':
-			newline = true
-			l.pos++
+			newline, spaced = true, false
 		default:
-			return newline
+			return newline, spaced
 		}
+
+		l.pos++
 	}
 
-	return newline
+	return newline, spaced
 }
 
 func (l *lexer) next() token {

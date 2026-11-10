@@ -39,6 +39,8 @@ func (p *typeParser) atWord(w []byte) bool {
 	return p.at(tokIdent) && bytes.Equal(p.toks[p.pos].raw, w)
 }
 
+func (p *typeParser) spaced() bool { return p.toks[p.pos].spaceBefore }
+
 func (p *typeParser) advance() token {
 	t := p.toks[p.pos]
 
@@ -144,7 +146,9 @@ func (p *typeParser) parsePrefix() Type {
 func (p *typeParser) parsePostfix() Type {
 	t := p.parseAtom()
 
-	for p.at(tokLBracket) {
+	// As PHPStan reads it, only `[]` attaches after a space; `string [optional]`
+	// is a type and a description.
+	for p.at(tokLBracket) && (!p.spaced() || p.kindAt(1) == tokRBracket) {
 		p.advance()
 
 		if p.at(tokRBracket) {
@@ -207,13 +211,34 @@ func (p *typeParser) parseNamed() Type {
 		return p.parseConstFetch(name.raw)
 	case p.at(tokLAngle):
 		return p.parseGeneric(&IdentType{Name: name.raw})
-	case p.at(tokLBrace):
+	case p.at(tokLBrace) && !p.spaced():
 		return p.parseShape(name.raw)
 	case p.at(tokLParen) && isCallableKeyword(name.raw):
-		return p.parseCallable(name.raw)
+		return p.tryParseCallable(name.raw)
 	default:
 		return &IdentType{Name: name.raw}
 	}
+}
+
+// After a space PHPStan takes the parentheses as a signature only when a return
+// type follows; `callable (string) Handler` is a type and a description.
+func (p *typeParser) tryParseCallable(keyword []byte) Type {
+	if !p.spaced() {
+		return p.parseCallable(keyword)
+	}
+
+	// The rollback restores the flag as found, so a failure earlier in the type
+	// still fails it.
+	start, failed := p.pos, p.failed
+
+	c := p.parseCallable(keyword)
+	if !p.failed && c.Return != nil {
+		return c
+	}
+
+	p.pos, p.failed = start, failed
+
+	return &IdentType{Name: keyword}
 }
 
 func (p *typeParser) parseConstFetch(class []byte) Type {
@@ -238,7 +263,7 @@ func (p *typeParser) parseConstFetch(class []byte) Type {
 	return &ConstFetchType{Class: class, Member: member}
 }
 
-func (p *typeParser) parseCallable(keyword []byte) Type {
+func (p *typeParser) parseCallable(keyword []byte) *CallableType {
 	p.advance()
 	c := &CallableType{Keyword: keyword}
 
@@ -371,6 +396,12 @@ func (p *typeParser) parseShape(keyword []byte) Type {
 		if p.at(tokEllipsis) {
 			p.advance()
 			sh.HasRest = true
+
+			// PHPStan allows a trailing comma after the rest marker, and a broken
+			// shape prints one.
+			if p.at(tokComma) {
+				p.advance()
+			}
 
 			break
 		}

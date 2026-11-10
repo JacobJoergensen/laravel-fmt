@@ -329,6 +329,12 @@ func buildDocShape(s *phpdoc.ShapeType, depth int) *document.Doc {
 // The spaces after each line's LinePrefix `*` are baked in here so no
 // document.Indent shifts the star column.
 func docShapeBody(s *phpdoc.ShapeType, depth int) *document.Doc {
+	// A broken shape gives each member a trailing comma; with no member, a
+	// broken `array{,` would no longer parse.
+	if len(s.Items) == 0 && !s.HasRest {
+		return document.Text(string(s.Keyword) + "{}")
+	}
+
 	memberPad := document.IfBreak(document.Text(strings.Repeat(" ", docStarGap+docIndentStep*(depth+1))), document.Text(""))
 	closePad := document.IfBreak(document.Text(strings.Repeat(" ", docStarGap+docIndentStep*depth)), document.Text(""))
 

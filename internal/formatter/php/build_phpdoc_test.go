@@ -106,6 +106,16 @@ func TestDocCommentTypeNormalization(t *testing.T) {
 			want:  "<?php\n\nfunction foo()\n{\n    /**\n     * @template T of array<int, Foo> = array<int, Bar>\n     */\n    return;\n}\n",
 		},
 		{
+			name:  "description after a space stays out of the type",
+			input: "<?php\n\nfunction foo()\n{\n/**\n* @param array {a: int} $x The x\n* @return string [optional] The name\n* @throws callable (string) Handler\n*/\n    return;\n}\n",
+			want:  "<?php\n\nfunction foo()\n{\n    /**\n     * @param array {a: int} $x The x\n     * @return string [optional] The name\n     * @throws callable (string) Handler\n     */\n    return;\n}\n",
+		},
+		{
+			name:  "an empty shape broken by its author prints as array{}",
+			input: "<?php\n\nfunction foo()\n{\n/**\n* @return array{\n* }\n*/\n    return;\n}\n",
+			want:  "<?php\n\nfunction foo()\n{\n    /**\n     * @return array{}\n     */\n    return;\n}\n",
+		},
+		{
 			name:  "assert type is normalized, negation and variable kept",
 			input: "<?php\n\nfunction foo()\n{\n/**\n* @phpstan-assert-if-true !array<int,Foo> $x\n*/\n    return;\n}\n",
 			want:  "<?php\n\nfunction foo()\n{\n    /**\n     * @phpstan-assert-if-true !array<int, Foo> $x\n     */\n    return;\n}\n",
