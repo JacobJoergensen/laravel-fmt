@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.10.0 (2026-11-10)
 * Improved `laravel-fmt.json` to reject duplicate keys, wrong-case keys like `PrintWidth`, `null` and invalid UTF-8
 * Improved the error for a wrong value in `laravel-fmt.json`, `pint.json` or `mago.json` to name its key, like `preset must be a string`
 * Improved `devcontainer.json` and `.vscode/*.json` to be formatted as JSONC
