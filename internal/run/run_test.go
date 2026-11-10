@@ -280,3 +280,24 @@ func TestSinceDiffIsRelativeToTheAppRoot(t *testing.T) {
 		t.Fatalf("diffBase = %q, want the app root %q", got, appRoot)
 	}
 }
+
+// The line diff pairs the blank lines, so re-indenting <p>b</p> becomes a
+// delete in one change and an insert in the next.
+func TestStdinRangeKeepsWhatAPartialChangeWouldDrop(t *testing.T) {
+	writeProject(t, map[string]string{})
+
+	src := "<div>\n\n<p>a</p>\n\n\n<p>b</p>\n\n</div>\n"
+
+	var stdout bytes.Buffer
+
+	streams := Streams{In: strings.NewReader(src), Out: &stdout, Err: &bytes.Buffer{}}
+	opts := &Options{StdinFilepath: "page.html", RangeStart: new(7), RangeEnd: new(15)}
+
+	if err := Format(opts, streams); err != nil {
+		t.Fatalf("Format = %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "<p>b</p>") {
+		t.Fatalf("range output lost <p>b</p>:\n%s", stdout.String())
+	}
+}

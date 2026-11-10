@@ -151,8 +151,10 @@ func (e LineEdit) lineSpan(old []byte, lineStarts []int) (int, int) {
 // line takes every line that change covers.
 //
 // CONTRACT: a change is not always self-contained. Rewriting array( to [
-// touches two lines apart, and taking one alone does not parse, so the
-// selection widens until valid accepts it, at worst to all of updated.
+// touches two lines apart, and shortening a Markdown fence touches both of
+// its fences. Taking one alone can leave source that parses but means
+// something else, so valid must check meaning, not only syntax. The selection
+// widens until valid accepts it, at worst to all of updated.
 //
 // WARNING: widening cannot rescue a pass that moves code, since no selection
 // makes half a move whole. Such a pass must be off; see

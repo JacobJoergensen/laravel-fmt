@@ -502,13 +502,14 @@ func (r *runner) stdin(projects *detector.Resolver) error {
 
 	if r.opts.ranged() {
 		start, end := r.opts.resolveRange(len(src))
-		parses := func(b []byte) bool {
-			_, err := dispatch.File(path, b, cfg)
+		formatted := out
+		keepsMeaning := func(b []byte) bool {
+			got, err := dispatch.File(path, b, cfg)
 
-			return err == nil
+			return err == nil && bytes.Equal(got, formatted)
 		}
 
-		out = diff.ApplyInRange(src, out, start, end, parses)
+		out = diff.ApplyInRange(src, out, start, end, keepsMeaning)
 	}
 
 	if _, err := r.streams.Out.Write(out); err != nil {

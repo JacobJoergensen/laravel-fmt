@@ -682,10 +682,7 @@ func formatWholeDocument(t *testing.T, name, text string) string {
 	return applyEditsUTF8(text, mustDocumentEdits(t, s, uri))
 }
 
-func TestRangeFormattingLeavesBufferOnPathToFullFormat(t *testing.T) {
-	const name = "order.php"
-
-	src := `<?php
+const unsortedImportsSrc = `<?php
 
 namespace App;
 
@@ -702,42 +699,30 @@ class OrderController
 }
 `
 
-	want := formatWholeDocument(t, name, src)
-
-	sorted := "use App\\Models\\Apple;\nuse App\\Models\\Mango;\nuse App\\Models\\Zebra;\n"
-	if !strings.Contains(want, sorted) {
-		t.Fatalf("whole-document formatting must sort the imports, got:\n%s", want)
-	}
-
-	s, uri := newDirectServer(t, name, src)
-	lines := strings.Count(src, "\n") + 1
-
-	for start := range lines {
-		for end := start; end < lines; end++ {
-			r := Range{Start: Position{start, 0}, End: Position{end, 0}}
-			applied := applyEditsUTF8(src, mustRangeEdits(t, s, uri, r))
-
-			if got := formatWholeDocument(t, name, applied); got != want {
-				t.Fatalf("selection of lines %d-%d left the buffer at:\n%s\nwhich formats to:\n%s\nwant:\n%s", start, end, applied, got, want)
-			}
-		}
-	}
-}
-
-func TestRangeFormattingNeverLeavesUnparseableSource(t *testing.T) {
+func TestRangeFormattingLeavesBufferOnPathToFullFormat(t *testing.T) {
 	cases := []struct {
-		name string
-		src  string
+		name         string
+		file         string
+		src          string
+		fullContains string
 	}{
-		{"brace-less if", "<?php\n\nif ($x)\n    doThing();\n"},
-		{"long array syntax", "<?php\n\n$a = array(\n    1,\n    2,\n);\n"},
+		{"imports sorted only in full", "order.php", unsortedImportsSrc, "use App\\Models\\Apple;\nuse App\\Models\\Mango;\nuse App\\Models\\Zebra;\n"},
+		{"brace-less if", "r.php", "<?php\n\nif ($x)\n    doThing();\n", ""},
+		{"long array syntax", "r.php", "<?php\n\n$a = array(\n    1,\n    2,\n);\n", ""},
+		{"both fences of a code block", "doc.md", "Text\n\n````\ncode\n````\n\nAfter\n", ""},
+		{"list item and its continuation", "doc.md", "-   item\n\n    para\n", ""},
+		{"block scalar lines", "a.yaml", "key: |\n    a\n\n    b\nother:\n    - x\n\n    - y\n", ""},
+		{"element re-indented across blank lines", "page.html", "<div>\n\n<p>a</p>\n\n\n<p>b</p>\n\n</div>\n", ""},
 	}
-
-	const name = "r.php"
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s, uri := newDirectServer(t, name, tc.src)
+			want := formatWholeDocument(t, tc.file, tc.src)
+			if !strings.Contains(want, tc.fullContains) {
+				t.Fatalf("whole-document format lacks %q, got:\n%s", tc.fullContains, want)
+			}
+
+			s, uri := newDirectServer(t, tc.file, tc.src)
 			lines := strings.Count(tc.src, "\n") + 1
 
 			for start := range lines {
@@ -745,8 +730,8 @@ func TestRangeFormattingNeverLeavesUnparseableSource(t *testing.T) {
 					r := Range{Start: Position{start, 0}, End: Position{end, 0}}
 					applied := applyEditsUTF8(tc.src, mustRangeEdits(t, s, uri, r))
 
-					if _, err := dispatch.File("/r.php", []byte(applied), config.Default()); err != nil {
-						t.Fatalf("selecting lines %d-%d left source that does not parse:\n%s\n%v", start, end, applied, err)
+					if got := formatWholeDocument(t, tc.file, applied); got != want {
+						t.Fatalf("selection of lines %d-%d left the buffer at:\n%s\nwhich formats to:\n%s\nwant:\n%s", start, end, applied, got, want)
 					}
 				}
 			}

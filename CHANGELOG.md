@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+* Fixed range formatting dropping an HTML element or breaking a Markdown fence, list item or YAML block scalar
 
 ## Version 0.10.0 (2026-11-10)
 * Improved `laravel-fmt.json` to reject duplicate keys, wrong-case keys like `PrintWidth`, `null` and invalid UTF-8

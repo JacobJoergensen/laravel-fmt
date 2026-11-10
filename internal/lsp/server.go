@@ -3,6 +3,7 @@
 package lsp
 
 import (
+	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -384,13 +385,13 @@ func (s *server) selectRange(res *formatResult, r Range) []TextEdit {
 	start := positionToByte(res.src, lineStart, r.Start, s.encoding)
 	end := positionToByte(res.src, lineStart, r.End, s.encoding)
 
-	parses := func(b []byte) bool {
-		_, err := dispatch.File(res.path, b, &res.cfg)
+	keepsMeaning := func(b []byte) bool {
+		got, err := dispatch.File(res.path, b, &res.cfg)
 
-		return err == nil
+		return err == nil && bytes.Equal(got, res.out)
 	}
 
-	ranged := diff.ApplyInRange(res.src, res.out, start, end, parses)
+	ranged := diff.ApplyInRange(res.src, res.out, start, end, keepsMeaning)
 
 	return buildEdits(res.src, ranged, s.encoding)
 }
