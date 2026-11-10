@@ -18,19 +18,22 @@ import (
 // so a failure must never read as drift.
 func TestFinishDecidesHowTheRunEnded(t *testing.T) {
 	cases := []struct {
-		name                       string
-		opts                       Options
-		failed, changed, unchanged int
-		wantErr                    error
-		wantDrift                  bool
-		wantSummary                string
+		name               string
+		opts               Options
+		failed, unreadable int
+		changed, unchanged int
+		wantErr            error
+		wantDrift          bool
+		wantSummary        string
 	}{
-		{"failure outranks drift", Options{Check: true}, 1, 2, 0, ErrSilentFailure, false, "1 file failed to format"},
-		{"check with drift", Options{Check: true}, 0, 2, 1, ErrDrift, true, "2 files would be reformatted · 1 already formatted"},
-		{"diff with drift", Options{Diff: true}, 0, 1, 0, ErrDrift, true, "1 file would be reformatted · 0 already formatted"},
-		{"check with none", Options{Check: true}, 0, 0, 3, nil, false, "All files already formatted"},
-		{"write with changes", Options{}, 0, 1, 2, nil, false, "Formatted 1 file · 2 unchanged"},
-		{"write with none", Options{}, 0, 0, 1, nil, false, "1 file already formatted"},
+		{"failure outranks drift", Options{Check: true}, 1, 0, 2, 0, ErrSilentFailure, false, "1 file failed to format"},
+		{"unreadable folder fails a clean run", Options{Check: true}, 0, 1, 0, 3, ErrSilentFailure, false, "1 folder could not be read"},
+		{"failures and unreadable folders", Options{}, 1, 2, 1, 0, ErrSilentFailure, false, "1 file failed to format · 2 folders could not be read"},
+		{"check with drift", Options{Check: true}, 0, 0, 2, 1, ErrDrift, true, "2 files would be reformatted · 1 already formatted"},
+		{"diff with drift", Options{Diff: true}, 0, 0, 1, 0, ErrDrift, true, "1 file would be reformatted · 0 already formatted"},
+		{"check with none", Options{Check: true}, 0, 0, 0, 3, nil, false, "All files already formatted"},
+		{"write with changes", Options{}, 0, 0, 1, 2, nil, false, "Formatted 1 file · 2 unchanged"},
+		{"write with none", Options{}, 0, 0, 0, 1, nil, false, "1 file already formatted"},
 	}
 
 	for _, tc := range cases {
@@ -39,7 +42,7 @@ func TestFinishDecidesHowTheRunEnded(t *testing.T) {
 
 			r := &runner{opts: tc.opts, streams: Streams{Err: &stderr}}
 
-			err := r.finish(tc.failed, tc.changed, tc.unchanged, time.Millisecond)
+			err := r.finish(tc.failed, tc.unreadable, tc.changed, tc.unchanged, time.Millisecond)
 
 			if !errors.Is(err, tc.wantErr) || (err == nil) != (tc.wantErr == nil) {
 				t.Fatalf("finish() = %v, want %v", err, tc.wantErr)

@@ -1,6 +1,8 @@
 package walk
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1382,6 +1384,86 @@ func TestFilesListsAFileReachedThroughALinkedFolderOnce(t *testing.T) {
 
 			if !slices.Equal(got, []string{want}) {
 				t.Fatalf("Files(%q) = %q, want [%q]", tt.args, got, want)
+			}
+		})
+	}
+}
+
+func TestFilesSkipsAndReportsAnUnreadableFolder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits")
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every folder")
+	}
+
+	composerProbe := func(root string) ProjectIgnore {
+		return func(dir string) (string, *config.File, error) {
+			if _, err := os.Stat(filepath.Join(dir, "composer.json")); err != nil && !os.IsNotExist(err) {
+				return "", nil, fmt.Errorf("probe %s: %w", dir, err)
+			}
+
+			return root, config.Default(), nil
+		}
+	}
+
+	noProbe := func(string) ProjectIgnore { return nil }
+
+	cases := []struct {
+		name           string
+		closed         string
+		mode           os.FileMode
+		args           []string
+		projectOf      func(root string) ProjectIgnore
+		wantFiles      []string
+		wantUnreadable bool
+	}{
+		{"walked", "locked", 0, nil, noProbe, []string{"ok.php"}, true},
+		{"walked with a project resolver", "locked", 0, nil, composerProbe, []string{"ok.php"}, true},
+		{"named beside another argument", "locked", 0, []string{"locked", "ok.php"}, noProbe, []string{"ok.php"}, true},
+		{"glob into it", "locked", 0, []string{"locked/*.php", "ok.php"}, noProbe, []string{"ok.php"}, true},
+		{"searchable but not listable", "locked", 0o311, nil, noProbe, []string{"ok.php"}, true},
+		{"unreadable ignore file in a readable folder", "pkg/.gitignore", 0, nil, noProbe, nil, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := buildTree(t, map[string]string{
+				"ok.php":         "<?php",
+				"locked/x.php":   "<?php",
+				"pkg/y.php":      "<?php",
+				"pkg/.gitignore": "",
+			})
+			t.Chdir(root)
+
+			closed := filepath.Join(root, filepath.FromSlash(tc.closed))
+			if err := os.Chmod(closed, tc.mode); err != nil {
+				t.Fatal(err)
+			}
+
+			//nolint:gosec // restores the folder so t.TempDir can remove it
+			t.Cleanup(func() { _ = os.Chmod(closed, 0o755) })
+
+			got, err := Files(root, root, config.Default(), tc.args, tc.projectOf(root))
+
+			var unreadable UnreadableError
+			if !tc.wantUnreadable {
+				if err == nil || errors.As(err, &unreadable) || !errors.Is(err, os.ErrPermission) {
+					t.Fatalf("Files error = %v, want the permission error on %s", err, tc.closed)
+				}
+
+				return
+			}
+
+			if !errors.As(err, &unreadable) || len(unreadable) != 1 || unreadable[0].Path != closed {
+				t.Fatalf("Files error = %v, want an UnreadableError naming %s", err, closed)
+			}
+
+			for _, want := range tc.wantFiles {
+				if !containsRel(got, root, want) {
+					t.Fatalf("Files = %v, want %s beside the unreadable folder", got, want)
+				}
 			}
 		})
 	}

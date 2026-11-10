@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+* Fixed an unreadable folder stopping the whole run; it is now reported and the rest formatted
+* Fixed error messages naming the same path twice, like `stat x: stat x: permission denied`
 * Fixed range formatting dropping an HTML element or breaking a Markdown fence, list item or YAML block scalar
 
 ## Version 0.10.0 (2026-11-10)

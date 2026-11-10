@@ -27,7 +27,7 @@ func detectPhpCsFixer(root string) (Pint, bool, error) {
 				continue
 			}
 
-			return Pint{}, false, fmt.Errorf("stat %s: %w", candidate, err)
+			return Pint{}, false, fmt.Errorf("detect PHP-CS-Fixer: %w", err)
 		}
 
 		if info.IsDir() {

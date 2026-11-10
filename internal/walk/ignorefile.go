@@ -132,7 +132,7 @@ func hasGitEntry(dir string) (bool, error) {
 		return false, nil
 	}
 
-	return false, fmt.Errorf("stat %s: %w", entry, err)
+	return false, fmt.Errorf("look for a nested repository: %w", err)
 }
 
 // One set serves files tested in any order: patterns are scoped to their

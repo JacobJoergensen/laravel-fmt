@@ -221,15 +221,15 @@ func detectPrettier(root string) (Prettier, bool, error) {
 			continue
 		}
 
-		path := filepath.Join(root, candidate.name)
+		configPath := filepath.Join(root, candidate.name)
 
-		info, err := os.Stat(path)
+		info, err := os.Stat(configPath)
 		if err != nil {
 			if upward.Absent(err) {
 				continue
 			}
 
-			return Prettier{}, false, fmt.Errorf("stat %s: %w", path, err)
+			return Prettier{}, false, fmt.Errorf("detect Prettier: %w", err)
 		}
 
 		if info.IsDir() {
@@ -238,7 +238,7 @@ func detectPrettier(root string) (Prettier, bool, error) {
 
 		switch candidate.kind {
 		case prettierKindPackageJSON, prettierKindPackageYAML:
-			prettier, found, err := loadPrettierFromPackage(path, candidate.kind)
+			prettier, found, err := loadPrettierFromPackage(configPath, candidate.kind)
 			if err != nil {
 				return Prettier{}, false, err
 			}
@@ -249,12 +249,12 @@ func detectPrettier(root string) (Prettier, bool, error) {
 
 			return prettier, true, nil
 		case prettierKindConfig, prettierKindJSON, prettierKindTOML:
-			return loadPrettierConfig(path, candidate.kind)
+			return loadPrettierConfig(configPath, candidate.kind)
 		default:
 			// Prettier uses this file, which laravel-fmt cannot evaluate. It
 			// counts as found with no options, so the search stops here as
 			// Prettier's does.
-			return Prettier{Path: path, Unread: true}, true, nil
+			return Prettier{Path: configPath, Unread: true}, true, nil
 		}
 	}
 

@@ -107,11 +107,13 @@ func Format(opts *Options, streams Streams) error {
 	}
 
 	files, err := r.selectFiles(ctx, &cfg, projects)
-	if err != nil {
+
+	var unreadable walk.UnreadableError
+	if err != nil && !errors.As(err, &unreadable) {
 		return err
 	}
 
-	return r.batch(files, r.diffBase(ctx), projects)
+	return r.batch(files, unreadable, r.diffBase(ctx), projects)
 }
 
 func (r *runner) outPalette() terminal.Palette {
@@ -133,12 +135,20 @@ type fileResultOrErr struct {
 	err error
 }
 
-func (r *runner) batch(files []string, base string, projects *detector.Resolver) error {
+func (r *runner) batch(files []string, unreadable walk.UnreadableError, base string, projects *detector.Resolver) error {
 	failed := 0
 
 	var changed []ci.Change
 
 	var failures []ci.Failure
+
+	for _, dir := range unreadable {
+		shown := displayPath(r.workDir, dir.Path) + string(filepath.Separator)
+		err := fmt.Errorf("read: %w", dir.Err)
+
+		r.renderFileError(dir.Path, shown, nil, err)
+		failures = append(failures, collectFailures(shown, err)...)
+	}
 
 	// Files format on every core and come back in input order, so --check and
 	// --diff output is stable and writes never interleave; each result is
@@ -229,7 +239,7 @@ func (r *runner) batch(files []string, base string, projects *detector.Resolver)
 		}
 	}
 
-	return r.finish(failed, len(changed), unchanged, time.Since(r.start))
+	return r.finish(failed, len(unreadable), len(changed), unchanged, time.Since(r.start))
 }
 
 func resolveFileConfig(projects *detector.Resolver, path string) (*config.File, error) {

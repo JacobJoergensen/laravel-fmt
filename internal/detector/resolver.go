@@ -105,7 +105,7 @@ func (r *Resolver) rootFor(dir string) (string, error) {
 
 			exists, statErr := r.memo.statExists(candidate)
 			if statErr != nil {
-				return false, fmt.Errorf("stat %s: %w", candidate, statErr)
+				return false, fmt.Errorf("find the project root: %w", statErr)
 			}
 
 			if exists {

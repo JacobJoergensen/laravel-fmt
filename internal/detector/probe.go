@@ -149,7 +149,7 @@ func statNames(dir string, candidates []string) (map[string]bool, error) {
 		}
 
 		if !upward.Absent(err) {
-			return nil, fmt.Errorf("stat %s: %w", path, err)
+			return nil, fmt.Errorf("find config files: %w", err)
 		}
 	}
 

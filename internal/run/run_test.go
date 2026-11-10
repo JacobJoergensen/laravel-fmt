@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -299,5 +300,49 @@ func TestStdinRangeKeepsWhatAPartialChangeWouldDrop(t *testing.T) {
 
 	if !strings.Contains(stdout.String(), "<p>b</p>") {
 		t.Fatalf("range output lost <p>b</p>:\n%s", stdout.String())
+	}
+}
+
+func TestUnreadableFolderFailsTheRunButNotTheOtherFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits")
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every folder")
+	}
+
+	writeProject(t, map[string]string{
+		"ok.php":       "<?php\n$a=[1,2];\n",
+		"locked/x.php": "<?php\n",
+	})
+
+	if err := os.Chmod("locked", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	//nolint:gosec // restores the folder so t.TempDir can remove it
+	t.Cleanup(func() { _ = os.Chmod("locked", 0o755) })
+
+	var stderr bytes.Buffer
+
+	err := Format(&Options{}, Streams{Out: &bytes.Buffer{}, Err: &stderr})
+	if !errors.Is(err, ErrSilentFailure) {
+		t.Fatalf("Format = %v, want a failed run", err)
+	}
+
+	got, readErr := os.ReadFile("ok.php")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+
+	if string(got) != "<?php\n\n$a = [1, 2];\n" {
+		t.Fatalf("ok.php = %q, want it formatted beside the unreadable folder", got)
+	}
+
+	for _, want := range []string{"locked" + string(filepath.Separator), "read: permission denied\n", "1 folder could not be read"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr lacks %q:\n%s", want, stderr.String())
+		}
 	}
 }

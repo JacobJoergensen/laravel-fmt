@@ -19,10 +19,10 @@ import (
 )
 
 // Failures take precedence over drift: a run with both exits 2, not 1.
-func (r *runner) finish(failed, changed, unchanged int, elapsed time.Duration) error {
-	if failed > 0 {
+func (r *runner) finish(failed, unreadable, changed, unchanged int, elapsed time.Duration) error {
+	if failed > 0 || unreadable > 0 {
 		r.errf("\n")
-		r.renderSummary(terminal.Red, terminal.CrossMark, pluralFiles(failed, "failed to format"), elapsed)
+		r.renderSummary(terminal.Red, terminal.CrossMark, failureSummary(failed, unreadable), elapsed)
 
 		return ErrSilentFailure
 	}
@@ -323,4 +323,21 @@ func filesWord(n int) string {
 
 func pluralFiles(n int, suffix string) string {
 	return filesWord(n) + " " + suffix
+}
+
+func failureSummary(failed, unreadable int) string {
+	var parts []string
+
+	if failed > 0 {
+		parts = append(parts, pluralFiles(failed, "failed to format"))
+	}
+
+	switch {
+	case unreadable == 1:
+		parts = append(parts, "1 folder could not be read")
+	case unreadable > 1:
+		parts = append(parts, strconv.Itoa(unreadable)+" folders could not be read")
+	}
+
+	return strings.Join(parts, " · ")
 }

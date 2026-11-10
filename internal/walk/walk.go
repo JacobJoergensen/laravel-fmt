@@ -29,10 +29,69 @@ func statError(arg string, err error) error {
 	return fmt.Errorf("stat %s: %w", arg, err)
 }
 
+// UnreadableDir is a folder a walk skipped because it may not read it.
+type UnreadableDir struct {
+	Path string
+	Err  error
+}
+
+// UnreadableError lists the folders a walk skipped.
+type UnreadableError []UnreadableDir
+
+func (e UnreadableError) Error() string {
+	msgs := make([]string, len(e))
+	for i, dir := range e {
+		msgs[i] = fmt.Sprintf("read %s: %v", dir.Path, dir.Err)
+	}
+
+	return strings.Join(msgs, "\n")
+}
+
+func recordUnreadable(list *UnreadableError, dir string, err error) bool {
+	pathErr, ok := errors.AsType[*fs.PathError](err)
+	if !ok || !errors.Is(err, fs.ErrPermission) {
+		return false
+	}
+
+	dir = filepath.Clean(dir)
+	if !deniedByFolder(dir, pathErr.Path) {
+		return false
+	}
+
+	// Overlapping arguments walk a folder more than once; it is reported once.
+	dir = Precompose(dir)
+	if !slices.ContainsFunc(*list, func(d UnreadableDir) bool { return d.Path == dir }) {
+		*list = append(*list, UnreadableDir{Path: dir, Err: pathErr.Err})
+	}
+
+	return true
+}
+
+// A child of a folder that may not be searched cannot even be looked up; an
+// unreadable file in a readable folder still can.
+func deniedByFolder(dir, path string) bool {
+	path = filepath.Clean(path)
+	if path == dir {
+		return true
+	}
+
+	if filepath.Dir(path) != dir {
+		return false
+	}
+
+	_, err := os.Lstat(path)
+
+	return errors.Is(err, fs.ErrPermission)
+}
+
 // Files returns the files to format as absolute paths, in order. Ignore
 // patterns match from ignoreRoot wherever traversal starts, since they are
 // written from the file that declares them; projectOf, when set, also holds
 // each file to its own project's patterns.
+//
+// CONTRACT: a folder it may not read is skipped, not the end of the walk.
+// Files then returns an UnreadableError together with every file it did
+// find, as os.ReadDir returns the entries it read.
 func Files(root, ignoreRoot string, cfg *config.File, args []string, projectOf ProjectIgnore) ([]string, error) {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -41,11 +100,26 @@ func Files(root, ignoreRoot string, cfg *config.File, args []string, projectOf P
 
 	patterns := compileRules(cfg, ignoreRoot)
 
+	var (
+		files      []string
+		unreadable UnreadableError
+	)
+
 	if len(args) > 0 {
-		return fromArgs(ignoreRoot, args, patterns, projectOf)
+		files, err = fromArgs(ignoreRoot, args, patterns, projectOf, &unreadable)
+	} else {
+		files, err = walkTree(absRoot, ignoreRoot, patterns, projectOf, &unreadable)
 	}
 
-	return walkTree(absRoot, ignoreRoot, patterns, projectOf)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(unreadable) > 0 {
+		return files, unreadable
+	}
+
+	return files, nil
 }
 
 // ProjectIgnore returns the ignore anchor and config of the project dir is in.
@@ -148,7 +222,7 @@ func hasHiddenSegment(slashPath string) bool {
 
 // Arguments overlap freely, so the union is taken per file: a named file stays
 // in even when its directory's walk ignored it.
-func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf ProjectIgnore) ([]string, error) {
+func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf ProjectIgnore, unreadable *UnreadableError) ([]string, error) {
 	var out []string
 
 	seen := make(map[string][]string)
@@ -166,7 +240,7 @@ func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf P
 
 			candidates, walked := walks[base]
 			if !walked {
-				candidates, err = walkGlobBase(arg, base, ignoreRoot, matcher, projectOf)
+				candidates, err = walkGlobBase(arg, base, ignoreRoot, matcher, projectOf, unreadable)
 				if err != nil {
 					return nil, err
 				}
@@ -176,6 +250,11 @@ func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf P
 
 			matched, err := matchGlob(arg, base, segments, candidates)
 			if err != nil {
+				// What it might have matched is behind a folder that is reported.
+				if slices.ContainsFunc(*unreadable, func(d UnreadableDir) bool { return within(base, d.Path) }) {
+					continue
+				}
+
 				return nil, err
 			}
 
@@ -195,7 +274,7 @@ func fromArgs(ignoreRoot string, args []string, matcher ignoreRules, projectOf P
 		}
 
 		if info.IsDir() {
-			more, err := walkTree(abs, ignoreRoot, matcher, projectOf)
+			more, err := walkTree(abs, ignoreRoot, matcher, projectOf, unreadable)
 			if err != nil {
 				return nil, err
 			}
@@ -408,7 +487,7 @@ func splitGlob(pattern string) (string, []string, error) {
 	return base, segments, nil
 }
 
-func walkGlobBase(pattern, base, ignoreRoot string, matcher ignoreRules, projectOf ProjectIgnore) ([]string, error) {
+func walkGlobBase(pattern, base, ignoreRoot string, matcher ignoreRules, projectOf ProjectIgnore, unreadable *UnreadableError) ([]string, error) {
 	info, err := os.Stat(base)
 	if errors.Is(err, fs.ErrNotExist) || err == nil && !info.IsDir() {
 		return nil, nil
@@ -418,7 +497,7 @@ func walkGlobBase(pattern, base, ignoreRoot string, matcher ignoreRules, project
 		return nil, statError(pattern, err)
 	}
 
-	return walkTree(base, ignoreRoot, matcher, projectOf)
+	return walkTree(base, ignoreRoot, matcher, projectOf, unreadable)
 }
 
 // A pattern matching nothing is an error, like any argument that selects no
@@ -444,17 +523,22 @@ func matchGlob(pattern, base string, segments, candidates []string) ([]string, e
 // Paths match from ignoreRoot, not dir, since patterns are written from the
 // project root. Each directory adds its .gitignore as it is entered, before
 // anything inside is tested, and a pruned directory is never read.
-func walkTree(dir, ignoreRoot string, cfg ignoreRules, projectOf ProjectIgnore) ([]string, error) {
+func walkTree(dir, ignoreRoot string, cfg ignoreRules, projectOf ProjectIgnore, unreadable *UnreadableError) ([]string, error) {
 	prefix := ignorePrefix(ignoreRoot, dir)
 	set := &ignoreSet{cfg: cfg}
 
-	if err := set.addChain(ignoreRoot, dir, prefix); err != nil {
-		return nil, err
-	}
-
 	// The project the walk starts in may be rooted above it (`a/src` inside
 	// project `a`), where entering directories would never reach its anchor.
-	if err := set.enterProject(projectOf, dir, false); err != nil {
+	err := set.addChain(ignoreRoot, dir, prefix)
+	if err == nil {
+		err = set.enterProject(projectOf, dir, false)
+	}
+
+	if err != nil {
+		if recordUnreadable(unreadable, dir, err) {
+			return nil, nil
+		}
+
 		return nil, err
 	}
 
@@ -467,9 +551,21 @@ func walkTree(dir, ignoreRoot string, cfg ignoreRules, projectOf ProjectIgnore) 
 		start += string(filepath.Separator)
 	}
 
-	err := filepath.WalkDir(start, func(abs string, d fs.DirEntry, walkErr error) error {
+	skipUnreadable := func(abs string, err error) error {
+		if recordUnreadable(unreadable, abs, err) {
+			return filepath.SkipDir
+		}
+
+		return err
+	}
+
+	err = filepath.WalkDir(start, func(abs string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return walkErr
+			if d == nil {
+				return walkErr
+			}
+
+			return skipUnreadable(abs, walkErr)
 		}
 
 		rel := relSlash(dir, abs)
@@ -492,10 +588,14 @@ func walkTree(dir, ignoreRoot string, cfg ignoreRules, projectOf ProjectIgnore) 
 			}
 
 			if err := set.enterProject(projectOf, abs, true); err != nil {
-				return err
+				return skipUnreadable(abs, err)
 			}
 
-			return set.enterGitignoreDir(abs, prefix+rel)
+			if err := set.enterGitignoreDir(abs, prefix+rel); err != nil {
+				return skipUnreadable(abs, err)
+			}
+
+			return nil
 		}
 
 		// Only regular files: a write follows a link, so a symlink found by

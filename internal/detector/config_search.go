@@ -18,7 +18,7 @@ func findConfig(workDir, stopAt string, memo *probeMemo) (string, error) {
 
 		exists, statErr := memo.statExists(candidate)
 		if statErr != nil {
-			return false, fmt.Errorf("stat %s: %w", candidate, statErr)
+			return false, fmt.Errorf("find %s: %w", config.FileName, statErr)
 		}
 
 		if exists {

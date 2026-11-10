@@ -85,7 +85,7 @@ func regularFiles(root string, relPaths []string, skip func(relPath string) (boo
 		}
 
 		if err != nil {
-			return nil, fmt.Errorf("stat %s: %w", path, err)
+			return nil, fmt.Errorf("list changed files: %w", err)
 		}
 
 		if info.Mode().IsRegular() {

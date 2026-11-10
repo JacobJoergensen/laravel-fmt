@@ -20,7 +20,7 @@ func detectLaravel(workDir string, memo *probeMemo) (Laravel, bool, error) {
 
 		hasComposer, err := memo.statExists(composerPath)
 		if err != nil {
-			return false, fmt.Errorf("stat %s: %w", composerPath, err)
+			return false, fmt.Errorf("detect Laravel: %w", err)
 		}
 
 		if !hasComposer {
@@ -31,7 +31,7 @@ func detectLaravel(workDir string, memo *probeMemo) (Laravel, bool, error) {
 
 		hasArtisan, err := memo.statExists(artisanPath)
 		if err != nil {
-			return false, fmt.Errorf("stat %s: %w", artisanPath, err)
+			return false, fmt.Errorf("detect Laravel: %w", err)
 		}
 
 		if hasArtisan {
