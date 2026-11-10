@@ -53,7 +53,9 @@ func formatCode(b *parser.FencedCodeBlock, cfg *config.File) ([]byte, bool) {
 
 	// A lone CR ends a line in Markdown, which the fence emitter writes as one,
 	// so the code has to be formatted with that line break, not as a CR byte.
-	src := formatter.NormalizeLoneCR(b.Content)
+	// Content drops its last line break, which belongs to the code: a YAML `|+`
+	// keeps it as value.
+	src := slices.Concat(formatter.NormalizeLoneCR(b.Content), []byte("\n"))
 
 	var (
 		out []byte

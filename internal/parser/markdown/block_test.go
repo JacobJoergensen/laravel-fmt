@@ -625,6 +625,9 @@ func TestLinkRefDefRejectsBadLabelAndDestination(t *testing.T) {
 		{"unbalanced open then text", "[a]:b(c", (*Paragraph)(nil)},
 		{"closing paren first", "[a]:)b", (*Paragraph)(nil)},
 		{"unescaped bracket in label", "[a[b]: x", (*Paragraph)(nil)},
+		{"title not set off from destination", "[a]: <b>(c)", (*Paragraph)(nil)},
+		{"unescaped paren in a parenthesised title", "[a]: b (()", (*Paragraph)(nil)},
+		{"next line with text after its title holds no title", "[a]: b\n\"c\" d", (*LinkRefDef)(nil)},
 	}
 
 	for _, tc := range cases {

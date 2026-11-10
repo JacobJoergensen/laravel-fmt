@@ -14,6 +14,14 @@
 * Fixed XML attributes with spaces around `=` being reported as invalid
 * Fixed XML text gaining indent after `laravel-fmt-ignore` or before a close tag
 * Fixed invalid XML like `<a b="1"c="2"/>` or a bare `&` being formatted instead of reported
+* Fixed Markdown lines like `<a name="x"></a>`, `<A`, or `    - e` under a list item being read as an HTML block or list
+* Fixed a backslash added to a Markdown line inside a code span or HTML tag, or before `***`, changing the text
+* Fixed a Markdown table header cell holding only `-` turning into a second delimiter row
+* Fixed Markdown code and HTML in list items and quotes losing blank lines, tabs or indent
+* Fixed Markdown link definitions like `[a]: <b>(c)` or `[a]: b (()`, or the line under one, changing meaning
+* Fixed Markdown headings, code block info strings and link labels losing a no-break space at their edge
+* Fixed Markdown with CR-only line endings losing the blank line between link definitions
+* Fixed a YAML `|+` code block in Markdown losing a trailing blank line on each run
 * Fixed Pint's `per`, `psr12` and `symfony` presets, rule sets like `@PER-CS` and the order of `pint.json` rules not matching Pint
 * Fixed a Pint rule set to `true` or only partly configured keeping the preset's options
 * Fixed `ordered_imports` with `sort_algorithm: none` still sorting imports

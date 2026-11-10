@@ -201,6 +201,16 @@ func TestFormatIndentedCodeInteriorBlanks(t *testing.T) {
 	if out := mustFormat(t, []byte("\tx\n\ny"), config.Default()); !bytes.Equal(out, []byte("    x\n\ny\n")) {
 		t.Fatalf("blank before paragraph should not be absorbed: %q", out)
 	}
+
+	// Whitespace past the indent on a blank line is a space of code.
+	blankWithSpace := mustFormat(t, []byte("\t0\n\n\t \n\t0\n"), config.Default())
+	if want := "    0\n    \n     \n    0\n"; string(blankWithSpace) != want {
+		t.Fatalf("blank line lost its code whitespace: %q", blankWithSpace)
+	}
+
+	if again := mustFormat(t, blankWithSpace, config.Default()); !bytes.Equal(again, blankWithSpace) {
+		t.Fatalf("not idempotent: %q -> %q", blankWithSpace, again)
+	}
 }
 
 func TestFormatListKeepsFollowingIndentedCodeOutside(t *testing.T) {
@@ -359,9 +369,9 @@ func TestFormatLinkRefKeepsTitleDelimited(t *testing.T) {
 		{"both quotes inside", `[a]: /b (it's "q")`, `it's "q"`},
 		{"already escaped quote survives", `[a]: /b "x \" y"`, `x " y`},
 		{"single quote alone keeps the canonical form", `[a]: /b (it's)`, "it's"},
-		// A parenthesised source can hold an unescaped instance of all three
-		// delimiters, and then only escaping keeps the definition parseable.
-		{"all three inside", `[a]: /b (it's "q" ( )`, `it's "q" ( `},
+		// A parenthesised source can hold all three delimiters, its own `(`
+		// escaped, and then only escaping keeps the definition parseable.
+		{"all three inside", `[a]: /b (it's "q" \( )`, `it's "q" \( `},
 	}
 
 	for _, tc := range cases {
@@ -404,6 +414,47 @@ func unescapeTitle(title []byte) string {
 	}
 
 	return string(out)
+}
+
+// CommonMark trims spaces and tabs only; other Unicode whitespace is content.
+func TestFormatTrimsOnlySpacesAndTabs(t *testing.T) {
+	cases := []struct{ name, src string }{
+		{"info string", "```\u0085\n```\n"},
+		{"heading", "# a\u00a0\n"},
+		{"definition label", "[\u00a0]: /x\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mustFormat(t, []byte(tc.src), config.Default()); string(got) != tc.src {
+				t.Fatalf("got %q, want %q", got, tc.src)
+			}
+		})
+	}
+}
+
+// A backslash inside a code span is literal, and inside a raw HTML tag breaks
+// it, so a line there that would open a block takes an indent instead.
+func TestFormatContinuationInsideAnInlineSpanIsIndented(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"paragraph", "`\n\t>`\n", "`\n    >`\n"},
+		{"setext_heading", "`\n\t>`\n===\n", "`\n    >`\n===\n"},
+		{"raw_html_tag", "<A\n\t>\n", "<A\n    >\n"},
+		{"outside_a_code_span_is_escaped", "a\n\t> b\n", "a\n\\> b\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+
+			if again := mustFormat(t, got, config.Default()); !bytes.Equal(again, got) {
+				t.Fatalf("not idempotent: %q -> %q", got, again)
+			}
+		})
+	}
 }
 
 func TestFormatCodeSpanContinuationIsNotAFence(t *testing.T) {
@@ -466,6 +517,58 @@ func TestFormatFencedCodeBareCR(t *testing.T) {
 
 			if !bytes.Equal(twice, once) {
 				t.Fatalf("not idempotent.\n=== once ===\n%q\n=== twice ===\n%q", once, twice)
+			}
+		})
+	}
+}
+
+// A paragraph's first line holding one complete tag alone would open an HTML
+// block, so joining or wrapping must not leave it that way.
+func TestProseWrapKeepsALoneTagFirstLineAParagraph(t *testing.T) {
+	longWord := strings.Repeat("a", 130)
+	cases := []struct{ name, mode, src, want string }{
+		{"never keeps the break inside the tag", config.ProseWrapNever, "<img\n  src=\"a\">\n", "<img\nsrc=\"a\">\n"},
+		{"always keeps the break inside the tag", config.ProseWrapAlways, "<img\n  src=\"a\">\n", "<img\nsrc=\"a\">\n"},
+		{
+			"always keeps a unit after the tag",
+			config.ProseWrapAlways,
+			"<img src=\"a\"> " + longWord + " b\n",
+			"<img src=\"a\"> " + longWord + "\nb\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Markdown.ProseWrap = tc.mode
+
+			got := mustFormat(t, []byte(tc.src), cfg)
+			if string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+
+			if again := mustFormat(t, got, cfg); !bytes.Equal(again, got) {
+				t.Fatalf("not idempotent: %q -> %q", got, again)
+			}
+		})
+	}
+}
+
+// The line after a hard break continues the paragraph, so it is guarded like
+// any continuation line in every prose wrap mode.
+func TestProseWrapGuardsTheLineAfterAHardBreak(t *testing.T) {
+	for _, mode := range []string{config.ProseWrapPreserve, config.ProseWrapNever, config.ProseWrapAlways} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Markdown.ProseWrap = mode
+
+			got := mustFormat(t, []byte("a\\\n    # b\n"), cfg)
+			if want := "a\\\n\\# b\n"; string(got) != want {
+				t.Fatalf("got %q, want %q", got, want)
+			}
+
+			if again := mustFormat(t, got, cfg); !bytes.Equal(again, got) {
+				t.Fatalf("not idempotent: %q -> %q", got, again)
 			}
 		})
 	}
@@ -734,7 +837,7 @@ func TestFormatKeepsLazyContinuationInItem(t *testing.T) {
 		// CommonMark parses a link reference definition as the head of a
 		// paragraph, so a paragraph is still open under one and the line
 		// below it is a lazy continuation.
-		{"lazy_line_after_linkref_in_quote", "> [a]: #\nlazy\n", "> [a]: #\n>\n> lazy\n"},
+		{"lazy_line_after_linkref_in_quote", "> [a]: #\nlazy\n", "> [a]: #\n> lazy\n"},
 		{"lazy_line_after_linkref_in_item", "- [a]: #\nlazy\n", "- [a]: #\n  lazy\n"},
 		{"blank_after_linkref_ends_quote", "> [a]: #\n\nlazy\n", "> [a]: #\n\nlazy\n"},
 		{"heading_after_linkref_ends_quote", "> [a]: #\n# h\n", "> [a]: #\n\n# h\n"},
@@ -745,6 +848,24 @@ func TestFormatKeepsLazyContinuationInItem(t *testing.T) {
 		// `>` alone empties the inner quote, which closes the paragraph above it.
 		// Nothing is open to continue, so the line after belongs outside entirely.
 		{"emptied_inner_quote_ends_laziness", ">>2\n>\n4 b\n", "> > 2\n\n4 b\n"},
+		// Four columns kept these markers from opening a list; laziness makes them
+		// paragraph text, which the escape keeps once the indent is gone.
+		{"indented_bullet_escaped_in_item", "   - d\n    - e\n", "- d\n  \\- e\n"},
+		{"indented_ordered_escaped_in_item", "   - d\n    1. e\n", "- d\n  1\\. e\n"},
+		{"indented_bullet_escaped_in_quote", "> - d\n    - e\n", "> - d\n>   \\- e\n"},
+		// A backslash would make raw HTML text, so it takes an indent too.
+		{"indented_raw_html_indented_in_item", "*    0\n    <div>\n", "* 0\n      <div>\n"},
+		// Inside a code span a backslash is literal, so the marker takes an indent.
+		{"indented_bullet_in_code_span_indented_in_quote", "> a `b\n    - e`\n", "> a `b\n>     - e`\n"},
+		// The next pass strips the line as a quote line, which writes the gap after
+		// `*` as spaces, so the indented line takes them at once.
+		{"gap_after_indented_bullet_in_code_span_is_spaces", ">`\n\t*\t`0\n", "> `\n>     *   `0\n"},
+		{"indented_bullet_in_code_span_indented_in_item", "   - d `x\n    - e`\n", "- d `x\n      - e`\n"},
+		// The heading sits in the nested item and closes its paragraph, so the line
+		// after it is not lazy.
+		{"heading_in_nested_item_ends_laziness", "  *   *  0000000\n0\n\t        #\n0\n", "* * 0000000\n    0\n    #\n\n0\n"},
+		// `<A` is no complete tag, so it opens a paragraph, not an HTML block.
+		{"line_after_incomplete_tag_in_quote", "><A\n\t0\n", "> <A\n> 0\n"},
 	}
 
 	for _, tc := range cases {
@@ -857,7 +978,9 @@ func TestNestedMarkersSplitBeforeReadingAsAThematicBreak(t *testing.T) {
 		{"under_a_paragraph", "* a\n  * *\n      *\n", "* a\n  * *\n      * \n"},
 		{"at_the_top", "* *\n    *\n", "* *\n    * \n"},
 		{"nested_item_opening_with_code", "* a\n  * *\n          *\n", "* a\n  * *\n          *\n"},
-		{"padded_nested_list", "*\n\t* \t*\n\t\t#\n\t<a>\n", "*\n   *     *\n     #\n    <a>\n"},
+		// The tab after the inner marker reaches column 8, so the gap is three
+		// columns and the last `*` is an empty item, not code.
+		{"padded_inner_marker_opens_an_empty_item", "*\n\t* \t*\n\t\t#\n\t<a>\n", "*\n  *  * \n     #\n    <a>\n"},
 	}
 
 	for _, tc := range cases {
@@ -956,7 +1079,11 @@ func TestProseWrapAlwaysEscapesWrappedBlockMarkers(t *testing.T) {
 		// starts nothing.
 		{"underscore_is_never_a_bullet", "aaaa bbbb cccc dddd _ eee\n", "aaaa bbbb cccc dddd\n_ eee\n"},
 		{"ordered_marker_escapes_its_delimiter", "aaaa bbbb cccc dddd 1. eee fff\n", "aaaa bbbb cccc dddd\n1\\. eee fff\n"},
-		{"backtick_fence_opener", "aaaa bbbb cccc dddd ``` eee\n", "aaaa bbbb cccc dddd\n\\``` eee\n"},
+		// A backslash would leave a two-backtick run that can pair as a code span
+		// delimiter, so the fence takes an indent.
+		{"backtick_fence_opener_is_indented", "aaaa bbbb cccc dddd ``` eee\n", "aaaa bbbb cccc dddd\n    ``` eee\n"},
+		{"fence_indent_fits_the_width", "aaaa bbbb cccc dddd ``` eeee ffff gggg\n", "aaaa bbbb cccc dddd\n    ``` eeee ffff\ngggg\n"},
+		{"escaped_star_run_fits_the_width", "aaaa bbbb cccc dddd *** *** *** *** ***\n", "aaaa bbbb cccc dddd\n\\*\\*\\* *** *** ***\n\\*\\*\\*\n"},
 		{"code_span_is_not_a_fence", "aaaa bbbb cccc dddd ```eee``` fff\n", "aaaa bbbb cccc dddd\n```eee``` fff\n"},
 	}
 
@@ -999,6 +1126,31 @@ func TestLeadingFenceTextAvoidsFrontmatter(t *testing.T) {
 	}
 }
 
+// Raw HTML of types 1 to 5 runs to its closer, so when a list item ends before
+// it, the blank lines at the end of the item are its content and no closer can
+// be added.
+func TestFormatKeepsBlankLinesOfRawHTMLLeftOpenInAnItem(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"no blank line is added after the list", "-\t<pre>\n\t\tz\n  </pre>\n", " - <pre>\n   \tz\n  </pre>\n"},
+		{"blank lines before what follows the list stay", "- <pre>\n  x\n\n\n</pre>\n", "- <pre>\n  x\n\n\n</pre>\n"},
+		{"a blank line before the next item stays", "- <pre>\n\n- b\n", "- <pre>\n\n- b\n"},
+		{"a loose list adds none of its own", "- a\n\n  <!--\n  b\n\n\n- c\n", "- a\n\n  <!--\n  b\n\n\n- c\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+
+			if again := mustFormat(t, got, config.Default()); !bytes.Equal(again, got) {
+				t.Fatalf("not idempotent: %q -> %q", got, again)
+			}
+		})
+	}
+}
+
 // A blank line inside a fenced code block is content: it renders.
 func TestFormatFencedCodeKeepsBlankContentLines(t *testing.T) {
 	cases := []struct {
@@ -1013,6 +1165,15 @@ func TestFormatFencedCodeKeepsBlankContentLines(t *testing.T) {
 		{"blank-only content, indented", " ```\n\n ```\n", "```\n\n```\n"},
 		{"empty block stays empty", "```\n```\n", "```\n```\n"},
 		{"empty block with info string", "```ts\n```\n", "```ts\n```\n"},
+		{"in a list item, interior blank lines are kept", "- a\n\n\n  ```\n  b\n\n\n  ```\n", "- a\n\n  ```\n  b\n\n\n  ```\n"},
+		// A fence still open when the item ends takes the blank lines before the
+		// end as code; they do not separate the items, so the list stays tight.
+		{"unclosed in a list item, blank at the end", "* ~~~\n\n", "* ~~~\n\n  ~~~\n"},
+		{"unclosed in a list item, blank before the next item", "* ~~~\n\n* b\n", "* ~~~\n\n  ~~~\n* b\n"},
+		{"unclosed and ignored keeps its blank line", "<!--laravel-fmt-ignore-->\n```\n\n", "<!--laravel-fmt-ignore-->\n\n```\n\n"},
+		{"unclosed in a quote, blank at the end", ">```\n> \n", "> ```\n>\n> ```\n"},
+		// A blank line added after it would join the fence the kept item leaves open.
+		{"unclosed in an ignored item", "<!--laravel-fmt-ignore-->\n0) ~~~\n0\n", "<!--laravel-fmt-ignore-->\n\n0) ~~~\n0\n"},
 	}
 
 	for _, tc := range cases {
@@ -1046,6 +1207,16 @@ func TestFormatPromotesOnlyRealTables(t *testing.T) {
 		{"table with a row", "a|b\n---|---\n1|2\n", "| a   | b   |\n| --- | --- |\n| 1   | 2   |\n"},
 		{"alignment markers", "a|b\n:-:|:-:\n", "|   a   |   b   |\n| :---: | :---: |\n"},
 		{"indented delimiter is still a table", "a|b\n  ---|---\n", "| a   | b   |\n| --- | --- |\n"},
+		// Four columns in, no reader takes these for a delimiter row; dedented,
+		// some do, so the escape keeps them text.
+		{"dedented pipe row is escaped", "00\n    -|\n", "00\n\\-|\n"},
+		{"dedented colon row is escaped", "0\n    :-\n", "0\n\\:-\n"},
+		{"flush colon row is left as written", "0\n:-\n", "0\n:-\n"},
+		// Parsed on its own, a header four columns in would be code, so the rows
+		// stay paragraph text.
+		{"header four columns in is no table", "000\n    ||0\n-|-|-\n", "000\n||0\n-|-|-\n"},
+		// Under a paragraph line in a tight item, `| - |` would be a delimiter row.
+		{"dash-only header cell in a tight item under a paragraph", "* 0\n\t\t|\n\t|-\n\t|-\n", "* 0\n  |\n  | \\-  |\n  | --- |\n"},
 		{"tabs pad a delimiter cell", "a|b\n\t---\t|\t---\t\n", "| a   | b   |\n| --- | --- |\n"},
 		// GFM lets a table interrupt a paragraph, so the header needs no
 		// blank line above it.
@@ -1095,6 +1266,14 @@ func TestFormatKeepsLinkRefDefsTogether(t *testing.T) {
 		{"after a paragraph", "text\n\n[a]: /a\n[b]: /b\n", "text\n\n[a]: /a\n[b]: /b\n"},
 		{"in a quote", "> [a]: /a\n> [b]: /b\n", "> [a]: /a\n> [b]: /b\n"},
 		{"paragraph after keeps its blank", "[a]: /a\n\ntext\n", "[a]: /a\n\ntext\n"},
+		// The paragraph a definition was read from goes on, and `*` alone cannot
+		// interrupt it, so a blank line would turn it into a list.
+		{"paragraph directly under stays", "[a]: /a\n*\n", "[a]: /a\n*\n"},
+		{"heading directly under stays", "[a]: /a\n2. x\n===\n", "[a]: /a\n2. x\n===\n"},
+		{"its first line is guarded like a continuation", "[a]: /a\n    #\n", "[a]: /a\n\\#\n"},
+		// A continuation line's indent does not count, so this is a definition.
+		{"indented definition under one", "[a]: /a\n    [b]: /b\n", "[a]: /a\n[b]: /b\n"},
+		{"title on the next line stays with it", "[a]: /b\n  \"c\"\n[d]: /e\n", "[a]: /b\n\"c\"\n[d]: /e\n"},
 	}
 
 	for _, tc := range cases {
@@ -1203,6 +1382,10 @@ func TestFormatKeepsListItemTabColumnsAndFencedBytes(t *testing.T) {
 		{"four columns are content", "*    0\n", "* 0\n"},
 		// Five columns really do pin the content, code block and all.
 		{"five columns pin code", "*     0\n", "*     0\n"},
+		// The code's indent takes part of the second tab; the third is the code's.
+		{"a tab past the code indent stays a tab", "*\t\t\t0\n", "*       \t0\n"},
+		{"a continuation line keeps its code tab", "*\n\t\t\t0\n", "*       \t0\n"},
+		{"a nested item keeps its code tabs", "- a\n  - b\n\n\t\t\t\t0\n", "- a\n  - b\n\n        \t\t0\n"},
 		// A fence opened on the marker line governs the lines under it just as one
 		// opened further down does: the item's first line carries no indent to strip,
 		// but the block it opens still decides that the tab below is content.
@@ -1541,7 +1724,18 @@ func TestBlockStructureSurvivesTabsAndNesting(t *testing.T) {
 		want string
 	}{
 		{"tab after a blockquote marker is not code", "> \tquoted\n", "> quoted\n"},
-		{"nested list keeps a sibling outside it", "* \n\t* \n\t<A\n", "*\n   * \n    <A\n"},
+		// The first tab is also the optional space; the second still reaches the
+		// next tab stop, so the code keeps two columns of its own and its tabs.
+		{"tabs after a blockquote marker keep the code indent", ">\t\t\t\t0\n", ">       \t\t0\n"},
+		{"fenced code in a quote keeps its tab bytes", "> ```\n>\t\tx\n> ```\n", "> ```\n>   \tx\n> ```\n"},
+		{"fenced code in a quote keeps a tab after the space", "> ```\n> \tx\n> ```\n", "> ```\n> \tx\n> ```\n"},
+		{"an HTML block in a quote keeps its tab bytes", "> <pre>\n> \t\tx\n> </pre>\n", "> <pre>\n> \t\tx\n> </pre>\n"},
+		{"an HTML block in a list item keeps its tab bytes", "- <pre>\n  -\tx\n  </pre>\n", "- <pre>\n  -\tx\n  </pre>\n"},
+		// The outer item takes two columns, which moves a tab after the inner marker
+		// off its stop unless it is measured first.
+		{"tab after a nested marker keeps the code indent", "*\n    *   \t0\n", "* *       0\n"},
+		{"tab after a nested marker on the item's first line", "* *\t  0\n", "* * 0\n"},
+		{"nested list keeps a sibling outside it", "* \n\t* \n\t<a>\n", "*\n   * \n    <a>\n"},
 		{"nested list with no sibling still hoists", "- a\n\t- b\n", "- a\n  - b\n"},
 	}
 

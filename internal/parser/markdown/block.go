@@ -3,6 +3,7 @@ package markdown
 import (
 	"bytes"
 	"hash/maphash"
+	"slices"
 
 	parserpkg "github.com/JacobJoergensen/laravel-fmt/internal/parser"
 )
@@ -17,14 +18,76 @@ type parser struct {
 	peekOff, peekEnd, peekNext int
 	peeked                     bool
 
-	// probe skips container bodies and looseness: paragraphOpenAtEnd parses a
-	// body for every lazy line and reads only its last block's Content.
+	// probe skips container bodies and looseness: openLeafAtEnd parses a body
+	// for every lazy line and reads only its last block's Content.
 	probe bool
 
-	// lazy memoizes paragraphOpenAtEnd by a 128-bit hash of its content and is
+	// lazy memoizes openLeafAtEnd by a 128-bit hash of its content and is
 	// shared by every parser of one document. Keying by the bytes themselves
 	// would hold as much memory as a hostile document costs in time.
-	lazy map[[2]uint64]bool
+	lazy map[[2]uint64]openLeaf
+
+	// paragraphContinues is set after a link reference definition: CommonMark
+	// reads it off the front of a paragraph, so the next line joins that
+	// paragraph unless it can interrupt one (`*` alone cannot).
+	paragraphContinues bool
+
+	origins []lineOrigin
+}
+
+// lineOrigin is the document line a body line was cut from and the columns the
+// containers took off it. A body is parsed from column 0, which moves its tabs
+// off the document's grid, so indented code takes its bytes from here.
+type lineOrigin struct {
+	raw      []byte
+	consumed int
+}
+
+func (p *parser) origin(line []byte) lineOrigin {
+	if i := p.pos.Line - 1; i < len(p.origins) && p.origins[i].raw != nil {
+		return p.origins[i]
+	}
+
+	return lineOrigin{raw: line}
+}
+
+// Nothing is kept until a line holds a tab: without one a line's own bytes are
+// exact.
+func keepOrigin(origins []lineOrigin, index int, from lineOrigin, cut int) []lineOrigin {
+	if origins == nil && bytes.IndexByte(from.raw, '\t') < 0 {
+		return nil
+	}
+
+	for len(origins) < index {
+		origins = append(origins, lineOrigin{})
+	}
+
+	return append(origins, lineOrigin{raw: from.raw, consumed: from.consumed + cut})
+}
+
+// A tab the cut falls inside leaves its remaining columns as spaces, as
+// CommonMark's code indent does.
+func dropColumns(line []byte, n int) []byte {
+	col := 0
+
+	for i, c := range line {
+		if col >= n {
+			return line[i:]
+		}
+
+		width := 1
+		if c == '\t' {
+			width = tabStop - col%tabStop
+		}
+
+		if col+width > n {
+			return append(bytes.Repeat([]byte{' '}, col+width-n), line[i+1:]...)
+		}
+
+		col += width
+	}
+
+	return nil
 }
 
 var lazySeeds = [2]maphash.Seed{maphash.MakeSeed(), maphash.MakeSeed()}
@@ -129,6 +192,20 @@ func (p *parser) parseFile(document bool) []Node {
 func (p *parser) parseBlock() Node {
 	line, _ := p.peekLine()
 
+	if p.paragraphContinues {
+		p.paragraphContinues = false
+
+		block := p.parseParagraph(true)
+		switch b := block.(type) {
+		case *Paragraph:
+			b.ContinuesDefinition = true
+		case *SetextHeading:
+			b.ContinuesDefinition = true
+		}
+
+		return block
+	}
+
 	if level, ok := classifyATXHeading(line); ok {
 		return p.parseATXHeading(level)
 	}
@@ -157,7 +234,7 @@ func (p *parser) parseBlock() Node {
 		return p.parseHTMLBlock()
 	}
 
-	return p.parseParagraph()
+	return p.parseParagraph(false)
 }
 
 // OpensFrontmatter reports whether src begins with a frontmatter fence that a
@@ -390,6 +467,23 @@ func stripFenceIndent(content []byte, n int) []byte {
 	return out
 }
 
+// verbatimLine undoes the tab expansion a container's strip did to line.
+func (p *parser) verbatimLine(line []byte) []byte {
+	if o := p.origin(line); o.consumed > 0 {
+		return dropColumns(o.raw, o.consumed)
+	}
+
+	return line
+}
+
+func (p *parser) indentedCodeLine(line []byte) []byte {
+	if o := p.origin(line); o.consumed > 0 {
+		return dropColumns(o.raw, o.consumed+indentedCodeWidth)
+	}
+
+	return stripIndentColumns(line, indentedCodeWidth)
+}
+
 func (p *parser) parseIndentedCode() Node {
 	startPos := p.pos
 	var contentLines [][]byte
@@ -398,8 +492,8 @@ func (p *parser) parseIndentedCode() Node {
 	for !p.eof() {
 		line, _ := p.peekLine()
 
-		if isIndentedCode(line) {
-			contentLines = append(contentLines, stripIndentColumns(line, 4))
+		if isIndentedCode(line) && !isBlankLine(line) {
+			contentLines = append(contentLines, p.indentedCodeLine(line))
 			p.advancePastLine()
 			endPos = p.pos
 
@@ -409,10 +503,11 @@ func (p *parser) parseIndentedCode() Node {
 		if isBlankLine(line) {
 			// Blank lines between indented chunks form one code block (CommonMark),
 			// so look past the whole run, not just the next line: otherwise two
-			// blanks split the block and it re-merges on the next pass.
+			// blanks split the block and it re-merges on the next pass. Whitespace
+			// past the code indent on a blank line is code too.
 			savedPos := p.pos
 
-			blanks := 0
+			var blanks [][]byte
 
 			for !p.eof() {
 				next, _ := p.peekLine()
@@ -421,8 +516,8 @@ func (p *parser) parseIndentedCode() Node {
 					break
 				}
 
+				blanks = append(blanks, p.indentedCodeLine(next))
 				p.advancePastLine()
-				blanks++
 			}
 
 			if p.eof() {
@@ -439,9 +534,7 @@ func (p *parser) parseIndentedCode() Node {
 				break
 			}
 
-			for range blanks {
-				contentLines = append(contentLines, nil)
-			}
+			contentLines = append(contentLines, blanks...)
 
 			continue
 		}
@@ -465,6 +558,7 @@ func (p *parser) parseHTMLBlock() Node {
 
 	firstLine, _ := p.peekLine()
 	closers := htmlBlockClosers(firstLine)
+	unclosed := closers != nil
 
 	for !p.eof() {
 		line, _ := p.peekLine()
@@ -475,11 +569,13 @@ func (p *parser) parseHTMLBlock() Node {
 			break
 		}
 
-		lines = append(lines, line)
+		lines = append(lines, p.verbatimLine(line))
 		p.advancePastLine()
 		endPos = p.pos
 
 		if closesHTMLBlock(line, closers) {
+			unclosed = false
+
 			break
 		}
 	}
@@ -487,9 +583,10 @@ func (p *parser) parseHTMLBlock() Node {
 	content := bytes.Join(lines, []byte{'\n'})
 
 	return &HTMLBlock{
-		Start:   startPos,
-		End:     endPos,
-		Content: content,
+		Start:    startPos,
+		End:      endPos,
+		Content:  content,
+		Unclosed: unclosed,
 	}
 }
 
@@ -556,20 +653,25 @@ func (p *parser) parseBlockquote() Node {
 	endPos := p.pos
 	prevHadContent := false
 	lazyOpen := false
+	var fence openFenceTracker
+	var origins []lineOrigin
 
 	for !p.eof() {
 		line, _ := p.peekLine()
 
 		if isBlockquote(line) {
-			i := skipOptionalIndent(line)
+			markerEnd := skipOptionalIndent(line) + 1
 
-			i++
-
-			if i < len(line) && line[i] == ' ' {
-				i++
+			fence.indent = markerEnd
+			if markerEnd < len(line) && (line[markerEnd] == ' ' || line[markerEnd] == '\t') {
+				fence.indent++
 			}
 
-			stripped := expandStraddlingTab(line[i:], i)
+			// The marker becomes indentation so the tracker measures the rest of the
+			// line on the document's own tab grid.
+			unmarked := append(bytes.Repeat([]byte{' '}, markerEnd), line[markerEnd:]...)
+			stripped := fence.strip(unmarked)
+			origins = keepOrigin(origins, len(contentLines), p.origin(line), fence.indent)
 			contentLines = append(contentLines, stripped)
 			p.advancePastLine()
 			endPos = p.pos
@@ -601,16 +703,25 @@ func (p *parser) parseBlockquote() Node {
 		}
 
 		lazyOpen = true
-		contentLines = append(contentLines, escapeLazyBlockStart(line))
+		contentLines = append(contentLines, escapeLazyBlockStart(contentLines, line))
 		p.advancePastLine()
 		endPos = p.pos
 	}
 
 	content := bytes.Join(contentLines, []byte{'\n'})
 
+	// Joined lines leave the last one unterminated, which would drop a final
+	// blank line: code, when a fence is still open at the end of the quote.
+	if n := len(contentLines); n > 0 && isBlankLine(contentLines[n-1]) && linesMayHoldBlanks(contentLines) {
+		terminated := append(slices.Clip(content), '\n')
+		if p.blankHolderOpenAtEnd(terminated) {
+			content = terminated
+		}
+	}
+
 	quote := &Blockquote{Start: startPos, End: endPos, Content: content}
 	if !p.probe {
-		quote.Body = p.parseBody(content)
+		quote.Body = p.parseBody(content, origins)
 	}
 
 	return quote
@@ -715,29 +826,6 @@ func skipSpaceTab(line []byte, i int) int {
 	return i
 }
 
-// expandStraddlingTab rewrites a leading tab that begins at column col into the
-// spaces it stands for, so the slice can be measured on its own grid.
-//
-// CommonMark expands a tab to the next 4-column stop from where it sits, and
-// stripping a block marker moves that grid: after `> ` a tab covers two columns,
-// not four, so `> <TAB>quoted` is a paragraph rather than the indented code block a
-// fresh measurement claimed. Only the one tab at the cut is expanded; everything
-// after it keeps its own bytes, which is what an inner code fence needs.
-func expandStraddlingTab(rest []byte, col int) []byte {
-	if len(rest) == 0 || rest[0] != '\t' || col%4 == 0 {
-		return rest
-	}
-
-	width := 4 - col%4
-	out := make([]byte, 0, len(rest)+width)
-
-	for range width {
-		out = append(out, ' ')
-	}
-
-	return append(out, rest[1:]...)
-}
-
 // leadingIndentColumns counts the columns of leading whitespace, expanding a tab
 // to the next 4-column tab stop (CommonMark). Measuring list-item continuation
 // indent in columns, not bytes, keeps a tab-indented line claimed the same as the
@@ -750,7 +838,7 @@ func leadingIndentColumns(line []byte) int {
 		case ' ':
 			col++
 		case '\t':
-			col += 4 - col%4
+			col += tabStop - col%tabStop
 		default:
 			return col
 		}
@@ -759,10 +847,12 @@ func leadingIndentColumns(line []byte) int {
 	return col
 }
 
-// openFenceTracker strips a list item's content column from its lines, following
-// the fenced blocks inside so each line is stripped the way its own role needs:
-// see stripIndentColumnsAligned for why the two cannot be satisfied at once. Only
-// the item's collection loop sees the lines in order, so the state lives with it.
+// openFenceTracker strips a container's prefix (a list item's content column, a
+// blockquote's marker) from its lines, following the fenced blocks inside so
+// each line is stripped the way its own role needs: see
+// stripIndentColumnsAligned for why the two cannot be satisfied at once. Only
+// the container's collection loop sees the lines in order, so the state lives
+// with it.
 type openFenceTracker struct {
 	indent int
 	// nested is how far in the fence sits when it opened behind the markers of
@@ -835,16 +925,74 @@ func (t *openFenceTracker) observe(line []byte) {
 // Keeping both the tab bytes and the column is arithmetically impossible
 // unless n is a multiple of the tab stop, so the caller has to choose per
 // line: columns decide block structure, and inside a fenced block the bytes
-// are the value. openFenceTracker makes that choice for list items.
+// are the value. openFenceTracker makes that choice for containers.
+//
+// The same holds for the whitespace after markers the content opens with, so
+// tabs there become spaces too. That happens whatever n is, or a source cut on
+// a tab stop and its output cut off one would write the gap differently.
 func stripIndentColumnsAligned(line []byte, n int) []byte {
 	width := leadingIndentColumns(line)
 	rest := len(line) - len(bytes.TrimLeft(line, " \t"))
+	text := expandMarkerGaps(line[rest:], width)
 
 	if width <= n {
-		return line[rest:]
+		return text
 	}
 
-	return append(bytes.Repeat([]byte{' '}, width-n), line[rest:]...)
+	return append(bytes.Repeat([]byte{' '}, width-n), text...)
+}
+
+const (
+	tabStop           = 4
+	indentedCodeWidth = 4
+)
+
+func expandMarkerGaps(text []byte, col int) []byte {
+	if !bytes.Contains(text, []byte{'\t'}) {
+		return text
+	}
+
+	var out []byte
+
+	i := 0
+
+	for {
+		marker := containerMarkerLength(text[i:])
+		if marker == 0 {
+			break
+		}
+
+		out = append(out, text[i:i+marker]...)
+		i += marker
+		col += marker
+
+		start := i
+		for i < len(text) && (text[i] == ' ' || text[i] == '\t') {
+			i++
+		}
+
+		var gap []byte
+		gap, col = expandGapTabs(text[start:i], col)
+		out = append(out, gap...)
+	}
+
+	if i == 0 {
+		return text
+	}
+
+	return append(out, text[i:]...)
+}
+
+func containerMarkerLength(text []byte) int {
+	if len(text) > 0 && text[0] == '>' {
+		return 1
+	}
+
+	if _, marker, _, _, _, ok := listItemStart(text); ok {
+		return len(marker)
+	}
+
+	return 0
 }
 
 // stripIndentColumns drops the first n columns of leading whitespace from line. A
@@ -857,7 +1005,7 @@ func stripIndentColumns(line []byte, n int) []byte {
 		case ' ':
 			col++
 		case '\t':
-			col += 4 - col%4
+			col += tabStop - col%tabStop
 		default:
 			return line[i:]
 		}
@@ -872,31 +1020,60 @@ func stripIndentColumns(line []byte, n int) []byte {
 	return nil
 }
 
-// paragraphOpenAtEnd reports whether a paragraph is the block still open at the
-// end of content, which is the state CommonMark laziness requires. It asks the
-// parser instead of tracking the answer alongside it: a body can end in a fence,
-// a heading or a nested container, and laziness reaches a paragraph open inside
-// one of those. content must end with a newline, so that a trailing blank line
-// stays distinguishable from the last line's own terminator.
+type openLeaf uint8
+
+const (
+	openLeafNone openLeaf = iota
+	openLeafParagraph
+	openLeafHoldsBlanks
+)
+
+func (p *parser) paragraphOpenAtEnd(content []byte) bool {
+	return p.openLeafAtEnd(content) == openLeafParagraph
+}
+
+// blankHolderOpenAtEnd reports whether a fenced code block or an HTML block of
+// types 1 to 5 is still open at the end of content, which makes the blank lines
+// after it its content.
+func (p *parser) blankHolderOpenAtEnd(content []byte) bool {
+	return p.openLeafAtEnd(content) == openLeafHoldsBlanks
+}
+
+// linesMayHoldBlanks is the cheap precondition of blankHolderOpenAtEnd: neither
+// block can be open in lines without a fence run or a `<`.
+func linesMayHoldBlanks(lines [][]byte) bool {
+	for _, line := range lines {
+		if bytes.Contains(line, []byte("```")) || bytes.Contains(line, []byte("~~~")) || bytes.IndexByte(line, '<') >= 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// openLeafAtEnd asks the parser instead of tracking the answer alongside it: a
+// body can end in a heading or a nested container, and the open block may sit
+// inside one of those. content must end with a newline, so that a trailing
+// blank line stays distinguishable from the last line's own terminator.
 //
 // The answer is memoized: a probe parses nested containers whose own lazy
 // lines probe again, which without it is exponential in the line count.
-func (p *parser) paragraphOpenAtEnd(content []byte) bool {
+func (p *parser) openLeafAtEnd(content []byte) openLeaf {
 	key := [2]uint64{maphash.Bytes(lazySeeds[0], content), maphash.Bytes(lazySeeds[1], content)}
 	if open, ok := p.lazy[key]; ok {
 		return open
 	}
 
 	probe := p.child(content, true)
-	open := probe.lastParagraphOpen(probe.parseFile(false), len(content))
+	open := probe.lastOpenLeaf(probe.parseFile(false), len(content))
 	p.lazy[key] = open
 
 	return open
 }
 
-func (p *parser) lastParagraphOpen(blocks []Node, end int) bool {
+func (p *parser) lastOpenLeaf(blocks []Node, end int) openLeaf {
 	if len(blocks) == 0 {
-		return false
+		return openLeafNone
 	}
 
 	last := blocks[len(blocks)-1]
@@ -904,29 +1081,40 @@ func (p *parser) lastParagraphOpen(blocks []Node, end int) bool {
 	// A block that stops short of the end was closed by what follows it: a
 	// blockquote emptied by `>` on its own line ends there, whatever its content.
 	if last.Span().End.Offset < end {
-		return false
+		return openLeafNone
 	}
 
 	switch last := last.(type) {
 	case *Paragraph:
-		return true
+		return openLeafParagraph
 	case *LinkRefDef:
 		// CommonMark lifts a definition off the front of a paragraph, so a
 		// paragraph is still open under one and the next line joins it lazily.
-		return true
+		return openLeafParagraph
+	case *FencedCodeBlock:
+		if last.CloseFence.End.Offset == 0 {
+			return openLeafHoldsBlanks
+		}
+	case *HTMLBlock:
+		if last.Unclosed {
+			return openLeafHoldsBlanks
+		}
 	case *Blockquote:
-		return p.paragraphOpenAtEnd(append(last.Content, '\n'))
+		// Only laziness reaches past an unmarked line into a quote.
+		if p.paragraphOpenAtEnd(append(last.Content, '\n')) {
+			return openLeafParagraph
+		}
 	case *List:
 		if len(last.Items) == 0 {
-			return false
+			return openLeafNone
 		}
 
 		tail := last.Items[len(last.Items)-1]
 
-		return p.paragraphOpenAtEnd(append(tail.Content, '\n'))
+		return p.openLeafAtEnd(append(tail.Content, '\n'))
 	}
 
-	return false
+	return openLeafNone
 }
 
 func (p *parser) parseListItem(marker []byte, contentColumn int) (*ListItem, bool) {
@@ -934,13 +1122,16 @@ func (p *parser) parseListItem(marker []byte, contentColumn int) (*ListItem, boo
 	firstLine, _ := p.peekLine()
 
 	markerEnd := skipOptionalIndent(firstLine) + len(marker)
-	contentLines := [][]byte{listFirstLineContent(firstLine, markerEnd, contentColumn)}
+	first := listFirstLineContent(firstLine, markerEnd, contentColumn)
+	contentLines := [][]byte{expandMarkerGaps(first, contentColumn)}
+	origins := keepOrigin(nil, 0, p.origin(firstLine), contentColumn)
 
 	p.advancePastLine()
 	endPos := p.pos
 
 	contIndent := contentColumn
 	hadInternalBlank := false
+	endsInBlanks := false
 	startedBlank := isBlankLine(contentLines[0])
 	// A lazily absorbed line is paragraph text by construction, so the
 	// paragraph it joined stays open and the next lazy line needs no query.
@@ -959,9 +1150,17 @@ func (p *parser) parseListItem(marker []byte, contentColumn int) (*ListItem, boo
 				break
 			}
 
+			// Inside code every blank line's whitespace past the content column is
+			// content, and code takes its bytes from the origin, so a plain cut serves.
 			savedPos := p.pos
 
+			var blanks [][]byte
+			var blanksFrom []lineOrigin
+
 			for !p.eof() {
+				blank, _ := p.peekLine()
+				blanks = append(blanks, stripIndentColumns(blank, contIndent))
+				blanksFrom = append(blanksFrom, p.origin(blank))
 				p.advancePastLine()
 
 				peekAhead, _ := p.peekLine()
@@ -973,22 +1172,39 @@ func (p *parser) parseListItem(marker []byte, contentColumn int) (*ListItem, boo
 				break
 			}
 
-			if p.eof() {
-				p.pos = savedPos
-
-				break
+			keepBlanks := func() {
+				for k, blank := range blanks {
+					origins = keepOrigin(origins, len(contentLines), blanksFrom[k], contIndent)
+					contentLines = append(contentLines, blank)
+				}
 			}
 
-			peekAhead, _ := p.peekLine()
+			ends := p.eof()
+			if !ends {
+				peekAhead, _ := p.peekLine()
+				ends = leadingIndentColumns(peekAhead) < contIndent
+			}
 
-			if leadingIndentColumns(peekAhead) < contIndent {
-				p.pos = savedPos
+			if ends {
+				// A fence still open in the item takes the blank lines as code before
+				// the item closes; otherwise they lie between blocks outside it.
+				body := bytes.Join(contentLines, []byte{'\n'})
+				if !linesMayHoldBlanks(contentLines) || !p.blankHolderOpenAtEnd(append(body, '\n')) {
+					p.pos = savedPos
+
+					break
+				}
+
+				keepBlanks()
+
+				endsInBlanks = true
+				endPos = p.pos
 
 				break
 			}
 
 			hadInternalBlank = true
-			contentLines = append(contentLines, nil)
+			keepBlanks()
 			endPos = p.pos
 
 			lazyOpen = false
@@ -1021,7 +1237,7 @@ func (p *parser) parseListItem(marker []byte, contentColumn int) (*ListItem, boo
 			}
 
 			lazyOpen = true
-			absorbed := escapeLazyBlockStart(fence.strip(line))
+			absorbed := escapeLazyBlockStart(contentLines, fence.strip(line))
 			contentLines = append(contentLines, absorbed)
 			p.advancePastLine()
 			endPos = p.pos
@@ -1031,15 +1247,23 @@ func (p *parser) parseListItem(marker []byte, contentColumn int) (*ListItem, boo
 
 		stripped := fence.strip(line)
 		lazyOpen = lazyOpen && keepsParagraphOpen(stripped)
+		origins = keepOrigin(origins, len(contentLines), p.origin(line), contIndent)
 		contentLines = append(contentLines, stripped)
 		p.advancePastLine()
 		endPos = p.pos
 	}
 
 	content := bytes.Join(contentLines, []byte{'\n'})
+
+	// Joined lines leave the last one unterminated, which would drop the final
+	// blank line.
+	if endsInBlanks {
+		content = append(content, '\n')
+	}
+
 	item := &ListItem{Start: startPos, End: endPos, MarkerBytes: marker, Content: content}
 	if !p.probe {
-		item.Body = p.parseBody(content)
+		item.Body = p.parseBody(content, origins)
 		item.Loose = hadInternalBlank && blankSeparatesBlocks(item.Body)
 	}
 
@@ -1061,7 +1285,9 @@ func blankSeparatesBlocks(body *File) bool {
 	return false
 }
 
-func (p *parser) parseParagraph() Node {
+// continues marks a paragraph going on under a definition, whose first line is
+// a continuation line: its indent does not count, so it can be another one.
+func (p *parser) parseParagraph(continues bool) Node {
 	startPos := p.pos
 	var contentLines [][]byte
 	endPos := p.pos
@@ -1072,10 +1298,18 @@ func (p *parser) parseParagraph() Node {
 	lastLineStart := p.pos
 	endBeforeLast := p.pos
 
-	firstLine, _ := p.peekLine()
+	firstLine, nextOff := p.peekLine()
 
-	if label, dest, title, ok := tryLinkRefDef(firstLine); ok {
+	defLine := firstLine
+	if continues {
+		defLine = bytes.TrimLeft(firstLine, " \t")
+	}
+
+	if label, dest, title, ok := tryLinkRefDef(defLine); ok && (title != nil || !opensLinkTitle(p.src, nextOff)) {
 		p.advancePastLine()
+
+		next, _ := p.peekLine()
+		p.paragraphContinues = !p.eof() && !isBlankLine(next) && !interruptsParagraph(next)
 
 		return &LinkRefDef{
 			Start: startPos,
@@ -1111,17 +1345,7 @@ func (p *parser) parseParagraph() Node {
 				}
 			}
 
-			if interruptsParagraphNotList(line) {
-				break
-			}
-
-			// A list item interrupts a paragraph only with non-whitespace content
-			// after the marker (a trailing space is not content), and an ordered
-			// item only when its number is written as exactly `1` (CommonMark); else
-			// `*  `/`0) x`/`2. x`/`01) x` would flip to a list on the next pass.
-			if indent, marker, ordered, _, _, ok := listItemStart(line); ok &&
-				!isBlankLine(line[indent+len(marker):]) &&
-				(!ordered || orderedMarkerStartsAtOne(marker)) {
+			if interruptsParagraph(line) {
 				break
 			}
 
@@ -1131,8 +1355,10 @@ func (p *parser) parseParagraph() Node {
 			// comes after the checks above because a line they claim is that
 			// construct, not a separator: ` - | - ` is a bullet holding
 			// `| -`, and GFM reads it that way too.
+			// The header line is handed back to be parsed on its own, where four
+			// columns of indent would read it as code instead of a table.
 			last := contentLines[len(contentLines)-1]
-			if aligns, headerCells, ok := tableRowsPromote(last, line); ok {
+			if aligns, headerCells, ok := tableRowsPromote(last, line); ok && !isIndentedCode(last) {
 				if len(contentLines) == 1 {
 					return p.parseTable(startPos, headerCells, aligns)
 				}
@@ -1504,8 +1730,9 @@ func openFence(line []byte) (byte, int, []byte, bool) {
 		return 0, 0, nil, false
 	}
 
+	// CommonMark trims spaces and tabs only, so a U+0085 is part of the info.
 	rest := line[indent+length:]
-	info := bytes.TrimSpace(rest)
+	info := bytes.Trim(rest, " \t")
 
 	if char == '`' && bytes.IndexByte(info, '`') >= 0 {
 		return 0, 0, nil, false
@@ -1548,26 +1775,112 @@ func isClosingFence(line []byte, fenceChar byte, minLen int) bool {
 // isIndentedCode reports an indented code block: four or more leading columns,
 // counting a tab as a 4-column stop so `space+tab` matches four spaces.
 func isIndentedCode(line []byte) bool {
-	return leadingIndentColumns(line) >= 4
+	return leadingIndentColumns(line) >= indentedCodeWidth
 }
 
+// Type 7 takes a complete tag alone on its line, so `<A` is paragraph text.
 func isHTMLBlockStart(line []byte) bool {
-	i := skipOptionalIndent(line)
+	if htmlBlockInterruptsParagraph(line) {
+		return true
+	}
 
+	end, ok := completeTagEnd(line, skipOptionalIndent(line))
+
+	return ok && isBlankLine(line[end:])
+}
+
+func completeTagEnd(line []byte, i int) (int, bool) {
 	if i >= len(line) || line[i] != '<' {
-		return false
+		return 0, false
 	}
 
 	i++
+	closing := i < len(line) && line[i] == '/'
 
-	if i >= len(line) {
-		return false
+	if closing {
+		i++
 	}
 
-	c := line[i]
+	if i >= len(line) || !isASCIILetter(line[i]) {
+		return 0, false
+	}
 
-	return c == '!' || c == '?' || c == '/' || isASCIILetter(c)
+	for i < len(line) && (isASCIILetter(line[i]) || isASCIIDigit(line[i]) || line[i] == '-') {
+		i++
+	}
+
+	if !closing {
+		for {
+			next := skipSpaceTab(line, i)
+			end, ok := attributeEnd(line, next)
+
+			if next == i || !ok {
+				i = next
+
+				break
+			}
+
+			i = end
+		}
+
+		if i < len(line) && line[i] == '/' {
+			i++
+		}
+	} else {
+		i = skipSpaceTab(line, i)
+	}
+
+	if i >= len(line) || line[i] != '>' {
+		return 0, false
+	}
+
+	return i + 1, true
 }
+
+func attributeEnd(line []byte, i int) (int, bool) {
+	if i >= len(line) {
+		return 0, false
+	}
+
+	if first := line[i]; !isASCIILetter(first) && first != '_' && first != ':' {
+		return 0, false
+	}
+
+	for i < len(line) && (isASCIILetter(line[i]) || isASCIIDigit(line[i]) || bytes.IndexByte(attributeNamePunctuation, line[i]) >= 0) {
+		i++
+	}
+
+	eq := skipSpaceTab(line, i)
+	if eq >= len(line) || line[eq] != '=' {
+		return i, true
+	}
+
+	v := skipSpaceTab(line, eq+1)
+	if v >= len(line) {
+		return 0, false
+	}
+
+	if quote := line[v]; quote == '"' || quote == '\'' {
+		closeAt := bytes.IndexByte(line[v+1:], quote)
+		if closeAt < 0 {
+			return 0, false
+		}
+
+		return v + 1 + closeAt + 1, true
+	}
+
+	start := v
+	for v < len(line) && bytes.IndexByte(unquotedValueStops, line[v]) < 0 {
+		v++
+	}
+
+	return v, v > start
+}
+
+var (
+	attributeNamePunctuation = []byte("_.:-")
+	unquotedValueStops       = []byte("\"'=<>` \t")
+)
 
 func isBlockquote(line []byte) bool {
 	i := skipOptionalIndent(line)
@@ -1613,6 +1926,12 @@ func StartsHTMLBlockInParagraph(line []byte) bool {
 	return htmlBlockInterruptsParagraph(line)
 }
 
+// StartsHTMLBlock reports whether line, as the first line of a block, opens an
+// HTML block, a lone complete tag included.
+func StartsHTMLBlock(line []byte) bool {
+	return isHTMLBlockStart(line)
+}
+
 // htmlBlockInterruptsParagraph reports whether line opens one of the HTML blocks
 // that may interrupt a paragraph, CommonMark types 1 to 6. Type 7, any other
 // complete tag alone on its line, may not, which is why isHTMLBlockStart cannot
@@ -1655,7 +1974,7 @@ func htmlBlockInterruptsParagraph(line []byte) bool {
 func matchesTagName(s []byte, set map[string]bool) (bool, []byte) {
 	n := 0
 
-	for n < len(s) && (isASCIILetter(s[n]) || (s[n] >= '0' && s[n] <= '9')) {
+	for n < len(s) && (isASCIILetter(s[n]) || isASCIIDigit(s[n])) {
 		n++
 	}
 
@@ -1693,9 +2012,11 @@ func tagNameEnds(after []byte, selfClosing bool) bool {
 
 // escapeLazyBlockStart prefixes a lazily absorbed line with a backslash when it
 // would start a block in its new home that CommonMark never lets a lazy line
-// start: a setext underline, or a table delimiter row. Laziness is the proof that
-// the source meant paragraph text, but the line now sits at its container's own
-// column, directly under the line it continues, where it reads as that marker.
+// start: a setext underline, a table delimiter row, or a marker that four
+// columns of indent kept from opening a block (`    - e`). Laziness is the proof
+// that the source meant paragraph text, but the line now sits at its container's
+// own column, directly under the line it continues, where it reads as that
+// marker.
 //
 // A delimiter row is judged on its shape alone, not on whether this parser would
 // promote the pair: once the line is no longer lazy it is exposed to whatever
@@ -1706,47 +2027,101 @@ func tagNameEnds(after []byte, selfClosing bool) bool {
 //
 // The backslash goes on the marker rather than at the start of the line: a marker
 // may carry up to three columns of indent, and a backslash before a space is not
-// an escape in CommonMark, so it would render as literal text.
-func escapeLazyBlockStart(line []byte) []byte {
-	if setextLevel(line) == 0 && !delimiterRowShaped(line) {
+// an escape in CommonMark, so it would render as literal text. An ordered marker
+// escapes its delimiter (`1\.`) for the same reason: a backslash before a digit
+// is literal.
+//
+// Raw HTML, and a line that starts inside a code span or raw tag opened above
+// it, take four columns of indent instead, as a backslash there would make the
+// tag text or is literal; the emitter keeps that indent.
+func escapeLazyBlockStart(above [][]byte, line []byte) []byte {
+	indent := len(line) - len(bytes.TrimLeft(line, " \t"))
+	text := line[indent:]
+	rawHTML := htmlBlockInterruptsParagraph(text)
+	opensBlock := interruptsParagraphLazily(text) && !rawHTML
+
+	if !rawHTML && !opensBlock && setextLevel(line) == 0 && !DelimiterRowShaped(line) {
 		return line
 	}
 
-	indent := len(line) - len(bytes.TrimLeft(line, " \t"))
+	// The gap after a marker is written as spaces, as the next pass's strip
+	// writes it.
+	if rawHTML || startsInsideSpan(above, line) {
+		indented := make([]byte, 0, indentedCodeWidth+len(text))
+		indented = append(indented, bytes.Repeat([]byte{' '}, indentedCodeWidth)...)
+
+		return append(indented, expandMarkerGaps(text, indentedCodeWidth)...)
+	}
+
 	escaped := make([]byte, 0, len(line)+1)
 	escaped = append(escaped, line[:indent]...)
-	escaped = append(escaped, '\\')
 
-	return append(escaped, line[indent:]...)
+	return append(escaped, EscapeBlockMarker(text)...)
 }
 
-// delimiterRowShaped reports whether line is made only of the characters a table
-// delimiter row is made of, and holds at least one dash and one pipe. A bare dash
-// run is a thematic break or a setext underline, which are judged on their own.
-func delimiterRowShaped(line []byte) bool {
+// EscapeBlockMarker returns text, which starts with a block marker, with that
+// marker escaped. An ordered marker escapes its delimiter, as a backslash
+// before a digit is literal, and a `*` or `_` run is escaped whole: `\***`
+// would leave a `**` that can close emphasis.
+func EscapeBlockMarker(text []byte) []byte {
+	at := 0
+	for at < len(text) && isASCIIDigit(text[at]) {
+		at++
+	}
+
+	escaped := make([]byte, 0, len(text)+2)
+	escaped = append(escaped, text[:at]...)
+
+	if at < len(text) && (text[at] == '*' || text[at] == '_') {
+		run := text[at]
+		for at < len(text) && text[at] == run {
+			escaped = append(escaped, '\\', run)
+			at++
+		}
+
+		return append(escaped, text[at:]...)
+	}
+
+	escaped = append(escaped, '\\')
+
+	return append(escaped, text[at:]...)
+}
+
+// DelimiterRowShaped reports whether line is made only of the characters a table
+// delimiter row is made of, and holds a dash and either a pipe or a colon: some
+// readers promote a one-column table under `:-` alone. A bare dash run is a
+// thematic break or a setext underline, which are judged on their own.
+func DelimiterRowShaped(line []byte) bool {
 	hasPipe := false
+	hasColon := false
 	hasDash := false
 
 	for _, c := range line {
 		switch c {
 		case '|':
 			hasPipe = true
+		case ':':
+			hasColon = true
 		case '-':
 			hasDash = true
-		case ':', ' ', '\t':
+		case ' ', '\t':
 		default:
 			return false
 		}
 	}
 
-	return hasPipe && hasDash
+	return hasDash && (hasPipe || hasColon)
 }
 
 // keepsParagraphOpen reports whether appending line to a body that ends in an
 // open paragraph leaves it open. It only has to be sufficient: answering false
 // where the paragraph does survive costs parseListItem one re-parse, never a
-// wrong reading.
+// wrong reading. An indented line may sit in a nested container, where it can
+// open a block it cannot open here (`    #` under a nested item), so the line is
+// judged without its indent: text that opens nothing at any column is safe.
 func keepsParagraphOpen(line []byte) bool {
+	line = bytes.TrimLeft(line, " \t")
+
 	if isBlankLine(line) || interruptsParagraphLazily(line) {
 		return false
 	}
@@ -1756,6 +2131,21 @@ func keepsParagraphOpen(line []byte) bool {
 	}
 
 	return bytes.IndexByte(line, '|') < 0
+}
+
+// interruptsParagraph reports whether line starts a block while a paragraph is
+// open. A list item does only with non-whitespace content after the marker (a
+// trailing space is not content), and an ordered item only when its number is
+// written as exactly `1` (CommonMark); else `*  `/`0) x`/`2. x`/`01) x` would
+// flip to a list on the next pass.
+func interruptsParagraph(line []byte) bool {
+	if interruptsParagraphNotList(line) {
+		return true
+	}
+
+	indent, marker, ordered, _, _, ok := listItemStart(line)
+
+	return ok && !isBlankLine(line[indent+len(marker):]) && (!ordered || orderedMarkerStartsAtOne(marker))
 }
 
 // interruptsParagraphNotList reports whether line starts a block that may
@@ -1834,7 +2224,7 @@ func listItemStart(line []byte) (int, []byte, bool, int, int, bool) {
 
 	j := indent
 
-	for j < len(line) && line[j] >= '0' && line[j] <= '9' {
+	for j < len(line) && isASCIIDigit(line[j]) {
 		j++
 	}
 
@@ -1927,16 +2317,32 @@ func listFirstLineContent(line []byte, markerEnd, contentColumn int) []byte {
 	return append(bytes.Repeat([]byte{' '}, pad), text...)
 }
 
-// markerGap returns the width in columns and the length in bytes of the
-// whitespace run that follows a marker ending at markerEnd. A tab measures to the
-// next 4-column stop from where it sits, so `   \t` is seven columns after a
-// marker in column three, not four bytes' worth.
-func markerGap(line []byte, markerEnd int) (columns, length int) {
+// expandGapTabs also returns the column the gap ends at.
+func expandGapTabs(gap []byte, col int) ([]byte, int) {
+	out := make([]byte, 0, len(gap)+tabStop)
+
+	for _, c := range gap {
+		if c != '\t' {
+			out = append(out, c)
+			col++
+
+			continue
+		}
+
+		width := tabStop - col%tabStop
+		out = append(out, bytes.Repeat([]byte{' '}, width)...)
+		col += width
+	}
+
+	return out, col
+}
+
+func columnAt(line []byte, end int) int {
 	col := 0
 
-	for i := range markerEnd {
-		if line[i] == '\t' {
-			col += 4 - col%4
+	for _, c := range line[:end] {
+		if c == '\t' {
+			col += tabStop - col%tabStop
 
 			continue
 		}
@@ -1944,6 +2350,15 @@ func markerGap(line []byte, markerEnd int) (columns, length int) {
 		col++
 	}
 
+	return col
+}
+
+// markerGap returns the width in columns and the length in bytes of the
+// whitespace run that follows a marker ending at markerEnd. A tab measures to the
+// next 4-column stop from where it sits, so `   \t` is seven columns after a
+// marker in column three, not four bytes' worth.
+func markerGap(line []byte, markerEnd int) (columns, length int) {
+	col := columnAt(line, markerEnd)
 	start := col
 
 	for markerEnd+length < len(line) {
@@ -1951,7 +2366,7 @@ func markerGap(line []byte, markerEnd int) (columns, length int) {
 		case ' ':
 			col++
 		case '\t':
-			col += 4 - col%4
+			col += tabStop - col%tabStop
 		default:
 			return col - start, length
 		}
@@ -1996,7 +2411,7 @@ func tryLinkRefDef(line []byte) ([]byte, []byte, []byte, bool) {
 
 	label := line[labelStart:i]
 
-	if len(bytes.TrimSpace(label)) == 0 {
+	if len(bytes.Trim(label, " \t")) == 0 {
 		return nil, nil, nil, false
 	}
 
@@ -2054,45 +2469,25 @@ func tryLinkRefDef(line []byte) ([]byte, []byte, []byte, bool) {
 		}
 	}
 
+	destEnd := i
 	i = skipSpaceTab(line, i)
 
 	var title []byte
 
 	if i < len(line) {
-		var endCh byte
-
-		switch line[i] {
-		case '"':
-			endCh = '"'
-		case '\'':
-			endCh = '\''
-		case '(':
-			endCh = ')'
-		default:
+		// A title must be set off from the destination: `<bar>(baz)` is no
+		// definition at all.
+		if i == destEnd {
 			return nil, nil, nil, false
 		}
 
-		i++
-		titleStart := i
-
-		for i < len(line) && line[i] != endCh {
-			if line[i] == '\\' && i+1 < len(line) {
-				i += 2
-
-				continue
-			}
-
-			i++
-		}
-
-		if i >= len(line) {
+		closeAt, valid := scanLinkTitle(line, i)
+		if !valid || closeAt < 0 {
 			return nil, nil, nil, false
 		}
 
-		title = line[titleStart:i]
-		i++
-
-		i = skipSpaceTab(line, i)
+		title = line[i+1 : closeAt]
+		i = skipSpaceTab(line, closeAt+1)
 	}
 
 	if i != len(line) {
@@ -2100,6 +2495,66 @@ func tryLinkRefDef(line []byte) ([]byte, []byte, []byte, bool) {
 	}
 
 	return label, dest, title, true
+}
+
+// opensLinkTitle reports whether the line at off may hold the title of a
+// definition on the line above. Such a definition spans lines, which
+// tryLinkRefDef does not model, so it stays paragraph text and keeps its line
+// breaks.
+//
+// A title that closes on its line with more text after it is no title, so the
+// definition above ends on its own line.
+func opensLinkTitle(src []byte, off int) bool {
+	line, _ := lineAt(src, off)
+	i := skipSpaceTab(line, 0)
+
+	closeAt, valid := scanLinkTitle(line, i)
+	if !valid {
+		return false
+	}
+
+	return closeAt < 0 || isBlankLine(line[closeAt+1:])
+}
+
+// scanLinkTitle returns where the title opening at line[i] closes, or -1 when
+// it runs past the line, and false when line[i] opens no title or the title
+// holds what CommonMark forbids.
+func scanLinkTitle(line []byte, i int) (int, bool) {
+	if i >= len(line) {
+		return 0, false
+	}
+
+	var endCh byte
+
+	switch line[i] {
+	case '"':
+		endCh = '"'
+	case '\'':
+		endCh = '\''
+	case '(':
+		endCh = ')'
+	default:
+		return 0, false
+	}
+
+	for i++; i < len(line) && line[i] != endCh; i++ {
+		if line[i] == '\\' && i+1 < len(line) {
+			i++
+
+			continue
+		}
+
+		// A parenthesised title holds a `(` only escaped.
+		if endCh == ')' && line[i] == '(' {
+			return 0, false
+		}
+	}
+
+	if i >= len(line) {
+		return -1, true
+	}
+
+	return i, true
 }
 
 // destParensBalanced checks a bare link destination's parentheses: CommonMark
@@ -2123,6 +2578,31 @@ func destParensBalanced(dest []byte) bool {
 	}
 
 	return depth == 0
+}
+
+// startsInsideSpan looks back only to the last blank line, as far as the
+// paragraph the line continues can reach.
+func startsInsideSpan(above [][]byte, line []byte) bool {
+	from := len(above)
+	for from > 0 && !isBlankLine(above[from-1]) {
+		from--
+	}
+
+	run := append(slices.Clip(above[from:]), line)
+	joined := bytes.Join(run, []byte{'\n'})
+	textStart := len(joined) - len(bytes.TrimLeft(line, " \t"))
+
+	for _, span := range UnescapableSpans(joined) {
+		if span[0] < textStart && textStart < span[1] {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isASCIIDigit(c byte) bool {
+	return c >= '0' && c <= '9'
 }
 
 func isASCIILetter(c byte) bool {

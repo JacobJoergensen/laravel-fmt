@@ -63,6 +63,12 @@ func TestFormatCodeBlocks(t *testing.T) {
 			"```xml\n<env name='A'/>\n  <env name='B'/>\n```\n",
 			"```xml\n<env name=\"A\"/>\n<env name=\"B\"/>\n```\n",
 		},
+		{
+			"a YAML keep block scalar keeps its trailing blank lines",
+			config.Default(),
+			"```yaml\na: |+\n  b\n\n```\n",
+			"```yaml\na: |+\n  b\n\n```\n",
+		},
 	}
 
 	for _, tc := range cases {

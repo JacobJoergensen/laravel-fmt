@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -93,4 +94,24 @@ func bytesSliceToStrings(b [][]byte) []string {
 	}
 
 	return out
+}
+
+// Each `<` with no `>` after it used to search to the end of the content, so
+// quadrupling a run of them took about sixteen times as long.
+func TestUnescapableSpansStaysLinearOnUnclosedTags(t *testing.T) {
+	nsPerScan := func(tags int) int64 {
+		content := []byte(strings.Repeat("<a ", tags))
+		result := testing.Benchmark(func(b *testing.B) {
+			for b.Loop() {
+				UnescapableSpans(content)
+			}
+		})
+
+		return result.NsPerOp()
+	}
+
+	small, large := nsPerScan(20000), nsPerScan(80000)
+	if ratio := float64(large) / float64(small); ratio > 8 {
+		t.Fatalf("four times the tags took %.1f times as long, want at most 8", ratio)
+	}
 }

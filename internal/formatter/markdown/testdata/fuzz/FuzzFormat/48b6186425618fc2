@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("  * 0000000000\n\n   00) 0000\n\t   \t* 0\n")

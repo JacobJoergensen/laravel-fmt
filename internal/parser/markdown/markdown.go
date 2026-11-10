@@ -21,12 +21,15 @@ func Parse(src []byte) (*File, []Error) {
 
 // parseBody parses the body of a list item or blockquote, which unlike a
 // document cannot open with frontmatter.
-func (p *parser) parseBody(src []byte) *File {
-	return &File{Src: src, Blocks: p.child(src, false).parseFile(false)}
+func (p *parser) parseBody(src []byte, origins []lineOrigin) *File {
+	body := p.child(src, false)
+	body.origins = origins
+
+	return &File{Src: src, Blocks: body.parseFile(false)}
 }
 
 func parse(src []byte, document bool) *File {
-	p := &parser{src: src, pos: Position{Line: 1, Column: 1}, lazy: map[[2]uint64]bool{}}
+	p := &parser{src: src, pos: Position{Line: 1, Column: 1}, lazy: map[[2]uint64]openLeaf{}}
 
 	return &File{Src: src, Blocks: p.parseFile(document)}
 }

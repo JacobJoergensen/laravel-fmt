@@ -36,10 +36,13 @@ func (f *Frontmatter) Span() Span {
 }
 
 // Paragraph is a run of text lines; Content is their raw source.
+// ContinuesDefinition is set on the rest of a paragraph a link reference
+// definition was read off, whose first line is then a continuation line.
 type Paragraph struct {
-	Start   Position
-	End     Position
-	Content []byte
+	Start               Position
+	End                 Position
+	Content             []byte
+	ContinuesDefinition bool
 }
 
 // Span returns the source extent of the paragraph.
@@ -61,12 +64,14 @@ func (h *ATXHeading) Span() Span {
 }
 
 // SetextHeading is paragraph text underlined by = (level 1) or - (level 2).
+// ContinuesDefinition is set as on Paragraph.
 type SetextHeading struct {
-	Start         Position
-	End           Position
-	Level         int
-	Content       []byte
-	UnderlineSpan Span
+	Start               Position
+	End                 Position
+	Level               int
+	Content             []byte
+	UnderlineSpan       Span
+	ContinuesDefinition bool
 }
 
 // Span returns the source extent of the heading.
@@ -115,11 +120,13 @@ func (b *IndentedCodeBlock) Span() Span {
 }
 
 // HTMLBlock is a run of lines matching a CommonMark HTML block; Content is kept
-// opaque.
+// opaque. Unclosed is set on a block of types 1 to 5 that its container or the
+// file ended before its closer, so blank lines after it would be its content.
 type HTMLBlock struct {
-	Start   Position
-	End     Position
-	Content []byte
+	Start    Position
+	End      Position
+	Content  []byte
+	Unclosed bool
 }
 
 // Span returns the source extent of the HTML block.

@@ -89,6 +89,71 @@ func hardBreakWidth(line []byte) int {
 	return 0
 }
 
+// UnescapableSpans returns the [start, end) offsets of the stretches of
+// paragraph content where a backslash cannot escape a block marker without
+// changing the inline reading: code spans, where it is literal, and anything
+// from `<` and a tag start to the next `>`, which may be a raw HTML tag
+// running over lines. The second over-approximates, so its callers must only
+// use it to pick a remedy that is safe either way.
+func UnescapableSpans(content []byte) [][2]int {
+	var spans [][2]int
+
+	// A candidate either closes and is skipped whole, or lies past the last `>`;
+	// checking that first keeps a line of unclosed `<` linear.
+	lastClose := bytes.LastIndexByte(content, '>')
+
+	for i := 0; i < len(content); {
+		switch content[i] {
+		case '\\':
+			i += 2
+		case '`':
+			if end, ok := scanInlineCodeSpan(content, i); ok {
+				spans = append(spans, [2]int{i, end})
+				i = end
+
+				continue
+			}
+
+			// A run with no closer of its length is literal backticks.
+			for i < len(content) && content[i] == '`' {
+				i++
+			}
+		case '<':
+			if i < lastClose {
+				if end, ok := scanTagCandidate(content, i); ok {
+					spans = append(spans, [2]int{i, end})
+					i = end
+
+					continue
+				}
+			}
+
+			i++
+		default:
+			i++
+		}
+	}
+
+	return spans
+}
+
+func scanTagCandidate(content []byte, i int) (int, bool) {
+	if i+1 >= len(content) {
+		return 0, false
+	}
+
+	if next := content[i+1]; !isASCIILetter(next) && next != '/' && next != '!' && next != '?' {
+		return 0, false
+	}
+
+	closeAt := bytes.IndexByte(content[i+1:], '>')
+	if closeAt < 0 {
+		return 0, false
+	}
+
+	return i + 1 + closeAt + 1, true
+}
+
 func isInlineWhitespace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }

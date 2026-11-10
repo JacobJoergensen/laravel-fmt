@@ -17,13 +17,63 @@ func isIgnoreDirectiveComment(block parser.Node) bool {
 	return formatter.IsIgnore(bytes.TrimSpace(h.Content))
 }
 
-// A block span runs past its trailing newline; emitFile owns inter-block
-// spacing, so trimming here keeps the gap from doubling.
+func endsInOpenFence(block parser.Node) bool {
+	fence, ok := lastListLeaf(block).(*parser.FencedCodeBlock)
+
+	return ok && fence.CloseFence.End.Offset == 0
+}
+
+func endsInOpenHTMLBlock(block parser.Node) bool {
+	html, ok := lastListLeaf(block).(*parser.HTMLBlock)
+
+	return ok && html.Unclosed
+}
+
+func openHTMLTrailingBlanks(body *parser.File) int {
+	if body == nil || len(body.Blocks) == 0 {
+		return 0
+	}
+
+	html, ok := lastListLeaf(body.Blocks[len(body.Blocks)-1]).(*parser.HTMLBlock)
+	if !ok || !html.Unclosed {
+		return 0
+	}
+
+	content := bytes.TrimRight(html.Content, "\r\n")
+
+	return bytes.Count(html.Content[len(content):], []byte("\n"))
+}
+
+// A blank line after a quote ends the quote, so only lists can leave a block
+// open to the lines after them.
+func lastListLeaf(block parser.Node) parser.Node {
+	for {
+		list, ok := block.(*parser.List)
+		if !ok {
+			return block
+		}
+
+		body := list.Items[len(list.Items)-1].Body
+		if body == nil || len(body.Blocks) == 0 {
+			return nil
+		}
+
+		block = body.Blocks[len(body.Blocks)-1]
+	}
+}
+
+// A block span runs past its last line's terminator; emitFile owns inter-block
+// spacing, so trimming it keeps the gap from doubling. Only that one goes: blank
+// lines before it, as an unclosed fence holds, are the block's own.
 func emitBlockVerbatim(w *formatter.Writer, src []byte, block parser.Node) {
 	span := block.Span()
 	end := span.End.Offset
 
-	for end > span.Start.Offset && (src[end-1] == '\n' || src[end-1] == '\r') {
+	if end > span.Start.Offset && src[end-1] == '\n' {
+		end--
+	}
+
+	if end > span.Start.Offset && src[end-1] == '\r' {
 		end--
 	}
 

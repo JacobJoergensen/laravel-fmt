@@ -29,7 +29,13 @@ func emitBlocks(w *formatter.Writer, file *parser.File, cfg *config.File, blankB
 		if i > 0 {
 			w.Newline()
 
-			if blankBetween && !linkRefRunStaysTight(file.Src, prev, block) {
+			// A block kept as written may leave a fence open in a list item, and no
+			// closer can be added to raw HTML left open there; an added blank line
+			// would become a line of either.
+			keptOpen := i >= 2 && isIgnoreDirectiveComment(file.Blocks[i-2]) && endsInOpenFence(prev)
+			keptOpen = keptOpen || endsInOpenHTMLBlock(prev)
+
+			if blankBetween && !keptOpen && !linkRefRunStaysTight(file.Src, prev, block) {
 				w.Newline()
 			}
 		}
@@ -98,9 +104,9 @@ func clearColumn(blocks []parser.Node, cfg *config.File, i, depth int, blankBetw
 	return 0
 }
 
-// emittedCodeColumn returns the column the first character of a code line lands
-// on once written after the mandatory four spaces. A tab in the line's own indent
-// reaches the next tab stop, so it is worth more than the one byte it takes.
+// emittedCodeColumn returns the furthest column a code line's first character
+// can land on after the four spaces. A tab in its indent counts at its widest,
+// since the body's column is not known here.
 func emittedCodeColumn(line []byte) int {
 	col := indentedCodeColumn
 
@@ -109,7 +115,7 @@ func emittedCodeColumn(line []byte) int {
 		case ' ':
 			col++
 		case '\t':
-			col += tabStop - col%tabStop
+			col += tabStop
 		default:
 			return col
 		}
@@ -220,12 +226,18 @@ func breakReadsAsSetextUnderline(prev, block parser.Node) bool {
 // consecutive lines. A run of them is one block of text, which the emitter's
 // usual blank line between blocks would push apart. A blank line the author did
 // write stays: definitions render as nothing, so grouping them is theirs.
+//
+// A paragraph written directly under a definition stays there too: it is the
+// rest of the paragraph the definition was read from, and after a blank line
+// its first line could open a block instead (`*` alone).
 func linkRefRunStaysTight(src []byte, prev, block parser.Node) bool {
 	if _, ok := prev.(*parser.LinkRefDef); !ok {
 		return false
 	}
 
-	if _, ok := block.(*parser.LinkRefDef); !ok {
+	switch block.(type) {
+	case *parser.LinkRefDef, *parser.Paragraph, *parser.SetextHeading:
+	default:
 		return false
 	}
 
@@ -240,7 +252,8 @@ func blankLineBetween(src []byte, from, to int) bool {
 		return false
 	}
 
-	return bytes.Count(src[from:to], []byte{'\n'}) > 0
+	// A lone CR ends a line too.
+	return bytes.ContainsAny(src[from:to], "\r\n")
 }
 
 // absorbsLazyLine reports whether a quote emitted right above block, with no
@@ -367,7 +380,7 @@ func emitATXHeading(w *formatter.Writer, h *parser.ATXHeading) {
 		w.Write("#")
 	}
 
-	content := bytes.TrimSpace(h.Content)
+	content := bytes.Trim(h.Content, " \t")
 
 	if len(content) > 0 {
 		w.Space()
@@ -407,15 +420,22 @@ func emitSetextHeading(w *formatter.Writer, h *parser.SetextHeading) {
 
 	var prev []byte
 
+	spans := parser.UnescapableSpans(h.Content)
+	off := 0
+
 	for i, line := range lines {
 		if i > 0 {
 			w.Newline()
 		}
 
+		lineStart := off
+		off = nextLineOffset(h.Content, off, line)
+
 		// The content is a paragraph: leading whitespace is insignificant, trailing
 		// spaces are a hard break. Only the last line's go, since the spec strips
 		// the heading's final whitespace.
-		line = bytes.TrimLeft(bytes.TrimRight(line, "\r"), " \t")
+		raw := bytes.TrimRight(line, "\r")
+		line = bytes.TrimLeft(raw, " \t")
 
 		if i == len(lines)-1 {
 			line = bytes.TrimRight(line, " \t")
@@ -423,14 +443,16 @@ func emitSetextHeading(w *formatter.Writer, h *parser.SetextHeading) {
 
 		// A continuation line that would begin a block construct once dedented
 		// splits the heading in two; same guard as emitParagraphPreserve.
+		continues := i > 0 || h.ContinuesDefinition
+
 		rest := line
-		if i > 0 && paragraphLineNeedsEscape(prev, line) {
-			rest = writeMarkerEscape(w, line)
+		if continues && (paragraphLineNeedsEscape(prev, line) || dedentedDelimiterRow(raw)) {
+			rest = writeContinuationGuard(w, line, insideSpan(spans, lineStart))
 		}
 
 		// Raw HTML cannot be escaped, so it keeps an indent; same guard as
 		// emitParagraphPreserve.
-		if i > 0 && parser.StartsHTMLBlockInParagraph(line) {
+		if continues && parser.StartsHTMLBlockInParagraph(line) {
 			w.Write(strings.Repeat(" ", indentedCodeColumn))
 		}
 
@@ -473,23 +495,33 @@ func emitParagraph(w *formatter.Writer, p *parser.Paragraph, cfg *config.File) {
 func emitParagraphPreserve(w *formatter.Writer, p *parser.Paragraph) {
 	var prev []byte
 
+	spans := parser.UnescapableSpans(p.Content)
+	off := 0
+
 	for i, line := range splitContentLines(p.Content) {
 		if i > 0 {
 			w.Newline()
 		}
 
+		lineStart := off
+		off = nextLineOffset(p.Content, off, line)
+
 		// Leading whitespace on a paragraph line is insignificant in CommonMark.
 		// Emitting it verbatim can indent a trailing paragraph enough to reparse
 		// as a list-item continuation, flipping the prior list to lose next pass.
-		line = bytes.TrimLeft(bytes.TrimRight(line, "\r"), " \t")
+		raw := bytes.TrimRight(line, "\r")
+		line = bytes.TrimLeft(raw, " \t")
 
 		// A continuation line whose stripped form would start a block construct
 		// (heading, blockquote, list, thematic break, fence, setext underline)
 		// must be escaped, or it would interrupt the paragraph on the next pass.
-		// The first line is the paragraph's start, so it cannot be such a marker.
+		// The first line is the paragraph's start, so it cannot be such a marker,
+		// unless the paragraph goes on under a definition.
+		continues := i > 0 || p.ContinuesDefinition
+
 		rest := line
-		if i > 0 && paragraphLineNeedsEscape(prev, line) {
-			rest = writeMarkerEscape(w, line)
+		if continues && (paragraphLineNeedsEscape(prev, line) || dedentedDelimiterRow(raw)) {
+			rest = writeContinuationGuard(w, line, insideSpan(spans, lineStart))
 		}
 
 		// Raw HTML is the one construct a backslash cannot rescue: `\<div>` renders
@@ -498,7 +530,7 @@ func emitParagraphPreserve(w *formatter.Writer, p *parser.Paragraph) {
 		// this indented can no longer open a block while a paragraph is open. An
 		// indented code block cannot interrupt a paragraph either, so the line stays
 		// the inline content it was.
-		if i > 0 && parser.StartsHTMLBlockInParagraph(line) {
+		if continues && parser.StartsHTMLBlockInParagraph(line) {
 			w.Write(strings.Repeat(" ", indentedCodeColumn))
 		}
 
@@ -549,19 +581,78 @@ func paragraphLineNeedsEscape(prev, line []byte) bool {
 	}
 }
 
-// writeMarkerEscape writes line's escape and returns the rest of line. An
-// ordered marker escapes its delimiter (`1\.`): a backslash before a digit
-// is literal.
-func writeMarkerEscape(w *formatter.Writer, line []byte) []byte {
-	at := 0
-	for at < len(line) && line[at] >= '0' && line[at] <= '9' {
-		at++
+// writeContinuationGuard keeps a continuation line from opening a block and
+// returns what of line is left to write.
+//
+// A backslash must not change the inline reading. Inside a code span it is
+// literal, inside a raw HTML tag it breaks the tag, and a fence's backtick run
+// can pair as a code span delimiter, so those lines take the indent raw HTML
+// takes instead.
+func writeContinuationGuard(w *formatter.Writer, line []byte, inSpan bool) []byte {
+	if inSpan || line[0] == '`' || line[0] == '~' {
+		w.Write(strings.Repeat(" ", indentedCodeColumn))
+
+		return line
 	}
 
-	w.WriteBytes(line[:at])
-	w.Write("\\")
+	w.WriteBytes(parser.EscapeBlockMarker(line))
 
-	return line[at:]
+	return nil
+}
+
+// guardWidth is how many columns writeContinuationGuard adds before line,
+// outside any code span.
+func guardWidth(line []byte) int {
+	if line[0] == '`' || line[0] == '~' {
+		return indentedCodeColumn
+	}
+
+	return len(parser.EscapeBlockMarker(line)) - len(line)
+}
+
+func insideSpan(spans [][2]int, off int) bool {
+	for _, span := range spans {
+		if off > span[0] && off < span[1] {
+			return true
+		}
+	}
+
+	return false
+}
+
+func nextLineOffset(content []byte, off int, line []byte) int {
+	end := off + len(line)
+
+	if end < len(content) && content[end] == '\r' {
+		end++
+	}
+
+	if end < len(content) && content[end] == '\n' {
+		end++
+	}
+
+	return end
+}
+
+// dedentedDelimiterRow reports a paragraph line written four or more columns
+// in, where no reader takes it for a table delimiter row, that is shaped like
+// one once dedented. Readers differ on which rows promote a table, so the shape
+// alone decides; a row the author wrote flush is read as written either way.
+func dedentedDelimiterRow(raw []byte) bool {
+	col := 0
+
+	for _, c := range raw {
+		switch c {
+		case ' ':
+			col++
+		case '\t':
+			col += tabStop - col%tabStop
+		default:
+			return col >= indentedCodeColumn && parser.DelimiterRowShaped(raw)
+		}
+	}
+
+	return false
 }
 
 func mdATXStart(line []byte) bool {
@@ -651,9 +742,23 @@ func emitParagraphNever(w *formatter.Writer, p *parser.Paragraph) {
 		}
 
 		joined := bytes.ReplaceAll(segment, []byte("\n"), []byte(" "))
-		joined = collapseSpaces(joined)
+		text := bytes.Trim(collapseSpaces(joined), " \t")
 
-		w.WriteBytes(bytes.TrimSpace(joined))
+		if i == 0 && !p.ContinuesDefinition && joinedOpensHTMLBlock(text) {
+			writeKeepingFirstBreak(w, segment)
+
+			continue
+		}
+
+		if i > 0 || p.ContinuesDefinition {
+			if paragraphLineNeedsEscape(nil, text) {
+				text = writeContinuationGuard(w, text, false)
+			} else if parser.StartsHTMLBlockInParagraph(text) {
+				w.Write(strings.Repeat(" ", indentedCodeColumn))
+			}
+		}
+
+		w.WriteBytes(text)
 	}
 }
 
@@ -672,11 +777,13 @@ func emitParagraphAlways(w *formatter.Writer, p *parser.Paragraph, printWidth in
 			w.Newline()
 		}
 
-		wrapSegment(w, segment, printWidth)
+		wrapSegment(w, segment, printWidth, i > 0 || p.ContinuesDefinition)
 	}
 }
 
-func wrapSegment(w *formatter.Writer, content []byte, printWidth int) {
+// continues marks a segment whose first line continues the paragraph, past a
+// hard break or under a definition, and so needs the same guard as the rest.
+func wrapSegment(w *formatter.Writer, content []byte, printWidth int, continues bool) {
 	units := parser.InlineWrapUnits(content)
 	col := w.Column()
 
@@ -685,11 +792,13 @@ func wrapSegment(w *formatter.Writer, content []byte, printWidth int) {
 	for start := 0; start < len(units); {
 		end := fitUnits(units, start, col, printWidth)
 
-		// A wrapped line that needs an escape is one column wider than its
-		// units, so the width that chose them has to count that column or the
-		// next pass wraps a word earlier.
-		if start > 0 && wrapLineNeedsEscape(prev, units, start, end) {
-			if narrowed := fitUnits(units, start, col+1, printWidth); narrowed > start &&
+		// A wrapped line that needs a guard is wider than its units, so the width
+		// that chose them has to count the guard or the next pass wraps a word
+		// earlier.
+		guarded := start > 0 || continues
+
+		if guarded && wrapLineNeedsEscape(prev, units, start, end) {
+			if narrowed := fitUnits(units, start, col+guardWidth(units[start]), printWidth); narrowed > start &&
 				wrapLineNeedsEscape(prev, units, start, narrowed) {
 				end = narrowed
 			}
@@ -705,15 +814,29 @@ func wrapSegment(w *formatter.Writer, content []byte, printWidth int) {
 			end++
 		}
 
+		// A paragraph's first line made of one complete tag would open an HTML
+		// block, so the next unit joins it; with none left, the author's first
+		// line break stays.
+		if start == 0 && !continues && units[0][0] == '<' {
+			for joinedOpensHTMLBlock(bytes.Join(units[:end], []byte(" "))) {
+				if end == len(units) {
+					writeKeepingFirstBreak(w, content)
+
+					return
+				}
+
+				end++
+			}
+		}
+
 		first := units[start]
 
 		if start > 0 {
 			w.Newline()
+		}
 
-			// Same guard, and the same reason, as emitParagraphPreserve.
-			if wrapLineNeedsEscape(prev, units, start, end) {
-				first = writeMarkerEscape(w, first)
-			}
+		if guarded && wrapLineNeedsEscape(prev, units, start, end) {
+			first = writeContinuationGuard(w, first, false)
 		}
 
 		// A hard break has already ended the line before this segment, so raw HTML
@@ -734,6 +857,34 @@ func wrapSegment(w *formatter.Writer, content []byte, printWidth int) {
 		start = end
 		col = 0
 	}
+}
+
+// joinedOpensHTMLBlock reports whether a paragraph's first line, once joined,
+// would open an HTML block; the source line did not, or it would be one.
+func joinedOpensHTMLBlock(line []byte) bool {
+	return len(line) > 0 && line[0] == '<' && parser.StartsHTMLBlock(line)
+}
+
+func writeKeepingFirstBreak(w *formatter.Writer, segment []byte) {
+	first, rest, _ := bytes.Cut(segment, []byte("\n"))
+	w.WriteBytes(bytes.Trim(first, " \t\r"))
+
+	joined := bytes.ReplaceAll(rest, []byte("\n"), []byte(" "))
+	text := bytes.Trim(collapseSpaces(joined), " \t\r")
+
+	if len(text) == 0 {
+		return
+	}
+
+	w.Newline()
+
+	if paragraphLineNeedsEscape(nil, text) {
+		text = writeContinuationGuard(w, text, false)
+	} else if parser.StartsHTMLBlockInParagraph(text) {
+		w.Write(strings.Repeat(" ", indentedCodeColumn))
+	}
+
+	w.WriteBytes(text)
 }
 
 func collapseSpaces(b []byte) []byte {
@@ -1038,12 +1189,10 @@ func emitBlockquote(w *formatter.Writer, b *parser.Blockquote, cfg *config.File,
 			continue
 		}
 
+		// A body line starting with a tab is verbatim code or HTML, whose bytes
+		// the parser reads back after the marker's optional space.
 		w.Write("> ")
-
-		// After `> ` a leading tab covers two columns, not four, and the parser
-		// reads it that way, so it is written as those spaces and the next pass
-		// measures the same.
-		w.WriteBytes(expandTabOnGrid(line, len("> ")))
+		w.WriteBytes(line)
 	}
 
 	// The marker-only line the source closed the quote with: without it the
@@ -1052,16 +1201,6 @@ func emitBlockquote(w *formatter.Writer, b *parser.Blockquote, cfg *config.File,
 		w.Newline()
 		w.Write(">")
 	}
-}
-
-// expandTabOnGrid rewrites a leading tab that lands at column col into the spaces
-// it covers there, so the bytes measure the same wherever they are re-read.
-func expandTabOnGrid(line []byte, col int) []byte {
-	if len(line) == 0 || line[0] != '\t' || col%tabStop == 0 {
-		return line
-	}
-
-	return append(bytes.Repeat([]byte(" "), tabStop-col%tabStop), line[1:]...)
 }
 
 // tabStop is CommonMark's tab width for the purposes of block structure.
@@ -1078,7 +1217,13 @@ func emitList(w *formatter.Writer, l *parser.List, cfg *config.File, clearAt int
 
 	for i, item := range l.Items {
 		last := i == len(l.Items)-1
-		bodies[i] = bytes.TrimRight(formatBody(item.Body, bodyCfg, item.Loose, true, closeQuote && last), "\n")
+		formatted := formatBody(item.Body, bodyCfg, item.Loose, true, closeQuote && last)
+		bodies[i] = bytes.TrimRight(formatted, "\n")
+
+		// Blank lines that end raw HTML left open are its content.
+		if blanks := openHTMLTrailingBlanks(item.Body); blanks > 0 {
+			bodies[i] = append(bodies[i], bytes.Repeat([]byte("\n"), blanks)...)
+		}
 	}
 
 	pad := ""
@@ -1107,7 +1252,8 @@ func emitList(w *formatter.Writer, l *parser.List, cfg *config.File, clearAt int
 		if i > 0 {
 			w.Newline()
 
-			if l.Loose {
+			// Blank lines kept at the end of an item already part it from the next.
+			if l.Loose && !bytes.HasSuffix(bodies[i-1], []byte("\n")) {
 				w.Newline()
 			}
 		}
@@ -1327,6 +1473,14 @@ func emitTable(w *formatter.Writer, t *parser.Table) {
 	cols := len(t.Header)
 
 	header := escapeTableRow(t.Header, cols)
+
+	// A header cell of only dashes and colons, as `| - |`, makes the header row a
+	// delimiter row for a paragraph line written above it; escaped it is text.
+	for i, cell := range header {
+		if cell != "" && strings.Trim(cell, "-:") == "" {
+			header[i] = `\` + cell
+		}
+	}
 
 	rows := make([][]string, len(t.Rows))
 
