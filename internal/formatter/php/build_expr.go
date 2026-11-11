@@ -89,24 +89,32 @@ func (b *builder) claim(tr parser.Trivia) {
 		b.emitted = make(map[int]bool)
 	}
 
-	b.emitted[tr.Span.Start.Offset] = true
-	b.claims = append(b.claims, tr.Span.Start.Offset)
+	if offset := tr.Span.Start.Offset; !b.emitted[offset] {
+		b.emitted[offset] = true
+		b.claims = append(b.claims, offset)
+	}
 }
 
-// claimMark records how many comments have been claimed, for a caller that may
-// throw away the docs it is about to build.
-func (b *builder) claimMark() int {
-	return len(b.claims)
+type commentMark struct {
+	claims, placements int
 }
 
-// releaseClaims un-claims everything claimed since mark, so a discarded doc
-// gives its comments back for the rebuild.
-func (b *builder) releaseClaims(mark int) {
-	for _, offset := range b.claims[mark:] {
+func (b *builder) markComments() commentMark {
+	return commentMark{claims: len(b.claims), placements: len(b.placements)}
+}
+
+// releaseComments gives a discarded doc's comments back for the rebuild.
+func (b *builder) releaseComments(mark commentMark) {
+	for _, offset := range b.claims[mark.claims:] {
 		delete(b.emitted, offset)
 	}
 
-	b.claims = b.claims[:mark]
+	for _, offset := range b.placements[mark.placements:] {
+		delete(b.placed, offset)
+	}
+
+	b.claims = b.claims[:mark.claims]
+	b.placements = b.placements[:mark.placements]
 }
 
 func (b *builder) exprInner(e parser.Expr) *document.Doc {

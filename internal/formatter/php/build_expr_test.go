@@ -443,3 +443,16 @@ func TestEmptyClosureBodyFollowsTheProjectsLayout(t *testing.T) {
 		t.Fatalf("not idempotent:\n%s\nthen:\n%s", got, again)
 	}
 }
+
+func TestCommentBeforeSemicolonInsideAClosureArgumentSurvives(t *testing.T) {
+	src := "<?php\n\n$o = f(function ($n) {\n    return $n instanceof A\n        || $n instanceof B\n        // keep me\n    ;\n});\n"
+
+	got := mustFormat(t, []byte(src), config.Default())
+	if !bytes.Contains(got, []byte("// keep me")) {
+		t.Fatalf("comment dropped:\n%s", got)
+	}
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent:\n%s\n---\n%s", got, twice)
+	}
+}

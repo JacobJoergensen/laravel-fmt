@@ -54,7 +54,7 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 	// A sole argument is built once, here, for both the width test and the
 	// output: measuring it with a separate build doubles the work at every level
 	// of a nested call.
-	soleMark := b.claimMark()
+	soleMark := b.markComments()
 
 	var sole *document.Doc
 	if !allNamed && !noHug && !authorBroken && soleArgShape(args) {
@@ -70,7 +70,7 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 		leadingSimple := true
 		leadingFlattened := false
 		arrayFlattened := false
-		mark := b.claimMark()
+		mark := b.markComments()
 
 		// Flat, a breakable leading arg cannot split mid-list. Before a call-like
 		// hug it would fan out a scalar (call_arrow_tail_stacks).
@@ -207,7 +207,7 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 			return document.Concat(parts...), true
 		}
 
-		b.releaseClaims(mark)
+		b.releaseComments(mark)
 	}
 
 	// First-argument hug: a huggable leading argument followed only by short,
@@ -246,7 +246,7 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 	// so it is built a level in, where it prints. The test reads the source: a
 	// level keyed on a width break would differ between passes.
 	if sole != nil && b.holdsBlock(args[0]) {
-		b.releaseClaims(soleMark)
+		b.releaseComments(soleMark)
 		sole = nil
 	}
 

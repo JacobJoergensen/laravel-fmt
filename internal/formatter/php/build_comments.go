@@ -119,7 +119,10 @@ func (b *builder) place(offset int) {
 		b.placed = make(map[int]bool)
 	}
 
-	b.placed[offset] = true
+	if !b.placed[offset] {
+		b.placed[offset] = true
+		b.placements = append(b.placements, offset)
+	}
 }
 
 func (b *builder) placeRange(lo, hi int) {
@@ -1220,11 +1223,11 @@ func (b *builder) mixedComments(offset int) (trailDocs, leadDocs []*document.Doc
 // claims the probe made are given back as well.
 func (b *builder) measureWidth(fn func() int) int {
 	saved := b.measuring
-	mark := b.claimMark()
+	mark := b.markComments()
 	b.measuring = true
 	width := fn()
 	b.measuring = saved
-	b.releaseClaims(mark)
+	b.releaseComments(mark)
 
 	return width
 }

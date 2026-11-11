@@ -952,6 +952,8 @@ func (e *emitter) emitElement(el *htmlparser.Element) {
 		htmlfmt.EmitPreformattedContent(e.w, e.src, el, e.bodyPHPSpans(el))
 	case htmlparser.IsRawTextElement(el.Name) || parser.IsRawBodyComponent(el.Name):
 		htmlfmt.EmitRawTextContent(e.w, el, e.cfg)
+	case blankBodyRenders(el):
+		e.w.Write(" ")
 	case len(el.Children) == 0 || allWhitespaceChildren(el.Children):
 		// Empty (or whitespace-only) body: the close tag emits immediately, so no
 		// indent-only line is left between the open and close tags.
@@ -1506,6 +1508,10 @@ func (e *emitter) gluedBodyTail(el *htmlparser.Element) func() {
 
 	if len(el.Children) == 0 || allWhitespaceChildren(el.Children) {
 		return func() {
+			if blankBodyRenders(el) {
+				e.w.Write(" ")
+			}
+
 			e.w.Write("</")
 			e.writeCloseTagName(el)
 			e.w.Write(">")
@@ -3846,6 +3852,10 @@ func allWhitespaceChildren(children []htmlparser.Node) bool {
 	return len(children) > 0
 }
 
+func blankBodyRenders(el *htmlparser.Element) bool {
+	return allWhitespaceChildren(el.Children) && htmlparser.IsTextLevelElement(el.Name)
+}
+
 func isWhitespaceOnlyText(n parser.Node) bool {
 	t, ok := n.(*htmlparser.Text)
 
@@ -3869,21 +3879,25 @@ func endsWithWhitespace(n parser.Node) bool {
 }
 
 func (e *emitter) emitInlineNodes(nodes []parser.Node) {
-	write := func() { e.writeInlineNodes(nodes) }
+	paras := inlineParagraphs(nodes)
 
-	// An element can copy a multi-line attribute value as written, which a flat
-	// try does not count as a break; how much followed it on the line would
-	// then decide the layout, and the next pass splits the run there.
-	if runHasElement(nodes) {
-		flat := false
-		if e.w.TryOneLine(func() { flat = e.w.TryFlat(write) }) && flat {
+	if len(paras) == 1 {
+		write := func() { e.writeInlineNodes(nodes) }
+
+		// An element can copy a multi-line attribute value as written, which a flat
+		// try does not count as a break; how much followed it on the line would
+		// then decide the layout, and the next pass splits the run there.
+		if runHasElement(nodes) {
+			flat := false
+			if e.w.TryOneLine(func() { flat = e.w.TryFlat(write) }) && flat {
+				return
+			}
+		} else if e.w.TryFlat(write) {
 			return
 		}
-	} else if e.w.TryFlat(write) {
-		return
 	}
 
-	for i, para := range inlineParagraphs(nodes) {
+	for i, para := range paras {
 		if i > 0 {
 			e.w.Newline()
 			e.w.Newline()
@@ -3894,26 +3908,36 @@ func (e *emitter) emitInlineNodes(nodes []parser.Node) {
 	}
 }
 
-// A blank line at a text's own edge is the boundary with its neighbor and
-// stays a plain space.
+// inlineParagraphs splits an inline run at every authored blank line with
+// content of the run on both sides. The blank line is not layout here: Laravel
+// renders a mailable's body as Markdown (`@component('mail::message')`,
+// `Str::markdown()`), where it separates paragraphs. An HTML view renders the
+// same either way. A blank line at the run's own edge stays a space, for the
+// trim.
 func inlineParagraphs(nodes []parser.Node) [][]htmlparser.Node {
 	paras := [][]htmlparser.Node{nil}
 
-	for _, n := range nodes {
-		text, ok := n.(*htmlparser.Text)
+	for n, node := range nodes {
+		text, ok := node.(*htmlparser.Text)
 		if !ok {
-			paras[len(paras)-1] = append(paras[len(paras)-1], n)
+			paras[len(paras)-1] = append(paras[len(paras)-1], node)
 
 			continue
 		}
 
 		pieces := splitBlankLines(text.Text)
+		lastPiece := len(pieces) - 1
 
 		for i, piece := range pieces {
-			if i > 0 && len(pieces[i-1]) > 0 && len(piece) > 0 {
-				paras = append(paras, nil)
-			} else if i > 0 {
-				piece = append([]byte(" "), piece...)
+			if i > 0 {
+				before := len(pieces[i-1]) > 0 || i == 1 && n > 0
+				after := len(piece) > 0 || i == lastPiece && n < len(nodes)-1
+
+				if before && after {
+					paras = append(paras, nil)
+				} else {
+					piece = append([]byte(" "), piece...)
+				}
 			}
 
 			paras[len(paras)-1] = append(paras[len(paras)-1], &htmlparser.Text{Text: piece})
@@ -3938,61 +3962,19 @@ func (e *emitter) writeInlineNodes(nodes []parser.Node) {
 	}
 }
 
-// writeInlineText writes one text node of an inline run, collapsing whitespace the
-// way white-space:normal renders it but keeping an authored blank line as a blank
-// line.
-//
-// The blank line is not layout here. Laravel renders a mailable's body as
-// Markdown (`@component('mail::message')`, `Str::markdown()`), where a blank
-// line separates paragraphs, so collapsing it would merge a heading and two
-// paragraphs into one line. An HTML view renders the same either way.
+// writeInlineText expects a run that holds no paragraph break.
 func (e *emitter) writeInlineText(text []byte, first, last bool) {
-	paras := splitBlankLines(text)
+	s := collapseInlineWhitespace(text)
 
-	segments := make([][]byte, 0, len(paras))
-
-	for _, para := range paras {
-		if s := collapseInlineWhitespace(para); len(s) > 0 {
-			segments = append(segments, s)
-		}
+	if first {
+		s = bytes.TrimLeft(s, " \n")
 	}
 
-	if len(segments) == 0 {
-		return
+	if last {
+		s = bytes.TrimRight(s, " \n")
 	}
 
-	// A blank run at the text's own edge is the boundary with the neighboring
-	// node and renders as a single space; the blank line itself is asked for at
-	// that boundary. Dropping the run would glue the two sides, so `@`, a
-	// blank line, then `A(` would read as the directive `@A(`. Only a blank
-	// between two segments of this text is a paragraph break this emitter
-	// reproduces.
-	if len(paras[0]) == 0 {
-		segments[0] = append([]byte(" "), segments[0]...)
-	}
-
-	lastIdx := len(segments) - 1
-
-	if len(paras[len(paras)-1]) == 0 {
-		segments[lastIdx] = append(segments[lastIdx], ' ')
-	}
-
-	for i, s := range segments {
-		if i > 0 {
-			e.w.Newline()
-			e.w.Newline()
-		}
-
-		if first && i == 0 {
-			s = bytes.TrimLeft(s, " \n")
-		}
-
-		if last && i == lastIdx {
-			s = bytes.TrimRight(s, " \n")
-		}
-
-		htmlfmt.WriteReindentedText(e.w, s)
-	}
+	htmlfmt.WriteReindentedText(e.w, s)
 }
 
 // splitBlankLines splits text at every run of whitespace holding two or more

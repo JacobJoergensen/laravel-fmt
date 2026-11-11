@@ -165,6 +165,26 @@ func TestFormatReadsALoneCRAsItsLFTwin(t *testing.T) {
 	}
 }
 
+func TestFormatKeepsTheWhitespaceBodyOfATextLevelElement(t *testing.T) {
+	cases := map[string]string{
+		"<p>Hello<span> </span>world</p>\n": "<p>Hello<span> </span>world</p>\n",
+		"<select name=\"a\">\n</select>\n":  "<select name=\"a\"></select>\n",
+		"<video>\n</video>\n":               "<video></video>\n",
+	}
+
+	for src, want := range cases {
+		got := mustFormat(t, []byte(src), config.Default())
+
+		if string(got) != want {
+			t.Errorf("Format(%q) = %q, want %q", src, got, want)
+		}
+
+		if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+			t.Errorf("not idempotent:\n%q\n---\n%q", got, twice)
+		}
+	}
+}
+
 func TestFormatWritesTextBreaksAsTheConfiguredLineEnding(t *testing.T) {
 	got := mustFormat(t, []byte("<p>a\r\nb</p>\r\n"), config.Default())
 

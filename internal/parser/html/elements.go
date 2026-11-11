@@ -35,9 +35,12 @@ var inlineElements = [...][]byte{
 	[]byte("samp"), []byte("small"), []byte("span"), []byte("strong"),
 	[]byte("sub"), []byte("sup"), []byte("time"), []byte("u"), []byte("var"),
 	[]byte("wbr"),
-	// Replaced and embedded content is display:inline in the HTML standard's
-	// rendering section, so whitespace around it is painted the same as around
-	// a span.
+}
+
+// embeddedElements are replaced and embedded content, display:inline in the
+// HTML standard's rendering section, so whitespace around them is painted the
+// same as around a span. Their own body never renders as text.
+var embeddedElements = [...][]byte{
 	[]byte("audio"), []byte("canvas"), []byte("embed"), []byte("iframe"),
 	[]byte("map"), []byte("object"), []byte("picture"), []byte("svg"),
 	[]byte("video"),
@@ -100,6 +103,12 @@ func IsRcdataElement(name []byte) bool {
 // IsInlineElement reports whether name renders inline (CSS display:inline), so
 // whitespace around it is significant to layout.
 func IsInlineElement(name []byte) bool {
+	return IsTextLevelElement(name) || containsFold(embeddedElements[:], name)
+}
+
+// IsTextLevelElement reports whether name is an inline element whose body is
+// flowed text, so even a whitespace-only body renders as a space.
+func IsTextLevelElement(name []byte) bool {
 	return containsFold(inlineElements[:], name)
 }
 

@@ -335,6 +335,11 @@ func emitTextChildren(w *formatter.Writer, el *parser.Element, openFlat bool) {
 	raw := textChildren(el.Children)
 
 	if len(bytes.Trim(raw, CollapsibleSpace)) == 0 {
+		// `Hello<span> </span>world` reads as two words.
+		if parser.IsTextLevelElement(el.Name) {
+			w.Write(" ")
+		}
+
 		return
 	}
 

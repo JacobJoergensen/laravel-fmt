@@ -47,11 +47,13 @@ type builder struct {
 	// it. Expressions are built before buildSequence reads its comments, so without
 	// this the two would both write it.
 	emitted map[int]bool
-	claims  []int // the offsets in emitted, in claim order, so a discarded doc can release its own
+	claims  []int // the offsets newly set in emitted, in order, so a discarded doc releases only its own
 	// placed records every comment some doc was built for, verbatim spans
 	// included. Only keepComments reads it; unlike emitted it never makes a
-	// layout skip a comment, so a discarded measurement cannot cost one.
-	placed map[int]bool
+	// layout skip a comment. A discarded doc still gives its placements back,
+	// or keepComments would trust a comment the real build never printed.
+	placed     map[int]bool
+	placements []int
 	// useTrail maps a sorted import to the same-line comment written after it,
 	// which trivia stores on the token that follows it in the source; movedTrail
 	// holds those comments' offsets so the reader of that token skips them.

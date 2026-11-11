@@ -2656,6 +2656,34 @@ func TestInlineRunKeepsAPaintedEdgeCharacter(t *testing.T) {
 	}
 }
 
+func TestFormatKeepsTheWhitespaceBodyOfATextLevelElement(t *testing.T) {
+	broken := "<p>\n    Hello<span\n        class=\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n" +
+		"        id=\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n        title=\"ccccccccccccccc\"\n    > </span>world\n</p>\n"
+
+	cases := []struct {
+		in, want string
+	}{
+		{"<p>Hello<span> </span>world</p>\n", "<p>Hello<span> </span>world</p>\n"},
+		{"<p>a<b>\n</b>b</p>\n", "<p>a<b> </b>b</p>\n"},
+		{broken, broken},
+		{"<livewire:counter>\n</livewire:counter>\n", "<livewire:counter></livewire:counter>\n"},
+		{"<select name=\"a\">\n</select>\n", "<select name=\"a\"></select>\n"},
+		{"<video>\n</video>\n", "<video></video>\n"},
+	}
+
+	for _, tc := range cases {
+		got := mustFormat(t, []byte(tc.in), config.Default())
+
+		if string(got) != tc.want {
+			t.Errorf("Format(%q) =\n%q, want\n%q", tc.in, got, tc.want)
+		}
+
+		if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+			t.Errorf("not idempotent:\n%q\n---\n%q", got, twice)
+		}
+	}
+}
+
 func TestEchoDocFormatting(t *testing.T) {
 	cfg := config.Default()
 
@@ -3213,6 +3241,21 @@ func TestFormatInlineRunKeepsAnAuthoredBlankLine(t *testing.T) {
 			"several blank lines collapse to one",
 			"<div>\n    a<br/>\n\n\n\n    b\n</div>\n",
 			"<div>\n    a<br />\n\n    b\n</div>\n",
+		},
+		{
+			"between a top-level echo and the text after it",
+			"{{ $a }}\n\nText after\n",
+			"{{ $a }}\n\nText after\n",
+		},
+		{
+			"between top-level text and the echo after it",
+			"Text before\n\n{{ $a }}\n",
+			"Text before\n\n{{ $a }}\n",
+		},
+		{
+			"an at sign before a blank line does not escape the echo",
+			"@\n\n{{ $a }}\n",
+			"@\n\n{{ $a }}\n",
 		},
 	}
 
