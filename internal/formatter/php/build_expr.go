@@ -64,17 +64,7 @@ func (b *builder) leadCommentsAt(offset int) *document.Doc {
 			continue
 		}
 
-		// A multi-line block comment keeps the line it opened. Pulled onto the line
-		// its expression starts, the next pass reads it as a trailing comment and
-		// re-homes its continuation lines against a different column, so the file
-		// never settles.
-		if bytes.ContainsAny(tr.Text, "\n\r") {
-			parts = append(parts, document.HardLine(), b.commentVerbatim(tr), document.Text(" "))
-
-			continue
-		}
-
-		parts = append(parts, b.commentVerbatim(tr), document.Text(" "))
+		parts = append(parts, b.inlineComment(tr))
 	}
 
 	if len(parts) == 0 {
@@ -82,6 +72,18 @@ func (b *builder) leadCommentsAt(offset int) *document.Doc {
 	}
 
 	return document.Concat(parts...)
+}
+
+func (b *builder) inlineComment(tr parser.Trivia) *document.Doc {
+	// A multi-line block comment keeps the line it opened. Pulled onto the line
+	// its expression starts, the next pass reads it as a trailing comment and
+	// re-homes its continuation lines against a different column, so the file
+	// never settles.
+	if bytes.ContainsAny(tr.Text, "\n\r") {
+		return document.Concat(document.HardLine(), b.commentVerbatim(tr), document.Text(" "))
+	}
+
+	return document.Concat(b.commentVerbatim(tr), document.Text(" "))
 }
 
 func (b *builder) claim(tr parser.Trivia) {
@@ -222,6 +224,8 @@ func (b *builder) exprInner(e parser.Expr) *document.Doc {
 		return document.Concat(b.tok(n.Name), document.Text(": "), b.expr(n.Value))
 	case *parser.SpreadExpr:
 		return document.Concat(document.Text("..."), b.expr(n.Expr))
+	case *parser.PlaceholderExpr:
+		return b.tok(n.Token)
 	case *parser.ClosureExpr:
 		return b.closure(n)
 	case *parser.ArrowFnExpr:
@@ -595,7 +599,18 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 			// comment to hold on its own line, it is the fill's separator kept broken,
 			// so the run still measures flat as the pass that broke it on width did.
 			if len(lead) == 0 && len(trail) == 0 {
-				inner = append(inner, indented(document.GroupBreak(document.Concat(sep, step))))
+				kept := indented(document.GroupBreak(document.Concat(sep, step)))
+
+				// Glued to a broken head's closer the break has no line to start,
+				// so the operand continues that line as the glue case prints it.
+				// IfBreakOf hides kept's forced break, so it is restated for the
+				// enclosing groups.
+				if glueID != 0 {
+					glued := document.Concat(document.Text(glueText), step)
+					kept = document.Concat(document.IfBreakOf(glueID, glued, kept), document.BreakParent())
+				}
+
+				inner = append(inner, kept)
 			} else {
 				line := []*document.Doc{document.HardLine()}
 				for _, c := range lead {
@@ -648,15 +663,64 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 			if alone > b.cfg.PrintWidth {
 				// The head measures its line up to the block's opener only, as
 				// the block breaks below it.
+				lead := document.FlatWidth(headDoc, b.cfg.IndentWidth) + len(op)
 				glued := document.Concat(headDoc, document.Text(op), document.Opener(width, operand))
-				width += document.FlatWidth(headDoc, b.cfg.IndentWidth) + len(op)
+				variants := []*document.Doc{document.Opener(lead+width, glued)}
 
-				return document.ConditionalGroup(document.Opener(width, glued), broken)
+				if unhugged, opener := b.unhuggedOperand(onlyTail[0].operand, width, saved+1); unhugged != nil {
+					gluedUnhugged := document.Concat(headDoc, document.Text(op), unhugged)
+					variants = append(variants, document.Opener(lead+opener, gluedUnhugged))
+				}
+
+				return document.ConditionalGroup(append(variants, broken)...)
 			}
 		}
 	}
 
 	return broken
+}
+
+// unhuggedOperand builds a call operand with its list broken after `(`, and
+// that opener's width, for when it hugs its last array on the head's line but
+// not on its own line at depth. The next pass reads that break as authored and
+// glues it, so the first pass offers that form too. nil when it hugs at depth
+// as well.
+func (b *builder) unhuggedOperand(operand parser.Expr, hugged, depth int) (*document.Doc, int) {
+	call, ok := operand.(*parser.CallExpr)
+	if !ok {
+		return nil, 0
+	}
+
+	// noHugNext goes to the first list built, which has to be this call's own:
+	// a callee with a `(` in it, a call, `new` or closure, builds one first.
+	if b.spanHasLParen(call.Callee.Span()) {
+		return nil, 0
+	}
+
+	saved := b.depth
+	b.depth = depth
+	moved, opens := b.blockOpenerWidth(operand)
+	b.depth = saved
+
+	if !opens || moved >= hugged {
+		return nil, 0
+	}
+
+	b.noHugNext = true
+
+	return b.expr(operand), moved
+}
+
+func (b *builder) spanHasLParen(span parser.Span) bool {
+	i := sort.Search(len(b.tokens), func(i int) bool { return b.tokens[i].Span.Start.Offset >= span.Start.Offset })
+
+	for ; i < len(b.tokens) && b.tokens[i].Span.Start.Offset < span.End.Offset; i++ {
+		if b.tokens[i].Kind == parser.KindLParen {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (b *builder) blockOpenerWidth(operand parser.Expr) (int, bool) {
@@ -777,15 +841,30 @@ func (b *builder) chainTail(chainStmt bool, last parser.Expr, tails []binaryTail
 	return step
 }
 
-// hidesForcedBreak reports whether doc, a call operand, cannot print on one line
-// although its break sits where the group does not see it: in a choice the
-// printer has yet to make, such as a chain's ConditionalGroup.
+// hidesForcedBreak reports whether doc, an operand ending in a call, cannot
+// print on one line although its break sits where the group does not see it:
+// in a choice the printer has yet to make, such as a chain's ConditionalGroup.
 func (b *builder) hidesForcedBreak(operand parser.Expr, doc *document.Doc) bool {
-	if _, call := prefixOperand(operand).(*parser.CallExpr); !call {
+	if _, call := endingExpr(operand).(*parser.CallExpr); !call {
 		return false
 	}
 
 	return !document.HasForcedBreak(doc) && document.FlatWidth(doc, b.cfg.IndentWidth) >= document.ForcedBreakWidth
+}
+
+func endingExpr(e parser.Expr) parser.Expr {
+	for {
+		switch n := prefixOperand(e).(type) {
+		case *parser.ParenExpr:
+			e = n.Expr
+		case *parser.BinaryExpr:
+			e = n.Right
+		case *parser.ArrowFnExpr:
+			e = n.Body
+		default:
+			return n
+		}
+	}
 }
 
 func (b *builder) gluedRun(tails []binaryTail, spaced, headBreaks bool, glueID int32, glueText string, sep, plain *document.Doc, indented func(*document.Doc) *document.Doc) []*document.Doc {
@@ -1319,7 +1398,9 @@ func (b *builder) preservedPipe(n *parser.BinaryExpr) *document.Doc {
 		return nil
 	}
 
-	return document.Concat(parts...)
+	// Grouped as the width path is, so it indents from a continuation line it
+	// opens on, as after `?><?php` in a template, in both passes.
+	return document.Group(document.Concat(parts...))
 }
 
 // wrapStmt carries the statement-level flag through a wrapper (unary, cast,

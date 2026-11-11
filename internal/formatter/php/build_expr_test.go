@@ -216,6 +216,57 @@ func TestGluedConcatOperandLaysOutTheSameInEveryPass(t *testing.T) {
 	}
 }
 
+func TestConcatBrokenAfterABrokenHeadGluesToItsCloser(t *testing.T) {
+	for _, src := range []string{"<?php\n$x = f([\n1]).\nh([\n2]);\n", "<?php\n$x = f([\n1])\n. h([\n2]);\n"} {
+		want := "<?php\n\n$x = f([\n    1,\n]).h([\n    2,\n]);\n"
+
+		got := string(mustFormat(t, []byte(src), config.Default()))
+		if got != want {
+			t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+		}
+
+		if twice := string(mustFormat(t, []byte(got), config.Default())); twice != got {
+			t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+		}
+	}
+}
+
+func TestBinaryBreaksAroundAChainKeptBrokenInsideAnArrowFunction(t *testing.T) {
+	want := "<?php\n\n$first\n    != $second\n        % (fn (Item $item, Collection $collection, Repository $repository): int => (int) $query\n" +
+		"            ->where(fn ($inner) => $inner % $limit)\n            ->count());\n"
+	src := "<?php\n$first != $second % (fn (Item $item, Collection $collection, Repository $repository): int => (int) $query->where(fn ($inner) => $inner % $limit)->count());\n"
+
+	for _, in := range []string{src, want} {
+		got := string(mustFormat(t, []byte(in), config.Default()))
+		if got != want {
+			t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+		}
+	}
+}
+
+func TestOperandThatCannotHugMovedDownBreaksItsListGlued(t *testing.T) {
+	long := "$" + strings.Repeat("a", 95)
+	want := "<?php\n\n$fallbackValueName ?? build(\n    " + long + ",\n    [\n        1,\n    ],\n);\n"
+
+	for _, src := range []string{"<?php\n$fallbackValueName ?? build(" + long + ", [\n1]);\n", want} {
+		got := string(mustFormat(t, []byte(src), config.Default()))
+		if got != want {
+			t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+		}
+	}
+}
+
+func TestKeptPipeIndentsFromTheContinuationLineItOpensOn(t *testing.T) {
+	want := "<?php $a\n    .$b;?><?php $c\n            .$d\n        |> f(...)\n        |> g(...);?>x\n"
+
+	for _, src := range []string{"<?php $a\n.$b?><?php $c\n.$d|>f(...)|>g(...)?>x", want} {
+		got := string(mustFormat(t, []byte(src), config.Default()))
+		if got != want {
+			t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+		}
+	}
+}
+
 func TestChainedAssignmentMeasuresFromItsRealColumn(t *testing.T) {
 	long := "$" + strings.Repeat("a", 113)
 	src := "<?php\n\nf([] = [" + long + "] = $b);\n"
@@ -450,6 +501,22 @@ func TestCommentBeforeSemicolonInsideAClosureArgumentSurvives(t *testing.T) {
 	got := mustFormat(t, []byte(src), config.Default())
 	if !bytes.Contains(got, []byte("// keep me")) {
 		t.Fatalf("comment dropped:\n%s", got)
+	}
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent:\n%s\n---\n%s", got, twice)
+	}
+}
+
+func TestPartialApplicationPlaceholdersFormatAsArguments(t *testing.T) {
+	in := "<?php\n$f = User::make( ? ,'guest');\n$g = foo(a:?, ...);\n$h = clone(...);\n" +
+		"$i = someLongFunctionName($firstArgumentValue, ?, $thirdArgumentValue, $fourthArgumentValue, $fifth, $sixthArgumentValue, named: ?, ...);\n"
+	want := "<?php\n\n$f = User::make(?, 'guest');\n$g = foo(a: ?, ...);\n$h = clone(...);\n" +
+		"$i = someLongFunctionName(\n    $firstArgumentValue,\n    ?,\n    $thirdArgumentValue,\n    $fourthArgumentValue,\n    $fifth,\n    $sixthArgumentValue,\n    named: ?,\n    ...,\n);\n"
+
+	got := mustFormat(t, []byte(in), config.Default())
+	if string(got) != want {
+		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
 
 	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {

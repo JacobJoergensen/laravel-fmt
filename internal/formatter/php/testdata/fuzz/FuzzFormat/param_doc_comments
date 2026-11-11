@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php\nfunction f(\n    /** a */\n    array $a /** b */,\n    $b, /** c */\n    $c // d\n    , $e /** f */\n) {}\nfunction g($a, /** x */) {}\n/**y */\nclass K { public function __construct(public int $a /** z */) {} }\n")

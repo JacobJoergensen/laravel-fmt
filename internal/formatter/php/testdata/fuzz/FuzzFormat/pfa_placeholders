@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php\n$f = User::make(?, 'guest');\n$g = foo(a: ?, 1, ...,);\n$h = clone(...);\n$i = clone($x, ?);\n$j = $x |> str_replace('a', 'b', ?);\nfunction f($a = g(1, ?)) {}\n")

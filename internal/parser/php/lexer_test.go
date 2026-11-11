@@ -156,3 +156,38 @@ func TestDoubleQuotedStringWithAnUnclosedInterpolationIsAnError(t *testing.T) {
 		t.Fatal("no error for an unclosed {$, which PHP rejects")
 	}
 }
+
+func TestDocCommentNeedsWhitespaceAfterItsOpener(t *testing.T) {
+	tests := []struct {
+		comment string
+		want    TriviaKind
+	}{
+		{"/** a */", TriviaDocComment},
+		{"/**\n * a\n */", TriviaDocComment},
+		{"/**\ta */", TriviaDocComment},
+		{"/**a */", TriviaBlockComment},
+		{"/***/", TriviaBlockComment},
+		{"/**/", TriviaBlockComment},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.comment, func(t *testing.T) {
+			tokens, errs := Lex([]byte("<?php " + tt.comment + " $a;"))
+			if len(errs) != 0 {
+				t.Fatalf("unexpected errors: %v", errs)
+			}
+
+			for _, tr := range tokens[1].Leading {
+				if tr.Kind != TriviaWhitespace {
+					if tr.Kind != tt.want {
+						t.Fatalf("kind = %v, want %v", tr.Kind, tt.want)
+					}
+
+					return
+				}
+			}
+
+			t.Fatal("no comment trivia")
+		})
+	}
+}

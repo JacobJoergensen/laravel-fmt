@@ -342,6 +342,11 @@ type SpreadExpr struct {
 	Expr     Expr
 }
 
+// PlaceholderExpr is a PHP 8.6 partial application placeholder, `?` or `...`.
+type PlaceholderExpr struct {
+	Token Token
+}
+
 // NamedArgExpr is `name: value` used as a call argument.
 type NamedArgExpr struct {
 	Name  Token
@@ -523,6 +528,7 @@ func (*ParenExpr) exprNode()              {}
 func (*DynamicName) exprNode()            {}
 func (*CallExpr) exprNode()               {}
 func (*FirstClassCallableExpr) exprNode() {}
+func (*PlaceholderExpr) exprNode()        {}
 func (*TernaryExpr) exprNode()            {}
 func (*MemberExpr) exprNode()             {}
 func (*StaticMemberExpr) exprNode()       {}
@@ -669,6 +675,11 @@ func (e *ArrayExpr) Span() Span {
 // Span returns the source extent of the spread expression.
 func (e *SpreadExpr) Span() Span {
 	return Span{Start: e.Ellipsis.Span.Start, End: e.Expr.Span().End}
+}
+
+// Span returns the source extent of the placeholder.
+func (e *PlaceholderExpr) Span() Span {
+	return e.Token.Span
 }
 
 // Span returns the source extent of the named argument.

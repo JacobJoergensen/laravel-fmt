@@ -63,3 +63,53 @@ func TestCarriageReturnInsideATokenOrCommentDoesNotStartAnAlignedLine(t *testing
 		})
 	}
 }
+
+func TestCopiedStatementKeepsTheSemicolonACloseTagStoodIn(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{
+			"alternative syntax inside added braces",
+			"<?php while(0)while(0):0;endwhile?>0",
+			"<?php while (0) {\n    while(0):0;endwhile;\n}?>0\n",
+		},
+		{
+			"alternative switch inside added braces",
+			"<?php while(0)switch(0):endswitch?>0",
+			"<?php while (0) {\n    switch(0):endswitch;\n}?>0\n",
+		},
+		{
+			"template region at the end of the file",
+			"<?php if ($x): ?>\n<p>hi</p>\n<?php endif ?>\n",
+			"<?php\n\nif ($x): ?>\n<p>hi</p>\n<?php endif;\n",
+		},
+		{
+			"commented declare inside added braces",
+			"<?php while(0)declare(ticks=1)#\n0?>0",
+			"<?php while (0) {\n    declare(ticks=1)#\n0;\n}?>0\n",
+		},
+		{
+			"commented loop inside added braces",
+			"<?php while(0)while(0)#\n0?>0",
+			"<?php while (0) {\n    while(0)#\n0;\n}?>0\n",
+		},
+		{
+			"commented if and else inside added braces",
+			"<?php while(0)if(0)#\n0; else #\n1?>0",
+			"<?php while (0) {\n    if(0)#\n0; else #\n1;\n}?>0\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tt.in), config.Default())
+			if string(got) != tt.want {
+				t.Fatalf("got\n%s\nwant\n%s", got, tt.want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent:\n%s\n---\n%s", got, twice)
+			}
+		})
+	}
+}

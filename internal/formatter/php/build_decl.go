@@ -78,19 +78,171 @@ func (b *builder) paramsID(ps []*parser.Param, rparen parser.Token) (*document.D
 
 // paramParts builds a non-empty parameter list's pieces: each parameter, the
 // comment trailing its `)`, and whether the list must break.
+//
+// Every comment keeps its side of each comma: PHP 8.6 gives a parameter the
+// last doc comment read before the token after it, so `$a /** x */,` documents
+// $a while `$a, /** x */` documents the next parameter or, before `)`, nothing.
 func (b *builder) paramParts(ps []*parser.Param, rparen parser.Token) ([]*document.Doc, *document.Doc, bool) {
 	docs := make([]*document.Doc, len(ps))
+	commented := false
+	var next parser.Token
+	var moved []parser.Trivia
+
 	for i, p := range ps {
-		docs[i] = b.param(p)
+		lead, trail := b.paramLeadComments(moved, paramStart(p), i == 0)
+		if trail != nil {
+			docs[i-1] = document.Concat(docs[i-1], document.LineSuffix(trail), document.BreakParent())
+			commented = true
+		}
+
+		next = b.tokenFrom(p.Span().End.Offset)
+
+		var glued *document.Doc
+		glued, moved = b.paramCommaComments(next)
+		docs[i] = document.Concat(lead, b.param(p), glued)
 	}
 
 	comment, breaks := b.trailingParenComment(rparen)
 
+	// Line comments moved past a trailing comma have no parameter after them,
+	// so they lead the comments before `)`.
+	if len(moved) > 0 {
+		comment, breaks = b.movedBeforeParen(moved, rparen), true
+	}
+
 	// Promoted properties go one per line, as in the Laravel docs and
-	// PHP-CS-Fixer's multiline_promoted_properties.
-	breaks = breaks || b.authorBroke(paramStart(ps[0])) || slices.ContainsFunc(ps, isPromoted)
+	// PHP-CS-Fixer's multiline_promoted_properties. A comment after an authored
+	// trailing comma keeps the list broken, since the flat form drops the comma.
+	breaks = breaks || commented || comment != nil && next.Kind == parser.KindComma ||
+		b.authorBroke(paramStart(ps[0])) || slices.ContainsFunc(ps, isPromoted)
 
 	return docs, comment, breaks
+}
+
+func (b *builder) movedBeforeParen(moved []parser.Trivia, rparen parser.Token) *document.Doc {
+	parts := make([]*document.Doc, 0, len(moved)*2)
+	parts = append(parts, b.trailingComment(moved[0]))
+
+	for _, tr := range moved[1:] {
+		parts = append(parts, document.HardLine(), b.commentVerbatim(tr))
+	}
+
+	for _, c := range b.allComments(rparen.Span.Start.Offset) {
+		parts = append(parts, document.HardLine(), c)
+	}
+
+	return document.Concat(parts...)
+}
+
+// paramLeadComments places the comments before a parameter in source order.
+// Once one ends its line, every later one goes above the parameter, so none
+// lands behind a line comment.
+func (b *builder) paramLeadComments(moved []parser.Trivia, offset int, first bool) (lead, trail *document.Doc) {
+	var leads []*document.Doc
+	ownLine := first
+
+	place := func(tr parser.Trivia, ends bool) {
+		switch {
+		case !ends:
+			leads = append(leads, b.inlineComment(tr))
+		case ownLine || len(leads) > 0:
+			leads = append(leads, b.leadComment(tr), document.HardLine())
+		default:
+			trail = b.trailingComment(tr)
+		}
+
+		ownLine = ownLine || ends
+	}
+
+	for _, tr := range moved {
+		place(tr, true)
+	}
+
+	trivia := b.leadingAt(offset)
+
+	for i, tr := range trivia {
+		if tr.Kind == parser.TriviaWhitespace {
+			ownLine = ownLine || triviaLineBreaks(tr.Text) > 0
+
+			continue
+		}
+
+		if !isCommentTrivia(tr.Kind) || b.emitted[tr.Span.Start.Offset] {
+			continue
+		}
+
+		b.claim(tr)
+		place(tr, endsLine(trivia, i))
+	}
+
+	return document.Concat(leads...), trail
+}
+
+// paramCommaComments keeps the comments before a comma or `)` in front of it,
+// except line comments after the last block comment, which the comma would
+// fall inside: before a comma they come back as moved, before `)`
+// trailingParenComment takes them.
+func (b *builder) paramCommaComments(next parser.Token) (*document.Doc, []parser.Trivia) {
+	if next.Kind != parser.KindComma && next.Kind != parser.KindRParen {
+		return document.Text(""), nil
+	}
+
+	trivia := b.leadingAt(next.Span.Start.Offset)
+	lastBlock := -1
+
+	for i, tr := range trivia {
+		if isCommentTrivia(tr.Kind) && tr.Kind != parser.TriviaLineComment && !b.emitted[tr.Span.Start.Offset] {
+			lastBlock = i
+		}
+	}
+
+	var parts []*document.Doc
+	var moved []parser.Trivia
+	newline := false
+
+	for i, tr := range trivia {
+		if tr.Kind == parser.TriviaWhitespace {
+			newline = newline || triviaLineBreaks(tr.Text) > 0
+
+			continue
+		}
+
+		if !isCommentTrivia(tr.Kind) || b.emitted[tr.Span.Start.Offset] {
+			continue
+		}
+
+		if i > lastBlock {
+			if next.Kind == parser.KindComma {
+				b.claim(tr)
+				moved = append(moved, tr)
+			}
+
+			continue
+		}
+
+		b.claim(tr)
+
+		switch {
+		case newline:
+			parts = append(parts, document.HardLine(), b.commentVerbatim(tr))
+		case tr.Kind == parser.TriviaLineComment:
+			parts = append(parts, b.trailingComment(tr))
+		default:
+			parts = append(parts, document.Text(" "), b.commentVerbatim(tr))
+		}
+
+		newline = tr.Kind == parser.TriviaLineComment
+	}
+
+	return document.Concat(parts...), moved
+}
+
+func endsLine(trivia []parser.Trivia, i int) bool {
+	if trivia[i].Kind == parser.TriviaLineComment {
+		return true
+	}
+
+	return i+1 < len(trivia) && trivia[i+1].Kind == parser.TriviaWhitespace && triviaLineBreaks(trivia[i+1].Text) > 0
 }
 
 func isPromoted(p *parser.Param) bool {
@@ -99,12 +251,6 @@ func isPromoted(p *parser.Param) bool {
 
 func (b *builder) param(p *parser.Param) *document.Doc {
 	parts := make([]*document.Doc, 0, 6+len(p.Attributes)*2)
-
-	// A parameter is not an Expr, so exprLeadComments never sees its leading
-	// comments.
-	if lead := b.leadCommentsAt(paramStart(p)); lead != nil {
-		parts = append(parts, lead)
-	}
 
 	for _, g := range p.Attributes {
 		parts = append(parts, b.attributeGroup(g), document.Line())

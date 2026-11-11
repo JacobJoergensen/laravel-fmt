@@ -622,10 +622,10 @@ func (b *builder) layoutStmt(s parser.Stmt) *document.Doc {
 	// inside a string literal, whose value must survive byte for byte.
 	if !isLeafHTMLStmt(s) && b.spanHasInlineHTML(s.Span()) {
 		if b.spanHasCRLiteral(s.Span()) {
-			return b.verbatim(s.Span())
+			return withSemicolon(b.verbatim(s.Span()), s)
 		}
 
-		return b.inlineHTML(s.Span())
+		return withSemicolon(b.inlineHTML(s.Span()), s)
 	}
 
 	switch n := s.(type) {

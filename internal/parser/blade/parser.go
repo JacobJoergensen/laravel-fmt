@@ -584,8 +584,8 @@ func (p *bladeParser) parseEchoArgs(content []byte, base Position, raw bool) ([]
 	if raw {
 		for _, arg := range args {
 			switch arg.(type) {
-			case *php.NamedArgExpr, *php.SpreadExpr:
-				errs = append(errs, Error{Pos: arg.Span().Start, Msg: "a raw echo is an echo list; named arguments and spread do not parse"})
+			case *php.NamedArgExpr, *php.SpreadExpr, *php.PlaceholderExpr:
+				errs = append(errs, Error{Pos: arg.Span().Start, Msg: "a raw echo is an echo list; named arguments, spread and placeholders do not parse"})
 			}
 		}
 
@@ -945,6 +945,19 @@ func (p *bladeParser) parseDirectiveArgs(name string) (Span, []php.Expr, []php.T
 	lp, content, rp := p.consumeDirectiveParenContent()
 
 	args, tokens, errs := php.ParseCallArgs(content)
+
+	// Blade compiles a directive's arguments into PHP of its own shape, like
+	// `if (…):`, where a partial application placeholder does not parse.
+	for _, arg := range args {
+		if named, ok := arg.(*php.NamedArgExpr); ok {
+			arg = named.Value
+		}
+
+		if _, ok := arg.(*php.PlaceholderExpr); ok {
+			errs = append(errs, Error{Pos: arg.Span().Start, Msg: "a partial application placeholder does not parse in a directive's arguments"})
+		}
+	}
+
 	if len(errs) > 0 && rp.End.Offset > rp.Start.Offset && !isLaravelArgDirective(name) {
 		return lp, nil, nil, content, rp
 	}

@@ -27,7 +27,7 @@ func Format(src []byte, cfg *config.File) ([]byte, error) {
 	// A file drops its terminal `?>` per config. Livewire keeps its frontmatter
 	// `?>` (the template separator) by calling BuildFile directly, so the strip
 	// lives here rather than in BuildFile.
-	if cfg.PHP.RemoveTrailingCloseTag && !closeTagTerminatesPrevious(file.Src, file.Stmts) {
+	if cfg.PHP.RemoveTrailingCloseTag {
 		kept := len(file.Stmts)
 		file.Stmts = stripTrailingCloseTag(file.Stmts)
 
@@ -107,53 +107,4 @@ func stripTrailingCloseTag(stmts []parser.Stmt) []parser.Stmt {
 	}
 
 	return stmts[:len(stmts)-1]
-}
-
-// closeTagTerminatesPrevious reports whether the file's trailing `?>` is what
-// terminates the statement before it. PHP reads a close tag as an implicit
-// `;`, and only a statement the builder reproduces verbatim (an
-// alternative-syntax block) can still lack its own `;` in the output, so
-// dropping the tag there would leave PHP that no longer parses.
-func closeTagTerminatesPrevious(src []byte, stmts []parser.Stmt) bool {
-	if len(stmts) < 2 {
-		return false
-	}
-
-	tag, ok := stmts[len(stmts)-1].(*parser.TagStmt)
-	if !ok || tag.Token.Kind != parser.KindCloseTag {
-		return false
-	}
-
-	prev := stmts[len(stmts)-2]
-
-	if !emitsVerbatim(prev) {
-		return false
-	}
-
-	end := prev.Span().End.Offset
-	if end <= 0 || end > len(src) {
-		return false
-	}
-
-	return src[end-1] != ';'
-}
-
-// emitsVerbatim reports whether the builder reproduces a statement's source rather
-// than rebuilding it: the alternative `if:`/`while:`/`for:`/`foreach:`/`switch:`
-// syntaxes, whose bodies the doc model cannot express.
-func emitsVerbatim(s parser.Stmt) bool {
-	switch n := s.(type) {
-	case *parser.IfStmt:
-		return has(n.Colon)
-	case *parser.WhileStmt:
-		return has(n.Colon)
-	case *parser.ForStmt:
-		return has(n.Colon)
-	case *parser.ForEachStmt:
-		return has(n.Colon)
-	case *parser.SwitchStmt:
-		return has(n.Colon)
-	}
-
-	return false
 }

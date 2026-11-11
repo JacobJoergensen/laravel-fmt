@@ -228,7 +228,7 @@ func (b *builder) condition(e parser.Expr) *document.Doc {
 
 func (b *builder) ifStmt(n *parser.IfStmt) *document.Doc {
 	if has(n.Colon) {
-		return b.verbatim(n.Span())
+		return withSemicolon(b.verbatim(n.Span()), n)
 	}
 
 	parts := []*document.Doc{b.header("if", b.condition(n.Cond), n.Cond, n.RParen), b.controlBody(n.Then)}
@@ -248,7 +248,7 @@ func (b *builder) ifStmt(n *parser.IfStmt) *document.Doc {
 
 func (b *builder) whileStmt(n *parser.WhileStmt) *document.Doc {
 	if has(n.Colon) {
-		return b.verbatim(n.Span())
+		return withSemicolon(b.verbatim(n.Span()), n)
 	}
 
 	return document.Concat(b.header("while", b.condition(n.Cond), n.Cond, n.RParen), b.controlBody(n.Body))
@@ -263,7 +263,7 @@ func (b *builder) doWhileStmt(n *parser.DoWhileStmt) *document.Doc {
 
 func (b *builder) forStmt(n *parser.ForStmt) *document.Doc {
 	if has(n.Colon) {
-		return b.verbatim(n.Span())
+		return withSemicolon(b.verbatim(n.Span()), n)
 	}
 
 	return document.Concat(b.header("for", b.forClause(n), nil, n.RParen), b.controlBody(n.Body))
@@ -289,7 +289,7 @@ func (b *builder) forClause(n *parser.ForStmt) *document.Doc {
 
 func (b *builder) foreachStmt(n *parser.ForEachStmt) *document.Doc {
 	if has(n.Colon) {
-		return b.verbatim(n.Span())
+		return withSemicolon(b.verbatim(n.Span()), n)
 	}
 
 	return document.Concat(b.header("foreach", b.foreachClause(n), n.Expr, n.RParen), b.controlBody(n.Body))
@@ -316,7 +316,7 @@ func (b *builder) foreachClause(n *parser.ForEachStmt) *document.Doc {
 
 func (b *builder) switchStmt(n *parser.SwitchStmt) *document.Doc {
 	if has(n.Colon) {
-		return b.verbatim(n.Span())
+		return withSemicolon(b.verbatim(n.Span()), n)
 	}
 
 	cases := make([]*document.Doc, 0, len(n.Cases)*2)
@@ -396,7 +396,7 @@ func (b *builder) jump(keyword string, level parser.Expr) *document.Doc {
 
 func (b *builder) declareStmt(n *parser.DeclareStmt) *document.Doc {
 	if has(n.Colon) {
-		return b.verbatim(n.Span())
+		return withSemicolon(b.verbatim(n.Span()), n)
 	}
 
 	dirs := make([]*document.Doc, len(n.Directives))

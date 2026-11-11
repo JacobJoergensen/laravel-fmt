@@ -72,8 +72,9 @@ func TestEchoRejectsContentBladeCannotCompile(t *testing.T) {
 		{"statement terminator", "{{ $a; }}", "1:6: unexpected token after arguments"},
 		{"two expressions", "{{ $a $b }}", "1:7: unexpected token after arguments"},
 		{"raw echo trailing comma", "{!! $a, !!}", "1:7: a raw echo is an echo list; a trailing comma does not parse"},
-		{"raw echo spread", "{!! ...$a !!}", "1:5: a raw echo is an echo list; named arguments and spread do not parse"},
-		{"raw echo named argument", "{!! a: $b !!}", "1:5: a raw echo is an echo list; named arguments and spread do not parse"},
+		{"raw echo spread", "{!! ...$a !!}", "1:5: a raw echo is an echo list; named arguments, spread and placeholders do not parse"},
+		{"raw echo named argument", "{!! a: $b !!}", "1:5: a raw echo is an echo list; named arguments, spread and placeholders do not parse"},
+		{"raw echo placeholder", "{!! $a, ? !!}", "1:9: a raw echo is an echo list; named arguments, spread and placeholders do not parse"},
 		{"line comment runs to the closer", "{{ $a // c }}", "1:7: a line comment runs to the echo's closer, which Blade compiles onto the same line"},
 		{"hash comment runs to the raw closer", "{!! $a #c!!}", "1:8: a line comment runs to the echo's closer, which Blade compiles onto the same line"},
 	}
@@ -102,6 +103,7 @@ func TestDirectiveArgumentErrors(t *testing.T) {
 		{"paren never closed in an unquoted value", "<div class=@x( b=c></div>", "1:12: the directive's ( is never closed"},
 		{"laravel directive with non-PHP argument", "@hasSection(x y)", "1:15: unexpected token after arguments"},
 		{"js argument that is not PHP", "@js(x y)", "1:7: unexpected token after arguments"},
+		{"placeholder in a directive argument", "@if(?)\nx\n@endif", "1:5: a partial application placeholder does not parse in a directive's arguments"},
 	}
 
 	for _, tc := range tests {

@@ -809,7 +809,7 @@ func delimitedListComment(open string, items []*document.Doc, trailing trailingC
 	}
 
 	if comment != nil {
-		tail = document.Concat(tail, comment)
+		tail = document.Concat(tail, document.Indent(comment))
 	}
 
 	if breaks {

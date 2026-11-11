@@ -196,7 +196,11 @@ func (l *lexer) atPHPOpenTag() bool {
 
 	// PHP's scanner opens only on `<?php` followed by a space, tab or line
 	// break; a form feed after it leaves the text inline HTML.
-	switch l.Src[l.Pos.Offset+5] {
+	return isScannerWhitespace(l.Src[l.Pos.Offset+5])
+}
+
+func isScannerWhitespace(c byte) bool {
+	switch c {
 	case ' ', '\t', '\n', '\r':
 		return true
 	}
@@ -347,7 +351,9 @@ func (l *lexer) scanLineComment() {
 
 func (l *lexer) scanBlockComment() {
 	start := l.Pos
-	isDoc := l.PeekAt(2) == '*' && l.PeekAt(3) != '/'
+	// PHP's scanner reads a doc comment only as `/**` plus whitespace; `/**x */`
+	// is a plain comment that reflection never sees.
+	isDoc := l.PeekAt(2) == '*' && isScannerWhitespace(l.PeekAt(3))
 
 	l.AdvanceN(2)
 

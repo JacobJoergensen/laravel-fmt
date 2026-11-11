@@ -103,3 +103,86 @@ func TestEmptyBodiesFollowTheProjectsLayout(t *testing.T) {
 		})
 	}
 }
+
+// PHP 8.6 gives a parameter the last doc comment read before the token after
+// it, so a comment never crosses a comma, and a trailing comma is never added
+// or dropped between a comment and the `)`.
+func TestParameterCommentsKeepTheirSideOfEachComma(t *testing.T) {
+	tests := []struct {
+		name, in, want string
+	}{
+		{
+			"a doc comment above a parameter stays above it",
+			"<?php\nfunction f(\n    /** @param Book[] */\n    array $books,\n) {}\n",
+			"<?php\n\nfunction f(\n    /** @param Book[] */\n    array $books,\n) {}\n",
+		},
+		{
+			"a doc comment before a comma stays before it",
+			"<?php\nfunction f(  array   $a   /** x */  ,  array $b ) {}\n",
+			"<?php\n\nfunction f(array $a /** x */, array $b) {}\n",
+		},
+		{
+			"an added trailing comma goes after the comment",
+			"<?php\nfunction f(\n    array $a /** x */\n) {}\n",
+			"<?php\n\nfunction f(\n    array $a /** x */,\n) {}\n",
+		},
+		{
+			"a comment after a trailing comma keeps the list broken",
+			"<?php\nfunction f(array $a, /** x */) {}\n",
+			"<?php\n\nfunction f(\n    array $a, /** x */\n) {}\n",
+		},
+		{
+			"a comment after a moved line comment goes on its own line",
+			"<?php\nfunction f(\n    $a // y\n    , /** x */\n    $b\n) {}\n",
+			"<?php\n\nfunction f(\n    $a, // y\n    /** x */\n    $b,\n) {}\n",
+		},
+		{
+			"a line comment before a trailing comma moves after it",
+			"<?php\nfunction f(\n    $a // y\n    // z\n    ,\n) {}\n",
+			"<?php\n\nfunction f(\n    $a, // y\n    // z\n) {}\n",
+		},
+		{
+			"two moved line comments stay on two lines",
+			"<?php\nfunction f(\n    $a // y\n    // z\n    , $b\n) {}\n",
+			"<?php\n\nfunction f(\n    $a, // y\n    // z\n    $b,\n) {}\n",
+		},
+		{
+			"two doc comments before a parameter keep their order",
+			"<?php\nfunction f($a, /** p */ /** q */\n    $b) {}\n",
+			"<?php\n\nfunction f(\n    $a,\n    /** p */ /** q */\n    $b,\n) {}\n",
+		},
+		{
+			"a line comment before a doc comment stays before it",
+			"<?php\nfunction f(\n    $a // y\n    /** z */\n) {}\n",
+			"<?php\n\nfunction f(\n    $a // y\n    /** z */,\n) {}\n",
+		},
+		{
+			"a comment after a comma trails it",
+			"<?php\nfunction f(\n    array $a, /** x */\n    array $b,\n) {}\n",
+			"<?php\n\nfunction f(\n    array $a, /** x */\n    array $b,\n) {}\n",
+		},
+		{
+			"inline doc comments stay inline",
+			"<?php\nfunction f(/** @param int */ $a, /** @param string */ $b) {}\n",
+			"<?php\n\nfunction f(/** @param int */ $a, /** @param string */ $b) {}\n",
+		},
+		{
+			"a promoted property keeps its trailing doc comment",
+			"<?php\nclass K { public function __construct(public int $a /** x */) {} }\n",
+			"<?php\n\nclass K\n{\n    public function __construct(\n        public int $a /** x */,\n    ) {}\n}\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tt.in), config.Default())
+			if string(got) != tt.want {
+				t.Fatalf("got\n%s\nwant\n%s", got, tt.want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent:\n%s\n---\n%s", got, twice)
+			}
+		})
+	}
+}

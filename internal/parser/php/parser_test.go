@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -646,29 +647,96 @@ func TestParseCloneShapes(t *testing.T) {
 	}
 }
 
-func TestParseRejectsFirstClassCloneSyntax(t *testing.T) {
-	expr, _, errs := ParseFullExpression([]byte("clone(...)"))
-
-	if len(errs) != 1 {
-		t.Fatalf("got %d errors, want exactly 1: %v", len(errs), errs)
+func TestPartialApplicationPlaceholdersParse(t *testing.T) {
+	tests := []struct {
+		src  string
+		want []string
+	}{
+		{"f(?, 1)", []string{"?", ""}},
+		{"f(1, ...)", []string{"", "..."}},
+		{"f(1, ...,)", []string{"", "..."}},
+		{"f(a: ?, b: 2)", []string{"?", ""}},
+		{"f(a: 1, ...)", []string{"", "..."}},
+		{"f(...$xs)", []string{""}},
+		{"clone(...)", []string{"..."}},
+		{"clone($x, ?)", []string{"", "?"}},
 	}
 
-	if !strings.Contains(errs[0].Msg, "clone(...)") {
-		t.Fatalf("error message = %q, want mention of clone(...)", errs[0].Msg)
+	for _, tt := range tests {
+		t.Run(tt.src, func(t *testing.T) {
+			expr, _, errs := ParseFullExpression([]byte(tt.src))
+			if len(errs) != 0 {
+				t.Fatalf("unexpected errors: %v", errs)
+			}
+
+			var args []Expr
+
+			switch n := expr.(type) {
+			case *CallExpr:
+				args = n.Args
+			case *CloneExpr:
+				args = n.Args
+			default:
+				t.Fatalf("expression is %T, want a call or clone", expr)
+			}
+
+			got := make([]string, len(args))
+			for i, arg := range args {
+				if named, ok := arg.(*NamedArgExpr); ok {
+					arg = named.Value
+				}
+
+				if p, ok := arg.(*PlaceholderExpr); ok {
+					got[i] = string(p.Token.Text)
+				}
+			}
+
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("placeholders = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlaceholderEndsACallArgumentListAtEOF(t *testing.T) {
+	for _, src := range []string{"$a, ?", "$a, ..."} {
+		t.Run(src, func(t *testing.T) {
+			args, _, errs := ParseCallArgs([]byte(src))
+			if len(errs) != 0 {
+				t.Fatalf("unexpected errors: %v", errs)
+			}
+
+			if _, ok := args[1].(*PlaceholderExpr); !ok {
+				t.Fatalf("last argument = %T, want *PlaceholderExpr", args[1])
+			}
+		})
+	}
+}
+
+func TestParseRejectsPlaceholdersPHPDoesNotCompile(t *testing.T) {
+	tests := []struct {
+		src, want string
+	}{
+		{"<?php new Foo(?);", "constructors"},
+		{"<?php new Foo(1, ...);", "constructors"},
+		{"<?php new Foo(..., 1);", "constructors"},
+		{"<?php new Foo(a: ?);", "constructors"},
+		{"<?php new class(?) {};", "constructors"},
+		{"<?php #[Attr(?)] function f() {}", "constant expressions"},
+		{"<?php f(..., 1);", "must be the last argument"},
+		{"<?php f(..., ...);", "must be the last argument"},
+		{"<?php f(..., a: 1);", "must be the last argument"},
+		{"<?php f(a: 1, ?);", "cannot follow a named argument"},
+		{"<?php f(...$xs, ?);", "combined with spread"},
 	}
 
-	cloneExpr, ok := expr.(*CloneExpr)
-
-	if !ok {
-		t.Fatalf("expression is %T, want *CloneExpr", expr)
-	}
-
-	if len(cloneExpr.Args) != 0 {
-		t.Fatalf("got %d args, want 0 (rejected form reduces to empty args)", len(cloneExpr.Args))
-	}
-
-	if cloneExpr.LParen.Kind == KindInvalid || cloneExpr.RParen.Kind == KindInvalid {
-		t.Fatalf("LParen=%v RParen=%v, want both non-invalid (tokens consumed cleanly)", cloneExpr.LParen.Kind, cloneExpr.RParen.Kind)
+	for _, tt := range tests {
+		t.Run(tt.src, func(t *testing.T) {
+			_, errs := Parse([]byte(tt.src))
+			if len(errs) != 1 || !strings.Contains(errs[0].Msg, tt.want) {
+				t.Fatalf("errors = %v, want one containing %q", errs, tt.want)
+			}
+		})
 	}
 }
 

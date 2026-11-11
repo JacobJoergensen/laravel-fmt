@@ -773,7 +773,7 @@ func (p *parser) parseAttribute() *Attribute {
 
 	if p.peekKind() == KindLParen {
 		lp = p.advance()
-		args = p.parseCallArgs(KindRParen)
+		args = p.parseArgsWithoutPlaceholders(lp, "#[Attr(?)] is not valid PHP; attribute arguments are constant expressions")
 		rp = p.expect(KindRParen)
 	}
 

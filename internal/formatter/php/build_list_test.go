@@ -62,3 +62,17 @@ func TestEmptyClosureOnTwoLinesHugsAsAnArgument(t *testing.T) {
 		t.Fatalf("not idempotent:\n%s\nthen:\n%s", got, again)
 	}
 }
+
+func TestCommentsBeforeAListCloserKeepTheItemsIndent(t *testing.T) {
+	tests := []string{
+		"<?php\n\nfoo(\n    $a, // y\n    // z\n);\n",
+		"<?php\n\nfunction f(\n    $a, // y\n    /* z */\n) {}\n",
+	}
+
+	for _, want := range tests {
+		got := mustFormat(t, []byte(want), config.Default())
+		if string(got) != want {
+			t.Fatalf("got\n%s\nwant\n%s", got, want)
+		}
+	}
+}

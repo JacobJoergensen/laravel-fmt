@@ -197,7 +197,7 @@ func parseNew(p *parser) Expr {
 			rp = p.advance()
 		} else {
 			lp = p.advance()
-			args = p.parseCallArgs(KindRParen)
+			args = p.parseArgsWithoutPlaceholders(kw, newPlaceholderError)
 			rp = p.expect(KindRParen)
 		}
 	}
@@ -236,7 +236,7 @@ func (p *parser) parseAnonClass(newKw *Token) Expr {
 
 	if p.peekKind() == KindLParen {
 		lp = p.advance()
-		args = p.parseCallArgs(KindRParen)
+		args = p.parseArgsWithoutPlaceholders(*newKw, newPlaceholderError)
 		rp = p.expect(KindRParen)
 	}
 
@@ -323,24 +323,39 @@ func (p *parser) parseNewClassExpr() Expr {
 	}
 }
 
+const newPlaceholderError = "new Class(?) is not valid PHP; partial application does not support constructors"
+
+// parseArgsWithoutPlaceholders parses arguments where PHP refuses any
+// placeholder: a constructor's ("Cannot create Closure for new expression")
+// and an attribute's, which are constant expressions. One error covers the
+// list.
+func (p *parser) parseArgsWithoutPlaceholders(at Token, msg string) []Expr {
+	args := p.parseCommaList(KindRParen, nil, p.parseCallArg)
+
+	for _, arg := range args {
+		if named, ok := arg.(*NamedArgExpr); ok {
+			arg = named.Value
+		}
+
+		if _, ok := arg.(*PlaceholderExpr); ok {
+			p.addError(at.Span.Start, msg)
+
+			break
+		}
+	}
+
+	return args
+}
+
 // parseClone handles `clone expr` and the PHP 8.5 call form `clone(arg, mods)`.
 // A `(` right after the keyword selects the call form even for `clone ($x)`,
-// which is semantically identical. `clone(...)` is rejected: clone is an
-// operator, not a callable.
+// which is semantically identical. `clone(...)` is the first-class callable of
+// clone, and 8.6 partially applies it like a function (`clone($x, ?)`).
 func parseClone(p *parser) Expr {
 	kw := p.advance()
 
 	if p.peekKind() == KindLParen {
 		lp := p.advance()
-
-		if p.peekKind() == KindEllipsis && p.peekKindAt(1) == KindRParen {
-			p.addError(kw.Span.Start, "clone(...) is not valid PHP; first-class callable syntax does not support clone")
-			p.advance()
-			rp := p.advance()
-
-			return &CloneExpr{Keyword: kw, LParen: lp, RParen: rp}
-		}
-
 		args := p.parseCallArgs(KindRParen)
 		rp := p.expect(KindRParen)
 

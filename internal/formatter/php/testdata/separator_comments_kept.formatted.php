@@ -16,7 +16,7 @@ isset($i1 /* c10 */, $i2);
 new Foo($n1 /* c11 */, $n2);
 [$l1 /* c12 */, $l2] = $arr;
 $m = match ($v) { 1 /* c13 */, 2 => 'x', default => 'y' };
-fn($p1 /* c14 */, $p2) => 1;
+fn ($p1 /* c14 */, $p2) => 1;
 static $s1 /* c15 */, $s2;
 const K1 = 1 /* c16 */, K2 = 2;
 for ($i = 0 /* c17 */, $j = 0; $i < 1; $i++) {}

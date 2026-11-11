@@ -1151,7 +1151,7 @@ func TestTrailingCloseTagSettlesInOnePass(t *testing.T) {
 		{"assignment with no semicolon", "<?php $a = 1 ?>", false},
 		// No tag inside the block, so the trailing one is the only `?>` the
 		// assertion can see.
-		{"alt syntax terminated by the tag", "<?php if ($a): endif ?>", true},
+		{"alt syntax terminated by the tag", "<?php if ($a): endif ?>", false},
 		{"alt syntax with its own semicolon", "<?php if ($a): endif; ?>", false},
 	}
 

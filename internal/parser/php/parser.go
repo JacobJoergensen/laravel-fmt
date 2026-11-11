@@ -856,10 +856,49 @@ func (p *parser) parseCommaList[T any](end Kind, commas *[]Token, one func() T) 
 }
 
 func (p *parser) parseCallArgs(end Kind) []Expr {
-	return p.parseCommaList(end, nil, p.parseCallArg)
+	args := p.parseCommaList(end, nil, p.parseCallArg)
+	p.checkPlaceholders(args)
+
+	return args
+}
+
+func (p *parser) checkPlaceholders(args []Expr) {
+	var placeholder, spread Expr
+	named := false
+
+	for i, arg := range args {
+		switch a := arg.(type) {
+		case *PlaceholderExpr:
+			if a.Token.Kind == KindEllipsis && i < len(args)-1 {
+				p.addError(a.Token.Span.Start, "f(..., x) is not valid PHP; the `...` placeholder must be the last argument")
+			}
+
+			if a.Token.Kind == KindQuestion && named {
+				p.addError(a.Token.Span.Start, "f(a: 1, ?) is not valid PHP; a positional placeholder cannot follow a named argument")
+			}
+
+			placeholder = a
+		case *NamedArgExpr:
+			named = true
+
+			if _, ok := a.Value.(*PlaceholderExpr); ok {
+				placeholder = a.Value
+			}
+		case *SpreadExpr:
+			spread = a
+		}
+	}
+
+	if placeholder != nil && spread != nil {
+		p.addError(placeholder.Span().Start, "f(...$xs, ?) is not valid PHP; partial application cannot be combined with spread")
+	}
 }
 
 func (p *parser) parseCallArg() Expr {
+	if p.atPlaceholder() {
+		return &PlaceholderExpr{Token: p.advance()}
+	}
+
 	if p.peekKind() == KindEllipsis {
 		ell := p.advance()
 		inner := p.parseExpression(precNone)
@@ -870,12 +909,32 @@ func (p *parser) parseCallArg() Expr {
 	if isMemberNameToken(p.peekKind()) && p.peekKindAt(1) == KindColon {
 		name := p.advance()
 		colon := p.advance()
-		value := p.parseExpression(precNone)
+
+		var value Expr
+		if p.peekKind() == KindQuestion && p.atPlaceholder() {
+			value = &PlaceholderExpr{Token: p.advance()}
+		} else {
+			value = p.parseExpression(precNone)
+		}
 
 		return &NamedArgExpr{Name: name, Colon: colon, Value: value}
 	}
 
 	return p.parseExpression(precNone)
+}
+
+// A lone `?` or `...` is a PHP 8.6 placeholder; `...` before an expression
+// stays a spread, and a named argument takes only `?`. EOF ends a Blade echo's
+// or directive's list.
+func (p *parser) atPlaceholder() bool {
+	switch p.peekKind() {
+	case KindQuestion, KindEllipsis:
+		next := p.peekKindAt(1)
+
+		return next == KindComma || next == KindRParen || next == KindEOF
+	}
+
+	return false
 }
 
 func (p *parser) parseHaltCompilerStmt() Stmt {

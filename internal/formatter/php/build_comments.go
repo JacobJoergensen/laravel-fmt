@@ -23,13 +23,21 @@ import (
 // Trivia goes to the first token after it, so where a zero-width token shares
 // an offset with the next one, the first holds it.
 func (b *builder) leadingAt(offset int) []parser.Trivia {
-	i := sort.Search(len(b.tokens), func(i int) bool { return b.tokens[i].Span.Start.Offset >= offset })
-
-	if i < len(b.tokens) && b.tokens[i].Span.Start.Offset == offset {
-		return b.tokens[i].Leading
+	if tok := b.tokenFrom(offset); tok.Span.Start.Offset == offset {
+		return tok.Leading
 	}
 
 	return nil
+}
+
+func (b *builder) tokenFrom(offset int) parser.Token {
+	i := sort.Search(len(b.tokens), func(i int) bool { return b.tokens[i].Span.Start.Offset >= offset })
+
+	if i < len(b.tokens) {
+		return b.tokens[i]
+	}
+
+	return parser.Token{}
 }
 
 func isCommentTrivia(k parser.TriviaKind) bool {
@@ -147,12 +155,17 @@ func (b *builder) keepComments(span parser.Span, doc *document.Doc, node any) *d
 		return doc
 	}
 
-	// A declare with a body has no terminator at all, only a zero token.
+	return withSemicolon(b.verbatim(span), node)
+}
+
+// withSemicolon adds the `;` a `?>` or a fragment's end stood in for: added
+// braces or a dropped final `?>` can separate the copy from it.
+func withSemicolon(doc *document.Doc, node any) *document.Doc {
 	if semi, ok := terminator(node); ok && has(semi) && semi.Span.Start.Offset == semi.Span.End.Offset {
-		return document.Concat(b.verbatim(span), document.Text(";"))
+		return document.Concat(doc, document.Text(";"))
 	}
 
-	return b.verbatim(span)
+	return doc
 }
 
 func terminator(node any) (parser.Token, bool) {
@@ -182,6 +195,11 @@ func terminator(node any) (parser.Token, bool) {
 	case *parser.DoWhileStmt:
 		return n.Semicolon, true
 	case *parser.DeclareStmt:
+		// A declare with a body has no terminator of its own, only a zero token.
+		if n.Body != nil || has(n.Colon) {
+			return controlTerminator(n.Colon, n.EndSemi, n.Body)
+		}
+
 		return n.Semicolon, true
 	case *parser.NamespaceStmt:
 		return n.Semicolon, true
@@ -196,9 +214,39 @@ func terminator(node any) (parser.Token, bool) {
 		return n.Semicolon, true
 	case *parser.TraitUseStmt:
 		return n.Semicolon, true
+	case *parser.WhileStmt:
+		return controlTerminator(n.Colon, n.EndSemi, n.Body)
+	case *parser.ForStmt:
+		return controlTerminator(n.Colon, n.EndSemi, n.Body)
+	case *parser.ForEachStmt:
+		return controlTerminator(n.Colon, n.EndSemi, n.Body)
+	case *parser.IfStmt:
+		return controlTerminator(n.Colon, n.EndSemi, lastIfBody(n))
+	case *parser.SwitchStmt:
+		return n.EndSemi, has(n.Colon)
 	}
 
 	return parser.Token{}, false
+}
+
+func controlTerminator(colon, endSemi parser.Token, body parser.Stmt) (parser.Token, bool) {
+	if has(colon) {
+		return endSemi, true
+	}
+
+	return terminator(body)
+}
+
+func lastIfBody(n *parser.IfStmt) parser.Stmt {
+	if n.Else != nil {
+		return n.Else.Body
+	}
+
+	if len(n.ElseIfs) > 0 {
+		return n.ElseIfs[len(n.ElseIfs)-1].Body
+	}
+
+	return n.Then
 }
 
 // tagOffsets returns the start offset of every template-boundary token (?>,
@@ -628,7 +676,7 @@ func (b *builder) closerCommentGap(offset int) *document.Doc {
 		switch {
 		case tr.Kind == parser.TriviaWhitespace && triviaLineBreaks(tr.Text) > 0:
 			return document.Text(" ")
-		case isCommentTrivia(tr.Kind):
+		case isCommentTrivia(tr.Kind) && !b.emitted[tr.Span.Start.Offset]:
 			group := b.alignedCommentGroup(tr.Span.Start.Offset)
 
 			return document.AlignGap(b.commentScope(group), 0)
