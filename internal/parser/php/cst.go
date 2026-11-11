@@ -1008,12 +1008,13 @@ type LabelStmt struct {
 }
 
 // ConstStmt is a file- or namespace-level `const` declaration; class constants
-// are ClassConstDecl.
+// are ClassConstDecl. PHP allows Attributes only when it declares one constant.
 type ConstStmt struct {
-	Keyword   Token
-	Items     []*ConstItem
-	Commas    []Token
-	Semicolon Token
+	Attributes []*AttributeGroup
+	Keyword    Token
+	Items      []*ConstItem
+	Commas     []Token
+	Semicolon  Token
 }
 
 // GlobalStmt is `global $a, $b, ...;`.
@@ -1217,7 +1218,13 @@ func (s *LabelStmt) Span() Span {
 
 // Span returns the source extent of the const statement.
 func (s *ConstStmt) Span() Span {
-	return Span{Start: s.Keyword.Span.Start, End: s.Semicolon.Span.End}
+	start := s.Keyword.Span.Start
+
+	if len(s.Attributes) > 0 {
+		start = s.Attributes[0].Span().Start
+	}
+
+	return Span{Start: start, End: s.Semicolon.Span.End}
 }
 
 // Span returns the source extent of the global statement.

@@ -8,6 +8,8 @@
 * Fixed PHPDoc text after a type, like `string [optional]`, `Foo <Bar>`, `int |string` or `T is int?string:bool`, being reformatted as part of the type
 * Fixed an empty PHPDoc `array{}` becoming `array{,` when its line breaks
 * Fixed `$item::$$property` and `self::${$name}` being reported as invalid PHP
+* Fixed a PHP 8.5 attribute on a constant, like `#[Deprecated] const A = 1;`, being reported as invalid PHP
+* Fixed `const`, `use` or `namespace` inside a function, block or another namespace being formatted instead of reported as invalid PHP
 
 ## Version 0.10.0 (2026-11-10)
 * Improved `laravel-fmt.json` to reject duplicate keys, wrong-case keys like `PrintWidth`, `null` and invalid UTF-8

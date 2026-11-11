@@ -240,10 +240,45 @@ func (p *parser) parseFile() []Stmt {
 	var stmts []Stmt
 
 	for p.peekKind() != KindEOF {
-		stmts = append(stmts, p.parseStmtOrTag())
+		stmts = append(stmts, p.parseTopStmt(false))
 	}
 
 	return stmts
+}
+
+func (p *parser) parseTopStmt(inNamespace bool) Stmt {
+	if stmt, ok := p.parseTopDecl(inNamespace); ok {
+		return stmt
+	}
+
+	return p.parseStmtOrTag()
+}
+
+// parseTopDecl parses the declarations PHP allows only at the top of a file or
+// braced namespace. ParseStatements treats a Blade PHP block as the top too,
+// though Blade compiles one inside @if or @foreach into a nested body.
+func (p *parser) parseTopDecl(inNamespace bool) (Stmt, bool) {
+	switch p.peekKind() {
+	case KindConst:
+		return p.parseConstStmt(nil), true
+	case KindUse:
+		return p.parseUseStmt(), true
+	case KindNamespace:
+		if p.peekKindAt(1) == KindBackslash {
+			return nil, false
+		}
+
+		if inNamespace {
+			tok := p.peek()
+			p.addError(tok.Span.Start, "namespace declarations cannot be nested")
+		}
+
+		return p.parseNamespaceStmt(), true
+	case KindAttributeOpen:
+		return p.parseAttributedStmt(true), true
+	default:
+		return nil, false
+	}
 }
 
 // parseStmtOrTag dispatches one statement, accepting the inline-HTML and tag
@@ -293,7 +328,9 @@ func (p *parser) parseStmt() Stmt {
 	case KindGoto:
 		return p.parseGotoStmt()
 	case KindConst:
-		return p.parseConstStmt()
+		p.reportNotAtTop()
+
+		return p.parseConstStmt(nil)
 	case KindGlobal:
 		return p.parseGlobalStmt()
 	case KindUnset:
@@ -312,8 +349,12 @@ func (p *parser) parseStmt() Stmt {
 			return p.parseExpressionStmt()
 		}
 
+		p.reportNotAtTop()
+
 		return p.parseNamespaceStmt()
 	case KindUse:
+		p.reportNotAtTop()
+
 		return p.parseUseStmt()
 	case KindDeclare:
 		return p.parseDeclareStmt()
@@ -332,7 +373,7 @@ func (p *parser) parseStmt() Stmt {
 
 		return p.parseExpressionStmt()
 	case KindAttributeOpen:
-		return p.parseAttributedStmt()
+		return p.parseAttributedStmt(false)
 	case KindSemicolon:
 		return &EmptyStmt{Semicolon: p.advance()}
 	default:
@@ -342,6 +383,11 @@ func (p *parser) parseStmt() Stmt {
 
 		return p.parseExpressionStmt()
 	}
+}
+
+func (p *parser) reportNotAtTop() {
+	tok := p.peek()
+	p.addError(tok.Span.Start, fmt.Sprintf("%s is only allowed at the top of a file or namespace", tok.Kind))
 }
 
 func (p *parser) parseBlockStmt() *BlockStmt {

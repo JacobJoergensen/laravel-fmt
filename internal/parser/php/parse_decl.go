@@ -714,7 +714,7 @@ func (p *parser) parseTraitAliasAdaptation(method *TraitMethodRef) *TraitAliasAd
 	}
 }
 
-func (p *parser) parseAttributedStmt() Stmt {
+func (p *parser) parseAttributedStmt(atTop bool) Stmt {
 	attrs := p.parseAttributeGroups()
 
 	switch p.peekKind() {
@@ -730,10 +730,16 @@ func (p *parser) parseAttributedStmt() Stmt {
 		if p.isFunctionDecl() {
 			return p.parseFunctionDecl(attrs)
 		}
+	case KindConst:
+		if !atTop {
+			p.reportNotAtTop()
+		}
+
+		return p.parseConstStmt(attrs)
 	}
 
 	tok := p.peek()
-	p.addError(tok.Span.Start, "attributes must precede a class, interface, trait, enum, or function declaration")
+	p.addError(tok.Span.Start, "attributes must precede a class, interface, trait, enum, function, or constant declaration")
 
 	return p.parseExpressionStmt()
 }

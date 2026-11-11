@@ -60,6 +60,12 @@ func ParseStatements(src []byte) ([]Stmt, []Token, []Error) {
 	var stmts []Stmt
 
 	for p.peekKind() != KindEOF {
+		if stmt, ok := p.parseTopDecl(false); ok {
+			stmts = append(stmts, stmt)
+
+			continue
+		}
+
 		stmts = append(stmts, p.parseStmt())
 	}
 

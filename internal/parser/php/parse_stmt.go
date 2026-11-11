@@ -460,20 +460,26 @@ func (p *parser) parseLabelStmt() Stmt {
 	return &LabelStmt{Name: name, Colon: colon}
 }
 
-func (p *parser) parseConstStmt() Stmt {
+func (p *parser) parseConstStmt(attrs []*AttributeGroup) Stmt {
 	kw := p.advance()
 	items := []*ConstItem{p.parseConstItem(false)}
 
 	var commas []Token
 
 	for p.peekKind() == KindComma {
-		commas = append(commas, p.advance())
+		comma := p.advance()
+
+		if len(attrs) > 0 && len(commas) == 0 {
+			p.addError(comma.Span.Start, "cannot apply attributes to multiple constants at once")
+		}
+
+		commas = append(commas, comma)
 		items = append(items, p.parseConstItem(false))
 	}
 
 	semi := p.expectStmtTerminator()
 
-	return &ConstStmt{Keyword: kw, Items: items, Commas: commas, Semicolon: semi}
+	return &ConstStmt{Attributes: attrs, Keyword: kw, Items: items, Commas: commas, Semicolon: semi}
 }
 
 func (p *parser) parseGlobalStmt() Stmt {
@@ -560,7 +566,7 @@ func (p *parser) parseNamespaceStmt() Stmt {
 	}
 
 	if p.peekKind() == KindLBrace {
-		body := p.parseBlockStmt()
+		body := p.parseNamespaceBody()
 
 		return &NamespaceStmt{Keyword: kw, Name: name, Body: body}
 	}
@@ -568,6 +574,21 @@ func (p *parser) parseNamespaceStmt() Stmt {
 	semi := p.expectStmtTerminator()
 
 	return &NamespaceStmt{Keyword: kw, Name: name, Semicolon: semi}
+}
+
+func (p *parser) parseNamespaceBody() *BlockStmt {
+	lb := p.expect(KindLBrace)
+	var stmts []Stmt
+
+	for p.peekKind() != KindRBrace && p.peekKind() != KindEOF {
+		start := p.pos
+		stmts = append(stmts, p.parseTopStmt(true))
+		p.guardProgress(start)
+	}
+
+	rb := p.expect(KindRBrace)
+
+	return &BlockStmt{LBrace: lb, Stmts: stmts, RBrace: rb}
 }
 
 func (p *parser) parseUseStmt() Stmt {

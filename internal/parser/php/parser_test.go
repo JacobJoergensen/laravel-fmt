@@ -229,6 +229,40 @@ func TestPropertyDeclarationErrors(t *testing.T) {
 	}
 }
 
+func TestTopLevelDeclarationErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"const in a function", "<?php function f() { const X = 1; }", "1:22: const is only allowed at the top of a file or namespace"},
+		{"attributed const in a block", "<?php if ($a) { #[A] const X = 1; }", "1:22: const is only allowed at the top of a file or namespace"},
+		{"use in a method", "<?php class C { function m() { use A; } }", "1:32: use is only allowed at the top of a file or namespace"},
+		{"namespace in a block", "<?php { namespace A; }", "1:9: namespace is only allowed at the top of a file or namespace"},
+		{"braced namespace in a namespace", "<?php namespace A { namespace B { } }", "1:21: namespace declarations cannot be nested"},
+		{"attribute on several constants", "<?php #[A] const X = 1, Y = 2;", "1:23: cannot apply attributes to multiple constants at once"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, errs := Parse([]byte(tt.src))
+			if len(errs) == 0 {
+				t.Fatalf("expected a parse error for %q", tt.src)
+			}
+
+			if got := errs[0].Error(); got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseStatementsAllowsTopLevelDeclarations(t *testing.T) {
+	if _, _, errs := ParseStatements([]byte("use A; const X = 1;")); len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+}
+
 // PHP rejects `0->p`, `0::C` and `0[1]` in any context. Parenthesised they
 // parse and fail only at runtime, so `(0)->p` is accepted.
 func TestPostfixOnNumericLiteralIsRejected(t *testing.T) {
@@ -1063,6 +1097,7 @@ func TestParseAcceptsValidAndRejectsInvalidSyntax(t *testing.T) {
 		{"unqualified trait method", `<?php class C { use A, B { A::foo insteadof B; } }`, false},
 		{"qualified trait method", `<?php class C { use \App\A, B { \App\A::foo insteadof B; } }`, false},
 		{"namespaced trait alias", `<?php class C { use App\A { App\A::foo as bar; } }`, false},
+		{"declarations in a braced namespace", `<?php namespace A { use B; #[C] const X = 1; }`, false},
 	}
 
 	for _, tc := range cases {

@@ -670,7 +670,7 @@ func (b *builder) layoutStmt(s parser.Stmt) *document.Doc {
 	case *parser.UseStmt:
 		return b.useStmt(n)
 	case *parser.ConstStmt:
-		return b.constStmt("const", n.Items)
+		return document.Concat(b.attributes(n.Attributes), b.constStmt("const", n.Items))
 	case *parser.BreakStmt:
 		return b.jump("break", n.Level)
 	case *parser.ContinueStmt:
