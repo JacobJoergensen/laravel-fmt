@@ -2960,16 +2960,7 @@ func (e *emitter) emitGluedBodyNormalized(children []htmlparser.Node, start, end
 				e.w.WriteBytes(e.src[cursor:nodeStart])
 			}
 
-			switch n := node.(type) {
-			case *htmlparser.Element:
-				e.emitOpenTagFlat(n, n.Attributes, e.selfCloseMarker(n), false)
-			case *parser.EchoNode:
-				e.emitEcho(n)
-			case *parser.RawEchoNode:
-				e.emitRawEcho(n)
-			case *parser.DirectiveNode:
-				e.emitDirective(n)
-			}
+			e.emitRebuilt(node)
 
 			cursor = nodeEnd
 		}
@@ -2990,6 +2981,23 @@ func (e *emitter) emitGluedBodyNormalized(children []htmlparser.Node, start, end
 	emit()
 
 	return true
+}
+
+// emitRebuilt writes one node of a body whose text is copied as written: of an
+// element only its open tag, whose breaks never render.
+func (e *emitter) emitRebuilt(node htmlparser.Node) {
+	switch n := node.(type) {
+	case *htmlparser.Element:
+		e.emitOpenTagFlat(n, n.Attributes, e.selfCloseMarker(n), false)
+	case *parser.EchoNode:
+		e.emitEcho(n)
+	case *parser.RawEchoNode:
+		e.emitRawEcho(n)
+	case *parser.DirectiveNode:
+		e.emitDirective(n)
+	case *parser.PhpBlockNode:
+		e.emitPhpBlock(n)
+	}
 }
 
 // An escaped `@{{ }}` or `@@` is literal output, not PHP, so it stays in the

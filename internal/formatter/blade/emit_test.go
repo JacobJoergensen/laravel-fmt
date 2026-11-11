@@ -2309,8 +2309,9 @@ func TestFormatLoopClauseCommentEndedByALoneCR(t *testing.T) {
 func TestFormatDirectiveEmptyArgList(t *testing.T) {
 	cases := map[string]string{
 		"@A()\n":                       "@A()\n",
-		"@if()\nx\n@endif\n":           "@if ()\n    x\n@endif\n",
-		"@if(/* note */)\nx\n@endif\n": "@if (/* note */)\n    x\n@endif\n",
+		"@if()\nx\n@endif\n":           "@if ()\nx\n@endif\n",
+		"@if(/* note */)\nx\n@endif\n": "@if (/* note */)\nx\n@endif\n",
+		"@if()\n<p>x</p>\n@endif\n":    "@if ()\n    <p>x</p>\n@endif\n",
 	}
 
 	for src, want := range cases {
@@ -2943,8 +2944,9 @@ func TestDirectiveAndAttrDocFormatting(t *testing.T) {
 		want string
 	}{
 		{"directive array arg cast", "@include('v', ['c' => (integer) $d])\n", "@include('v', ['c' => (int) $d])\n"},
-		{"directive multi-arg", "@can('edit',$post)\nx\n@endcan\n", "@can('edit', $post)\n    x\n@endcan\n"},
-		{"directive arg comment", "@if ($a /* keep */ && $b)\nz\n@endif\n", "@if ($a /* keep */ && $b)\n    z\n@endif\n"},
+		{"directive multi-arg", "@can('edit',$post)\nx\n@endcan\n", "@can('edit', $post)\nx\n@endcan\n"},
+		{"directive multi-arg with markup", "@can('edit',$post)\n<p>x</p>\n@endcan\n", "@can('edit', $post)\n    <p>x</p>\n@endcan\n"},
+		{"directive arg comment", "@if ($a /* keep */ && $b)\nz\n@endif\n", "@if ($a /* keep */ && $b)\nz\n@endif\n"},
 		{"bound attr array spacing", "<x-link :href=\"route('x', ['id'=>$id])\">l</x-link>\n", "<x-link :href=\"route('x', ['id' => $id])\">l</x-link>\n"},
 		{"bound attr ternary", "<x-card :class=\"$on?'a':'b'\"></x-card>\n", "<x-card :class=\"$on ? 'a' : 'b'\"></x-card>\n"},
 	}

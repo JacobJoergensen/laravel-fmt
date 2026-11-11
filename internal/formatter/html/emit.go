@@ -754,7 +754,7 @@ func emitScriptJSON(w *formatter.Writer, raw []byte, php []parser.Span) bool {
 func EmitRcdataContent(w *formatter.Writer, children []parser.Node) {
 	raw, base, php := rawBody(children)
 
-	emitVerbatimBytes(w, raw, base, php, false)
+	EmitVerbatimBytes(w, raw, base, php, false)
 }
 
 // EmitPreformattedContent writes the source between el's tags verbatim, for an
@@ -779,7 +779,7 @@ func emitBodySpan(w *formatter.Writer, src []byte, el *parser.Element, php []par
 		return
 	}
 
-	emitVerbatimBytes(w, src[start:end], start, php, indentClose)
+	EmitVerbatimBytes(w, src[start:end], start, php, indentClose)
 }
 
 // splitHTMLLines splits raw on CRLF, a lone CR and LF alike, except that a
@@ -812,7 +812,9 @@ func splitHTMLLines(raw []byte, base int, php []parser.Span) [][]byte {
 	}
 }
 
-func emitVerbatimBytes(w *formatter.Writer, raw []byte, base int, php []parser.Span, indentClose bool) {
+// EmitVerbatimBytes writes raw, at source offset base, at column zero with its
+// line breaks as the configured line ending; a lone CR inside php is data.
+func EmitVerbatimBytes(w *formatter.Writer, raw []byte, base int, php []parser.Span, indentClose bool) {
 	if len(raw) == 0 {
 		return
 	}

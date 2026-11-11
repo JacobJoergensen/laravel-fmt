@@ -32,7 +32,12 @@ func Format(src []byte, cfg *config.File) ([]byte, error) {
 	w := formatter.NewWriter(cfg)
 
 	e := &emitter{w: w, src: src, cfg: cfg}
-	e.emitFile(file)
+
+	if hasMarkup(file.Nodes) {
+		e.emitFile(file)
+	} else {
+		e.emitTextTemplate(file.Nodes)
+	}
 
 	return w.Bytes(), nil
 }

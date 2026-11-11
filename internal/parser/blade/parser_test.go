@@ -703,6 +703,7 @@ func TestUnclosedRawPhpIslandEndsByItsOpenTag(t *testing.T) {
 		{"short open tag stops at the next marker", "<?\"?>=\n</td>", "<?\"?>="},
 		{"long open tag runs to the end", "<?php \"?>x\n<b>", "<?php \"?>x\n<b>"},
 		{"php glued to a name is a short open tag", "<?phpx \"?>y\n<br>", "<?phpx \"?>y"},
+		{"php glued to a tag runs to the end", "<?php<br>\n<br>", "<?php<br>\n<br>"},
 	}
 
 	for _, tt := range tests {

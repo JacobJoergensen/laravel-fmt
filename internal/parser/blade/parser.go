@@ -278,8 +278,8 @@ func (p *bladeParser) parseText() Node {
 // only with short tags on, so unclosed it stops at the next real marker.
 func (p *bladeParser) parseRawPhp() Node {
 	start := p.Pos
-	toEOF := p.atPHPOpenTag()
-	longTag := toEOF && !p.StartsWith("<?=")
+	longTag := p.atPHPOpenTag() && !p.StartsWith("<?=")
+	toEOF := p.atPHPOpenTag() || p.atGluedPHPWord()
 	p.AdvanceN(2)
 
 	// The island ends where PHP says it does: in `"?> <div class='x'>"` the
@@ -2313,6 +2313,22 @@ func (p *bladeParser) atQuotedValueOutput() bool {
 	off := p.Pos.Offset
 
 	return off == 0 || !html.IsNameStart(p.Src[off-1]) && !html.IsDigit(p.Src[off-1])
+}
+
+// atGluedPHPWord reports whether the cursor is at `<?php` glued to the next
+// Blade marker. PHP reads that as a short tag holding `php`, but the line break
+// the layout puts after an island makes it a real `<?php` on the next pass.
+func (p *bladeParser) atGluedPHPWord() bool {
+	if !p.StartsWithFold("<?php") {
+		return false
+	}
+
+	saved := p.Pos
+	p.AdvanceN(len("<?php"))
+	glued := !p.Eof() && p.isBladeMarker()
+	p.Pos = saved
+
+	return glued
 }
 
 // atPHPOpenTag reports whether the cursor is at a tag PHP opens: `<?=`, or
