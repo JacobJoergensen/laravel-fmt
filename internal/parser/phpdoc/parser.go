@@ -18,9 +18,11 @@ var callableKeywords = [][]byte{
 }
 
 type typeParser struct {
-	toks   []token
-	pos    int
-	failed bool
+	toks       []token
+	pos        int
+	depth      int
+	failed     bool
+	psalmSplit bool
 }
 
 func (p *typeParser) kindAt(n int) tokKind {
@@ -39,13 +41,50 @@ func (p *typeParser) atWord(w []byte) bool {
 	return p.at(tokIdent) && bytes.Equal(p.toks[p.pos].raw, w)
 }
 
-func (p *typeParser) spaced() bool { return p.toks[p.pos].spaceBefore }
+func (p *typeParser) spaced() bool { return p.toks[p.pos].gap > 0 }
+
+// Outside every bracket Psalm ends a type at a space that PHPStan reads past,
+// so there a spaced token ends the type and both tools keep reading the text
+// as written. Inside brackets Psalm ignores spaces and PHPStan's rules apply.
+func (p *typeParser) psalmTopLevel() bool { return p.psalmSplit && p.depth == 0 }
+
+func (p *typeParser) joins() bool { return !p.psalmTopLevel() || !p.spaced() }
+
+// At the top level Psalm reads past one space on each side of `|` or `&`, as
+// in `A | B` or `A| B`, but ends the type at `A |B` or a wider gap.
+func (p *typeParser) joinsOperator() bool {
+	if !p.psalmTopLevel() {
+		return true
+	}
+
+	before, after := p.toks[p.pos].gap, p.toks[p.pos+1].gap
+
+	if before == 0 {
+		return after <= 1
+	}
+
+	return before == 1 && after == 1
+}
+
+func (p *typeParser) joinsReturn() bool {
+	return !p.psalmTopLevel() || (p.toks[p.pos].gap <= 1 && p.toks[p.pos+1].gap <= 1)
+}
 
 func (p *typeParser) advance() token {
 	t := p.toks[p.pos]
 
-	if t.kind != tokEOF {
-		p.pos++
+	if t.kind == tokEOF {
+		return t
+	}
+
+	p.pos++
+
+	switch t.kind {
+	case tokLParen, tokLAngle, tokLBrace, tokLBracket:
+		p.depth++
+	case tokRParen, tokRAngle, tokRBrace, tokRBracket:
+		p.depth--
+	default:
 	}
 
 	return t
@@ -60,7 +99,9 @@ func (p *typeParser) parseType() Type {
 func (p *typeParser) parseConditional() Type {
 	subject := p.parseUnion()
 
-	if !p.atWord(kwIs) {
+	// PHPStan reads a conditional only inside brackets; at the top level
+	// `T is int ? A : B` is the type T and a description.
+	if !p.atWord(kwIs) || p.depth == 0 {
 		return subject
 	}
 
@@ -96,18 +137,22 @@ func (p *typeParser) parseConditional() Type {
 func (p *typeParser) parseUnion() Type {
 	first := p.parseIntersection()
 
-	if !p.at(tokPipe) {
+	if !p.atUnion() {
 		return first
 	}
 
 	members := []Type{first}
 
-	for p.at(tokPipe) {
+	for p.atUnion() {
 		p.advance()
 		members = append(members, p.parseIntersection())
 	}
 
 	return &UnionType{Members: members}
+}
+
+func (p *typeParser) atUnion() bool {
+	return p.at(tokPipe) && p.joinsOperator()
 }
 
 func (p *typeParser) parseIntersection() Type {
@@ -130,12 +175,16 @@ func (p *typeParser) parseIntersection() Type {
 // An `&` before a $variable is a by-reference marker in a callable parameter,
 // not an intersection.
 func (p *typeParser) atIntersection() bool {
-	return p.at(tokAmp) && p.kindAt(1) != tokVar
+	return p.at(tokAmp) && p.kindAt(1) != tokVar && p.joinsOperator()
 }
 
 func (p *typeParser) parsePrefix() Type {
 	if p.at(tokQuestion) {
 		p.advance()
+
+		if !p.joins() {
+			p.fail()
+		}
 
 		return &NullableType{Inner: p.parsePrefix()}
 	}
@@ -146,9 +195,9 @@ func (p *typeParser) parsePrefix() Type {
 func (p *typeParser) parsePostfix() Type {
 	t := p.parseAtom()
 
-	// As PHPStan reads it, only `[]` attaches after a space; `string [optional]`
-	// is a type and a description.
-	for p.at(tokLBracket) && (!p.spaced() || p.kindAt(1) == tokRBracket) {
+	// After a space PHPStan attaches only `[]`; `string [optional]` is a type
+	// and a description.
+	for p.at(tokLBracket) && (!p.spaced() || (!p.psalmTopLevel() && p.kindAt(1) == tokRBracket)) {
 		p.advance()
 
 		if p.at(tokRBracket) {
@@ -207,21 +256,22 @@ func (p *typeParser) parseNamed() Type {
 	name := p.advance()
 
 	switch {
-	case p.at(tokDoubleColon):
+	case p.at(tokDoubleColon) && p.joins():
 		return p.parseConstFetch(name.raw)
-	case p.at(tokLAngle):
+	case p.at(tokLAngle) && p.joins():
 		return p.parseGeneric(&IdentType{Name: name.raw})
 	case p.at(tokLBrace) && !p.spaced():
 		return p.parseShape(name.raw)
-	case p.at(tokLParen) && isCallableKeyword(name.raw):
+	case p.at(tokLParen) && isCallableKeyword(name.raw) && p.joins():
 		return p.tryParseCallable(name.raw)
 	default:
 		return &IdentType{Name: name.raw}
 	}
 }
 
-// After a space PHPStan takes the parentheses as a signature only when a return
-// type follows; `callable (string) Handler` is a type and a description.
+// Where Psalm does not end the type, as inside `array<Closure (int): void>`,
+// PHPStan takes parentheses after a space as a signature only when a return
+// type follows.
 func (p *typeParser) tryParseCallable(keyword []byte) Type {
 	if !p.spaced() {
 		return p.parseCallable(keyword)
@@ -229,14 +279,14 @@ func (p *typeParser) tryParseCallable(keyword []byte) Type {
 
 	// The rollback restores the flag as found, so a failure earlier in the type
 	// still fails it.
-	start, failed := p.pos, p.failed
+	start, depth, failed := p.pos, p.depth, p.failed
 
 	c := p.parseCallable(keyword)
 	if !p.failed && c.Return != nil {
 		return c
 	}
 
-	p.pos, p.failed = start, failed
+	p.pos, p.depth, p.failed = start, depth, failed
 
 	return &IdentType{Name: keyword}
 }
@@ -246,11 +296,11 @@ func (p *typeParser) parseConstFetch(class []byte) Type {
 
 	var member []byte
 
-	if p.at(tokIdent) {
+	if p.at(tokIdent) && p.joins() {
 		member = append(member, p.advance().raw...)
 	}
 
-	if p.at(tokStar) {
+	if p.at(tokStar) && p.joins() {
 		member = append(member, p.advance().raw...)
 	}
 
@@ -289,7 +339,7 @@ func (p *typeParser) parseCallable(keyword []byte) *CallableType {
 
 	p.advance()
 
-	if p.at(tokColon) {
+	if p.at(tokColon) && p.joinsReturn() {
 		p.advance()
 		c.Return = p.parseType()
 	}

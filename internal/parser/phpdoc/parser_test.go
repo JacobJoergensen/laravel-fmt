@@ -55,18 +55,26 @@ func TestParseShapeRecordsALineBreakAfterTheBrace(t *testing.T) {
 	}
 }
 
-func TestParseTypePrefixEndsAtASpaceWherePHPStanDoes(t *testing.T) {
+func TestParseTypePrefixEndsAtASpaceWherePHPStanOrPsalmDoes(t *testing.T) {
 	cases := []struct {
 		in   string
 		want string
 	}{
-		{"string [optional] The name", "string"},
-		{"int [] list", "int []"},
-		{"array{a: int} [0] First", "array{a: int}"},
+		{"int [] list", "int"},
+		{"array<int []> list", "array<int []>"},
 		{"non-empty-array {0: ?string}", "non-empty-array"},
-		{"callable (string) Handler", "callable"},
-		{"Closure (int): void The closure", "Closure (int): void"},
-		{"array <int> The list", "array <int>"},
+		{"Closure (int): void The closure", "Closure"},
+		{"array<Closure (int): void> x", "array<Closure (int): void>"},
+		{"callable(int):  void x", "callable(int)"},
+		{"callable(int) :void x", "callable(int) :void"},
+		{"array <int> The list", "array"},
+		{"Foo ::BAR x", "Foo"},
+		{"A |B x", "A"},
+		{"A|  B x", "A"},
+		{"A | B x", "A | B"},
+		{"A| B x", "A| B"},
+		{"? int $x", ""},
+		{"T is int?string:bool", "T"},
 		{"array<string, array\n{a: int}> x", "array<string, array\n{a: int}>"},
 	}
 
@@ -80,11 +88,34 @@ func TestParseTypePrefixEndsAtASpaceWherePHPStanDoes(t *testing.T) {
 	}
 }
 
-func TestParseTypePrefixKeepsAFailureFromBeforeACallable(t *testing.T) {
+func TestParseBoundPrefixEndsAtASpaceOnlyWherePHPStanDoes(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"Collection <int> The list", "Collection <int>"},
+		{"int |string x", "int |string"},
+		{"int [] list", "int []"},
+		{"string [optional] The name", "string"},
+		{"callable (string) Handler", "callable"},
+		{"Closure (int): void The closure", "Closure (int): void"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			_, n := ParseBoundPrefix([]byte(tc.in))
+			if got := tc.in[:n]; got != tc.want {
+				t.Fatalf("type = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseBoundPrefixKeepsAFailureFromBeforeACallable(t *testing.T) {
 	const in = "Foo::|callable (string) $x"
 
-	if _, n := ParseTypePrefix([]byte(in)); n != 0 {
-		t.Fatalf("ParseTypePrefix(%q) read %q, want no type", in, in[:n])
+	if _, n := ParseBoundPrefix([]byte(in)); n != 0 {
+		t.Fatalf("ParseBoundPrefix(%q) read %q, want no type", in, in[:n])
 	}
 }
 

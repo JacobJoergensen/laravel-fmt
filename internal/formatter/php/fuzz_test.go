@@ -2,6 +2,7 @@ package php
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
@@ -226,4 +227,123 @@ func FuzzBuildDocAligned(f *testing.F) {
 			t.Fatalf("aligned doc path not idempotent:\n--- first ---\n%s\n--- second ---\n%s", first, second)
 		}
 	})
+}
+
+// The type's meaning is the PHPStan oracle's job; this only checks that
+// Psalm's split between type and description stays where it was.
+func FuzzPHPDocTypeKeepsPsalmSplit(f *testing.F) {
+	for _, seed := range []string{
+		"Foo <Bar> desc",
+		"int [] list",
+		"A |B $x",
+		"A | B $x",
+		"callable(int) :  void",
+		"array{a:int} [0]",
+		"? int $x",
+		"'a b'|Foo",
+		"T is int?string:bool",
+	} {
+		f.Add([]byte(seed))
+	}
+
+	f.Fuzz(func(t *testing.T, src []byte) {
+		if bytes.ContainsAny(src, "\r\n") || bytes.Contains(src, []byte("//")) {
+			t.Skip("Psalm joins docblock lines and strips // comments before this step")
+		}
+
+		if len(src) == 0 || src[0] == ' ' || src[0] == '\t' {
+			t.Skip("the tag layer starts the type after its spaces")
+		}
+
+		before, ok := psalmDescription(src)
+		if !ok {
+			t.Skip("Psalm rejects the tag")
+		}
+
+		out := normalizeTypeAt(src, 0)
+
+		if after, _ := psalmDescription(out); after != before {
+			t.Fatalf("Psalm splits %q before %q, but the rewrite %q before %q", src, before, out, after)
+		}
+	})
+}
+
+// psalmDescription models Psalm's CommentAnalyzer::splitDocLine. ok is
+// false where Psalm rejects mismatched brackets.
+func psalmDescription(body []byte) (rest string, ok bool) {
+	const opens, closes = "[{(<", "]})>"
+
+	var brackets []byte
+	var quote byte
+
+	expectsReturn, escaped := false, false
+	s := bytes.ReplaceAll(body, []byte("\t"), []byte(" "))
+
+	at := func(i int) byte {
+		if i < 0 || i >= len(s) {
+			return 0
+		}
+
+		return s[i]
+	}
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+
+		if quote != 0 {
+			switch {
+			case c == quote && !escaped:
+				quote = 0
+			case c == '\\' && !escaped && (at(i+1) == quote || at(i+1) == '\\'):
+				escaped = true
+
+				continue
+			}
+
+			escaped = false
+
+			continue
+		}
+
+		switch {
+		case c == '"' || c == '\'':
+			quote = c
+		case c == ':' && at(i-1) == ')':
+			expectsReturn = true
+
+			continue
+		case strings.IndexByte(opens, c) >= 0:
+			brackets = append(brackets, c)
+		case strings.IndexByte(closes, c) >= 0:
+			if len(brackets) == 0 || brackets[len(brackets)-1] != opens[strings.IndexByte(closes, c)] {
+				return "", false
+			}
+
+			brackets = brackets[:len(brackets)-1]
+		case c == ' ':
+			next, last := at(i+1), at(i-1)
+
+			switch {
+			case len(brackets) > 0:
+				expectsReturn = false
+			case next == '{':
+			case (next == '|' || next == '&') && at(i+2) == ' ':
+				i++
+			case last == '|' || last == '&':
+			case next == ':':
+				i++
+				expectsReturn = true
+			case expectsReturn:
+				expectsReturn = false
+			default:
+				return strings.TrimSpace(string(s[i+1:])), true
+			}
+
+			continue
+		}
+
+		expectsReturn = false
+	}
+
+	return "", true
 }

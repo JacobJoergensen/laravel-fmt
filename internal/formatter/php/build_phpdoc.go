@@ -197,7 +197,7 @@ func tagTypeStart(content []byte) int {
 		return typeStart
 	}
 
-	if !typeFirstTags[string(tag)] {
+	if !typeFirstTags[string(tag)] && !requireTags[string(tag)] {
 		return -1
 	}
 
@@ -414,11 +414,17 @@ func normalizeDocContent(content []byte) []byte {
 		return normalizeTemplateTag(content, tagEnd)
 	case assertTags[string(tag)]:
 		return normalizeAssertTag(content, tagEnd)
-	case typeFirstTags[string(tag)]:
+	case typeFirstTags[string(tag)], requireTags[string(tag)]:
 		typeStart := skipSpaceTab(content, tagEnd)
 
 		if typeStart == tagEnd || typeStart >= len(content) {
 			return content
+		}
+
+		if requireTags[string(tag)] {
+			out, _ := rewriteType(content, typeStart, phpdoc.ParseBoundPrefix)
+
+			return out
 		}
 
 		return normalizeTypeAt(content, typeStart)
@@ -428,23 +434,45 @@ func normalizeDocContent(content []byte) []byte {
 }
 
 var typeFirstTags = map[string]bool{
-	"@param":             true,
-	"@param-out":         true,
-	"@return":            true,
-	"@var":               true,
-	"@throws":            true,
-	"@property":          true,
-	"@property-read":     true,
-	"@property-write":    true,
-	"@mixin":             true,
-	"@phpstan-param":     true,
-	"@phpstan-param-out": true,
-	"@phpstan-return":    true,
-	"@phpstan-var":       true,
-	"@psalm-param":       true,
-	"@psalm-param-out":   true,
-	"@psalm-return":      true,
-	"@psalm-var":         true,
+	"@param":                      true,
+	"@param-out":                  true,
+	"@return":                     true,
+	"@var":                        true,
+	"@throws":                     true,
+	"@property":                   true,
+	"@property-read":              true,
+	"@property-write":             true,
+	"@mixin":                      true,
+	"@extends":                    true,
+	"@implements":                 true,
+	"@use":                        true,
+	"@template-extends":           true,
+	"@template-implements":        true,
+	"@template-use":               true,
+	"@param-closure-this":         true,
+	"@phpstan-param":              true,
+	"@phpstan-param-out":          true,
+	"@phpstan-return":             true,
+	"@phpstan-var":                true,
+	"@phpstan-extends":            true,
+	"@phpstan-implements":         true,
+	"@phpstan-use":                true,
+	"@phpstan-param-closure-this": true,
+	"@phpstan-this-out":           true,
+	"@phpstan-self-out":           true,
+	"@psalm-param":                true,
+	"@psalm-param-out":            true,
+	"@psalm-return":               true,
+	"@psalm-var":                  true,
+	"@psalm-this-out":             true,
+	"@psalm-self-out":             true,
+}
+
+var requireTags = map[string]bool{
+	"@phpstan-require-extends":    true,
+	"@phpstan-require-implements": true,
+	"@psalm-require-extends":      true,
+	"@psalm-require-implements":   true,
 }
 
 var typeAliasTags = map[string]bool{
@@ -453,13 +481,15 @@ var typeAliasTags = map[string]bool{
 }
 
 var templateTags = map[string]bool{
-	"@template":                   true,
-	"@template-covariant":         true,
-	"@template-contravariant":     true,
-	"@phpstan-template":           true,
-	"@phpstan-template-covariant": true,
-	"@psalm-template":             true,
-	"@psalm-template-covariant":   true,
+	"@template":                       true,
+	"@template-covariant":             true,
+	"@template-contravariant":         true,
+	"@phpstan-template":               true,
+	"@phpstan-template-covariant":     true,
+	"@phpstan-template-contravariant": true,
+	"@psalm-template":                 true,
+	"@psalm-template-covariant":       true,
+	"@psalm-template-contravariant":   true,
 }
 
 var methodTags = map[string]bool{
@@ -480,17 +510,20 @@ var assertTags = map[string]bool{
 // normalizeTypeAt rewrites the type beginning at content[start] into canonical
 // spacing, returning content unchanged when no complete type parses there.
 func normalizeTypeAt(content []byte, start int) []byte {
-	out, _ := rewriteType(content, start)
+	out, _ := rewriteType(content, start, phpdoc.ParseTypePrefix)
 
 	return out
 }
 
-// rewriteType normalizes the type at content[start] and returns the resulting
-// content plus the offset just past that type in it. after is -1 when no
-// complete, whitespace-terminated type parses (content is then unchanged), so a
-// parse that stopped mid-type is never partially re-spaced.
-func rewriteType(content []byte, start int) (out []byte, after int) {
-	parsed, n := phpdoc.ParseTypePrefix(content[start:])
+// after is -1 when no complete, whitespace-terminated type parses, and
+// content is then unchanged, so a type cut off mid-way is never partly
+// re-spaced.
+func rewriteType(
+	content []byte,
+	start int,
+	parse func([]byte) (phpdoc.Type, int),
+) (out []byte, after int) {
+	parsed, n := parse(content[start:])
 
 	if n == 0 {
 		return content, -1
@@ -530,7 +563,7 @@ func normalizeTemplateTag(content []byte, afterTag int) []byte {
 
 	if hasWord(out, i, "of") || hasWord(out, i, "as") {
 		var after int
-		out, after = rewriteType(out, skipSpaceTab(out, i+len("of")))
+		out, after = rewriteType(out, skipSpaceTab(out, i+len("of")), phpdoc.ParseBoundPrefix)
 
 		if after < 0 {
 			return out
@@ -542,7 +575,7 @@ func normalizeTemplateTag(content []byte, afterTag int) []byte {
 	j := skipSpaceTab(out, i)
 
 	if j < len(out) && out[j] == '=' {
-		out, _ = rewriteType(out, skipSpaceTab(out, j+1))
+		out, _ = rewriteType(out, skipSpaceTab(out, j+1), phpdoc.ParseBoundPrefix)
 	}
 
 	return out

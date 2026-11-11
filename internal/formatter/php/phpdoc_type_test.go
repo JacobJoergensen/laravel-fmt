@@ -55,8 +55,7 @@ func TestPrintPHPDocTypeIsCanonical(t *testing.T) {
 		{"callable variadic", "callable(float ...$f):int", "callable(float ...$f): int"},
 		{"callable by ref", "callable(int &$x):void", "callable(int &$x): void"},
 		{"callable paren return", "callable():(int|null)", "callable(): (int|null)"},
-		{"conditional", "T is int?string:bool", "T is int ? string : bool"},
-		{"conditional negated", "T is not int ? A : B", "T is not int ? A : B"},
+		{"conditional negated", "(T is not int?A:B)", "(T is not int ? A : B)"},
 		{"conditional paren param", "($value is int?A:B)", "($value is int ? A : B)"},
 	}
 

@@ -33,7 +33,7 @@ type token struct {
 	kind          tokKind
 	raw           []byte
 	end           int // byte offset in src immediately after raw
-	spaceBefore   bool
+	gap           uint8
 	newlineBefore bool
 }
 
@@ -50,37 +50,43 @@ func lex(src []byte) []token {
 	var toks []token
 
 	for {
-		newline, spaced := l.skipSpace()
+		newline, gap := l.skipSpace()
 
 		if l.pos >= len(l.src) {
-			return append(toks, token{kind: tokEOF, end: l.pos, newlineBefore: newline})
+			return append(toks, token{kind: tokEOF, end: l.pos, gap: gap, newlineBefore: newline})
 		}
 
 		tok := l.next()
 		tok.end = l.pos
-		tok.spaceBefore = spaced
+		tok.gap = gap
 		tok.newlineBefore = newline
 		toks = append(toks, tok)
 	}
 }
 
-// spaced counts only spaces and tabs after the last line break, as PHPStan's
+// wideGap stands for every gap of two or more spaces, which the parser's rules
+// all read alike.
+const wideGap = 2
+
+// The gap counts only spaces and tabs after the last line break, as PHPStan's
 // horizontal-whitespace check does.
-func (l *lexer) skipSpace() (newline, spaced bool) {
+func (l *lexer) skipSpace() (newline bool, gap uint8) {
 	for l.pos < len(l.src) {
 		switch l.src[l.pos] {
 		case ' ', '\t':
-			spaced = true
+			if gap < wideGap {
+				gap++
+			}
 		case '\r', '\n':
-			newline, spaced = true, false
+			newline, gap = true, 0
 		default:
-			return newline, spaced
+			return newline, gap
 		}
 
 		l.pos++
 	}
 
-	return newline, spaced
+	return newline, gap
 }
 
 func (l *lexer) next() token {

@@ -17,9 +17,20 @@ func ParseType(src []byte) Type {
 
 // ParseTypePrefix parses a leading type from src and returns it with the number
 // of bytes consumed, or (*Invalid, 0) when src does not begin with a complete
-// type.
+// type. The type ends at a top-level space where PHPStan or Psalm starts a
+// tag's description.
 func ParseTypePrefix(src []byte) (Type, int) {
-	p := &typeParser{toks: lex(src)}
+	return parsePrefix(src, true)
+}
+
+// ParseBoundPrefix is ParseTypePrefix for tags such as @template bounds, whose
+// whole remainder Psalm reads as the type, so only PHPStan's boundary applies.
+func ParseBoundPrefix(src []byte) (Type, int) {
+	return parsePrefix(src, false)
+}
+
+func parsePrefix(src []byte, psalmSplit bool) (Type, int) {
+	p := &typeParser{toks: lex(src), psalmSplit: psalmSplit}
 	t := p.parseType()
 
 	if p.failed || p.pos == 0 {
