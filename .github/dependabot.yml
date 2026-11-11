@@ -3,6 +3,8 @@ version: 2
 updates:
   - package-ecosystem: "github-actions"
     directory: "/"
+    labels:
+      - "dependencies"
     schedule:
       interval: "weekly"
     groups:
@@ -12,9 +14,26 @@ updates:
 
   - package-ecosystem: "gomod"
     directory: "/"
+    labels:
+      - "dependencies"
     schedule:
       interval: "weekly"
     groups:
       gomod:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "npm"
+    directories:
+      - "/scripts/generate-tailwind-registry"
+      - "/scripts/generate-textwidth"
+    labels:
+      - "dependencies"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      npm:
         patterns:
           - "*"
