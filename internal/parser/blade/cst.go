@@ -154,6 +154,10 @@ type RawPhpNode struct {
 	Opens  bool
 	Closes bool
 	Branch bool
+
+	// ToEOF marks an unclosed `<?php` or `<?=` island, which PHP runs to the
+	// end of the source.
+	ToEOF bool
 }
 
 func (n *EchoNode) Span() Span        { return Span{Start: n.Open.Start, End: n.Close.End} }

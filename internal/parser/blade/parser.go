@@ -273,10 +273,13 @@ func (p *bladeParser) parseText() Node {
 
 // parseRawPhp captures a `<?php … ?>` or `<?= … ?>` island whole, so the
 // emitter can lay it out as a structural boundary instead of reflowing it as
-// text. A `<?` with no closing `?>` becomes a verbatim island that stops at
-// the next real marker, so it cannot swallow the markup that follows.
+// text. PHP needs no closing tag: an unclosed `<?php` or `<?=` island runs to
+// the end of the source, markup-looking strings included. A bare `<?` is PHP
+// only with short tags on, so unclosed it stops at the next real marker.
 func (p *bladeParser) parseRawPhp() Node {
 	start := p.Pos
+	toEOF := p.atPHPOpenTag()
+	longTag := toEOF && !p.StartsWith("<?=")
 	p.AdvanceN(2)
 
 	// The island ends where PHP says it does: in `"?> <div class='x'>"` the
@@ -285,21 +288,22 @@ func (p *bladeParser) parseRawPhp() Node {
 	if closeAt < 0 {
 		bodyStart := p.Pos
 
-		// A `?>` hidden in a string or comment can still close the island on
-		// the next pass, once reflowing the text before it ends that string or
-		// comment early. So the island runs through the last `?>` ahead; the
-		// formatter writes no `?>` of its own, so nothing past it can close it.
-		if hidden := bytes.LastIndex(p.Src[p.Pos.Offset:], []byte("?>")); hidden >= 0 {
-			p.AdvanceN(hidden + len("?>"))
-		}
+		if toEOF {
+			for !p.Eof() {
+				p.Advance()
+			}
+		} else {
+			// A `?>` hidden in a string or comment can still close the island on
+			// the next pass, once reflowing the text before it ends that string or
+			// comment early. So the island runs through the last `?>` ahead; the
+			// formatter writes no `?>` of its own, so nothing past it can close it.
+			if hidden := bytes.LastIndex(p.Src[p.Pos.Offset:], []byte("?>")); hidden >= 0 {
+				p.AdvanceN(hidden + len("?>"))
+			}
 
-		// PHP needs no closing tag: after an unclosed `<?php` or `<?=` the rest
-		// of the file is PHP, markup-looking strings included. A bare `<?` is
-		// only PHP with short tags on, so it stops at the next marker instead.
-		toEOF := p.StartsWithFold("php") || p.StartsWith("=")
-
-		for !p.Eof() && (toEOF || !p.isBladeMarker() || p.StartsWith("<?")) {
-			p.Advance()
+			for !p.Eof() && (!p.isBladeMarker() || p.StartsWith("<?")) {
+				p.Advance()
+			}
 		}
 
 		// Trailing whitespace belongs to the next node, as after a closed
@@ -315,12 +319,10 @@ func (p *bladeParser) parseRawPhp() Node {
 		// Unclosed, so no layout of it is known to be safe: reflowing it can
 		// pull a `?>` onto a `#` comment's line and close the island there. It
 		// goes out as written.
-		return &RawPhpNode{Start: start, End: p.Pos, Body: Span{Start: bodyStart, End: p.Pos}}
+		return &RawPhpNode{Start: start, End: p.Pos, Body: Span{Start: bodyStart, End: p.Pos}, ToEOF: toEOF}
 	}
 
 	closeAt += p.Pos.Offset
-
-	longTag := p.StartsWithFold("php")
 
 	if longTag {
 		p.AdvanceN(len("php"))
@@ -1281,14 +1283,14 @@ func (p *bladeParser) parseElement(stack [][]byte) Node {
 
 	// After a PHP island running to the end of the file every byte is PHP, so
 	// an inserted close tag would land in the code.
-	if !html.HasOptionalEndTag(name) || endsInOpenPhp(p.Src, el.Children) {
+	if !html.HasOptionalEndTag(name) || endsInOpenPhp(el.Children) {
 		p.addError(openStart, "unclosed element")
 	}
 
 	return el
 }
 
-func endsInOpenPhp(src []byte, children []html.Node) bool {
+func endsInOpenPhp(children []html.Node) bool {
 	last := len(children) - 1
 	for last >= 0 {
 		t, ok := children[last].(*html.Text)
@@ -1304,15 +1306,8 @@ func endsInOpenPhp(src []byte, children []html.Node) bool {
 	}
 
 	island, ok := children[last].(*RawPhpNode)
-	if !ok {
-		return false
-	}
 
-	text := src[island.Start.Offset:island.End.Offset]
-	opens := len(text) >= len("<?php") && bytes.EqualFold(text[:len("<?php")], []byte("<?php")) ||
-		bytes.HasPrefix(text, []byte("<?="))
-
-	return opens && !bytes.HasSuffix(text, []byte("?>"))
+	return ok && island.ToEOF
 }
 
 func (p *bladeParser) parseElementChildren(stack [][]byte) []html.Node {
@@ -2327,7 +2322,7 @@ func (p *bladeParser) atPHPOpenTag() bool {
 		return true
 	}
 
-	return p.StartsWith("<?php") && (p.Pos.Offset+5 >= len(p.Src) || html.IsSpaceByte(p.Src[p.Pos.Offset+5]))
+	return p.StartsWithFold("<?php") && (p.Pos.Offset+5 >= len(p.Src) || html.IsSpaceByte(p.Src[p.Pos.Offset+5]))
 }
 
 func (p *bladeParser) atQuotedDirectiveArgs() bool {

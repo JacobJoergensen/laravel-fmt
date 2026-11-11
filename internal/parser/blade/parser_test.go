@@ -696,6 +696,42 @@ func TestParseRawPhpIslandStatements(t *testing.T) {
 	}
 }
 
+func TestUnclosedRawPhpIslandEndsByItsOpenTag(t *testing.T) {
+	tests := []struct {
+		name, src, island string
+	}{
+		{"short open tag stops at the next marker", "<?\"?>=\n</td>", "<?\"?>="},
+		{"long open tag runs to the end", "<?php \"?>x\n<b>", "<?php \"?>x\n<b>"},
+		{"php glued to a name is a short open tag", "<?phpx \"?>y\n<br>", "<?phpx \"?>y"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file, errs := Parse([]byte(tt.src), nil)
+			if len(errs) > 0 || len(file.Nodes) == 0 {
+				t.Fatalf("Parse = %d nodes, errors %v", len(file.Nodes), errs)
+			}
+
+			node, ok := file.Nodes[0].(*RawPhpNode)
+			if !ok {
+				t.Fatalf("first node is %T, want *RawPhpNode", file.Nodes[0])
+			}
+
+			if got := tt.src[node.Start.Offset:node.End.Offset]; got != tt.island {
+				t.Fatalf("island = %q, want %q", got, tt.island)
+			}
+		})
+	}
+}
+
+func TestOptionalEndTagCannotCloseAfterAnIslandRunningToTheEnd(t *testing.T) {
+	for _, src := range []string{"<td><?php \"?>", "<li><?= \"?>"} {
+		if _, errs := Parse([]byte(src), nil); len(errs) == 0 {
+			t.Errorf("Parse(%q) reported no error, want the element unclosed", src)
+		}
+	}
+}
+
 func TestBareAtStaysInTheTextAroundIt(t *testing.T) {
 	for _, src := range []string{"<p>a @ b</p>", "<p>a @\n\nb</p>", "<p>a @1 b</p>"} {
 		file, errs := Parse([]byte(src), nil)
@@ -729,6 +765,7 @@ func TestUnquotedAttrValueEndsAtWhitespaceOrTagEnd(t *testing.T) {
 		// the start tag.
 		{"php tag", "<div a=<?=$v?>>t</div>", "a", "<?=$v?>", false},
 		{"php tag printing a tag end", `<a b=<?= "/>" ?>>t</a>`, "b", `<?= "/>" ?>`, false},
+		{"uppercase php tag", `<a b=<?PHP echo "/>" ?>>t</a>`, "b", `<?PHP echo "/>" ?>`, false},
 	}
 
 	for _, tc := range cases {

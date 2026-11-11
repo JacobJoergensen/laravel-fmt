@@ -13,6 +13,7 @@
 * Fixed a comment before the `;` of a multi-line statement inside a closure argument being deleted
 * Fixed `<span> </span>` losing its space in Blade and HTML, which joined the words around it
 * Fixed a blank line between a top-level Blade echo and text collapsing to a space
+* Fixed an unclosed PHP tag with a `?>` in a string breaking the next close tag on a second run
 
 ## Version 0.10.0 (2026-11-10)
 * Improved `laravel-fmt.json` to reject duplicate keys, wrong-case keys like `PrintWidth`, `null` and invalid UTF-8
