@@ -1,30 +1,32 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.11.0 (2026-11-12)
 * Added PHP 8.6 partial function application, like `f(?, 1)`, `f(a: ?)` and `f(1, ...)`
-* Improved PHPDoc formatting to include `@extends`, `@implements`, `@use` and similar type tags
 * Improved `endif`, `endforeach` and the other alternative syntax ends to get a `;` before `?>`, like other statements
-* Fixed an unreadable folder stopping the whole run; it is now reported and the rest formatted
-* Fixed error messages naming the same path twice, like `stat x: stat x: permission denied`
-* Fixed range formatting dropping an HTML element or breaking a Markdown fence, list item or YAML block scalar
-* Fixed PHPDoc text after a type, like `string [optional]`, `Foo <Bar>`, `int |string` or `T is int?string:bool`, being reformatted as part of the type
-* Fixed an empty PHPDoc `array{}` becoming `array{,` when its line breaks
+* Improved PHPDoc formatting to include `@extends`, `@implements`, `@use` and similar type tags
 * Fixed `$item::$$property` and `self::${$name}` being reported as invalid PHP
 * Fixed a PHP 8.5 attribute on a constant, like `#[Deprecated] const A = 1;`, being reported as invalid PHP
-* Fixed `const`, `use` or `namespace` inside a function, block or another namespace being formatted instead of reported as invalid PHP
-* Fixed a comment before the `;` of a multi-line statement inside a closure argument being deleted
-* Fixed `<span> </span>` losing its space in Blade and HTML, which joined the words around it
-* Fixed a blank line between a top-level Blade echo and text collapsing to a space
-* Fixed an unclosed PHP tag with a `?>` in a string breaking the next close tag on a second run
-* Fixed Blade files with no HTML, like plain-text emails and Markdown views, being reindented, which changed their output
 * Fixed `clone(...)` being reported as invalid PHP
+* Fixed `const`, `use` or `namespace` inside a function, block or another namespace being formatted instead of reported as invalid PHP
+* Fixed an `endwhile`, `endif` or commented loop ended by `?>` becoming invalid PHP when the surrounding loop gains braces
+* Fixed an unclosed PHP tag with a `?>` in a string breaking the next close tag on a second run
+* Fixed some concatenations, comparisons, pipes and operators before a multi-line call changing their layout again on a second run
 * Fixed a comment written `/**text */` with no space becoming a doc comment that reflection and PHPDoc tools read
+* Fixed a comment before the `;` of a multi-line statement inside a closure argument being deleted
 * Fixed comments next to a parameter's comma moving to its other side or changing order, which in PHP 8.6 can document a different parameter
 * Fixed a comment before a parameter's comma leaving the whole function unformatted
 * Fixed a comment on its own line above a parameter being pulled onto the parameter's line
-* Fixed some concatenations, comparisons, pipes and operators before a multi-line call changing their layout again on a second run
-* Fixed an `endwhile`, `endif` or commented loop ended by `?>` becoming invalid PHP when the surrounding loop gains braces
 * Fixed a second comment before the `)` of a broken call or parameter list being moved to the start of the line
+* Fixed PHPDoc text after a type, like `string [optional]`, `Foo <Bar>`, `int |string` or `T is int?string:bool`, being reformatted as part of the type
+* Fixed an empty PHPDoc `array{}` becoming `array{,` when its line breaks
+* Fixed `<span> </span>` losing its space in Blade and HTML, which joined the words around it
+* Fixed a blank line between a top-level Blade echo and text collapsing to a space
+* Fixed Blade files with no HTML, like plain-text emails and Markdown views, being reindented, which changed their output
+* Fixed range formatting dropping an HTML element or breaking a Markdown fence, list item or YAML block scalar
+* Fixed an unreadable folder stopping the whole run; it is now reported and the rest formatted
+* Fixed error messages naming the same path twice, like `stat x: stat x: permission denied`
 
 ## Version 0.10.0 (2026-11-10)
 * Improved `laravel-fmt.json` to reject duplicate keys, wrong-case keys like `PrintWidth`, `null` and invalid UTF-8
