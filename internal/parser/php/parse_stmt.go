@@ -240,6 +240,8 @@ func (p *parser) parseForEachStmt() Stmt {
 		value = p.parseExpression(precNone)
 	}
 
+	p.markDestructuring(value)
+
 	rp := p.expect(KindRParen)
 
 	if p.peekKind() == KindColon {

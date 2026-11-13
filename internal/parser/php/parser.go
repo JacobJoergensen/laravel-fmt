@@ -156,6 +156,49 @@ type parser struct {
 	// statement there (`<?php 0` fails php -l), where in a bare fragment it
 	// stands for the `?>` its host compiles around it.
 	fileEOF bool
+	// holed lists arrays with a skipped element; whether one is a destructuring
+	// target is known only once its `=` or `as` is reached.
+	holed        []*ArrayExpr
+	destructured map[*ArrayExpr]bool
+}
+
+// markDestructuring marks target and the arrays nested in it as destructuring
+// patterns, where a skipped element is allowed and a spread is not ("Spread
+// operator is not supported in assignments").
+func (p *parser) markDestructuring(target Expr) {
+	arr, ok := target.(*ArrayExpr)
+	if !ok {
+		return
+	}
+
+	if p.destructured == nil {
+		p.destructured = make(map[*ArrayExpr]bool)
+	}
+
+	p.destructured[arr] = true
+
+	for _, el := range arr.Elements {
+		if el.Spread {
+			p.addError(el.Ellipsis.Span.Start, "spread operator is not supported in assignments")
+
+			continue
+		}
+
+		if el.Value != nil {
+			p.markDestructuring(el.Value)
+		}
+	}
+}
+
+// rejectStrayHoles reports every array with a skipped element that is not a
+// destructuring target: PHP fails it with "Cannot use empty array elements in
+// arrays".
+func (p *parser) rejectStrayHoles() {
+	for _, arr := range p.holed {
+		if !p.destructured[arr] {
+			p.addError(arr.Open.Span.Start, "cannot use empty array elements in arrays")
+		}
+	}
 }
 
 // maxNestingDepth caps expression recursion so a pathological file (a long run
@@ -733,6 +776,10 @@ func parseAssign(p *parser, left Expr) Expr {
 
 	if nonLvalue(left) {
 		p.addError(left.Span().Start, "cannot assign to this expression")
+	}
+
+	if op.Kind == KindEq {
+		p.markDestructuring(left)
 	}
 
 	right := p.parseExpression(precAssign - 1)

@@ -30,6 +30,18 @@ func (b *builder) postfix(e parser.Expr, stmtLevel bool) *document.Doc {
 	b.arrowBodyNext = false
 	preserve := b.preserveChainNext
 	b.preserveChainNext = false
+	structure := b.structureLinksNext
+	b.structureLinksNext = false
+
+	// Only the chain's own link group takes the structural indent: what opens
+	// inside its links (a closure, an array) indents from its line as ever.
+	linkGroup := func(broken *document.Doc) *document.Doc {
+		if structure {
+			return document.FromStructure(document.Group(broken))
+		}
+
+		return document.Group(broken)
+	}
 
 	// A comment trailing a chain step (`->where(...) // note`) attaches to the
 	// next step's arrow and has no slot in a reflowed chain; keep the author's
@@ -118,7 +130,7 @@ func (b *builder) postfix(e parser.Expr, stmtLevel bool) *document.Doc {
 	// A tail ending in a block hug rides the closer below, breaking inside its
 	// block: laddered, its arguments break and read back as authored.
 	if headEnd >= 0 && !stmtLevel && !chainEndsInBlockHug(e) {
-		if doc, ok := b.closerTailGroup(headDoc, links, headEnd); ok {
+		if doc, ok := b.closerTailGroup(headDoc, links, headEnd, structure); ok {
 			return doc
 		}
 	}
@@ -187,7 +199,7 @@ func (b *builder) postfix(e parser.Expr, stmtLevel bool) *document.Doc {
 		if opener, ok := b.arrayHugOpener(e, headDoc, links); ok {
 			glued := chainConcat(headDoc, links)
 
-			return document.ConditionalGroup(document.Opener(opener, glued), document.Group(broken))
+			return document.ConditionalGroup(document.Opener(opener, glued), linkGroup(broken))
 		}
 	}
 
@@ -211,7 +223,7 @@ func (b *builder) postfix(e parser.Expr, stmtLevel bool) *document.Doc {
 			return b.onlyLastCallBreaks(headDoc, links)
 		}
 
-		return document.Group(broken)
+		return linkGroup(broken)
 	}
 
 	if stmtLevel && methodCalls >= 2 && !slices.ContainsFunc(links, brokenBefore) && b.middleCallBreaks(headDoc, links) {
@@ -242,7 +254,7 @@ func (b *builder) postfix(e parser.Expr, stmtLevel bool) *document.Doc {
 		return chosen
 	}
 
-	return document.Group(broken)
+	return linkGroup(broken)
 }
 
 func (b *builder) headCallArgsBreak(headDoc *document.Doc, links []chainLink, i int, stmtLevel bool) bool {
@@ -322,7 +334,7 @@ func (b *builder) tailRidesCloser(headDoc *document.Doc, links []chainLink, head
 // ladder below it. A tail that rides fits flat, so nothing in it breaks. As
 // at statement level, only a break before the tail's first link is the
 // author's choice to ladder.
-func (b *builder) closerTailGroup(headDoc *document.Doc, links []chainLink, headEnd int) (*document.Doc, bool) {
+func (b *builder) closerTailGroup(headDoc *document.Doc, links []chainLink, headEnd int, structure bool) (*document.Doc, bool) {
 	last := runEnd(links, headEnd)
 	if last >= len(links)-1 || !links[last].blockHug || slices.ContainsFunc(links[:last+2], brokenBefore) {
 		return nil, false
@@ -356,6 +368,9 @@ func (b *builder) closerTailGroup(headDoc *document.Doc, links []chainLink, head
 	}
 
 	group := document.Group(document.Indent(document.Concat(tail...)))
+	if structure {
+		group = document.FromStructure(group)
+	}
 
 	return document.Concat(append(parts, group)...), true
 }
@@ -528,8 +543,9 @@ func chainEndsInBlockHug(e parser.Expr) bool {
 	return argsEndInBlockHug(call.Args)
 }
 
-// argsEndInBlockHug reports whether args end in a braced or bracketed body, so
-// the call's opener carries it and keeps what precedes it on the same line.
+// arrowReturnsPlainCall reports whether args end in an arrow returning a call
+// whose broken closer line is `))`. A call on a fluent chain is not one: the
+// chain ladders, and its last link opens that line.
 func arrowReturnsPlainCall(args []parser.Expr) bool {
 	if len(args) == 0 {
 		return false
@@ -542,9 +558,11 @@ func arrowReturnsPlainCall(args []parser.Expr) bool {
 
 	call, ok := arrow.Body.(*parser.CallExpr)
 
-	return ok && len(call.Args) > 0 && !argsEndInBlockHug(call.Args) && !hugsBracketedBlock(call)
+	return ok && len(call.Args) > 0 && !argsEndInBlockHug(call.Args) && !hugsBracketedBlock(call) && !isFluentChain(call.Callee)
 }
 
+// argsEndInBlockHug reports whether args end in a braced or bracketed body, so
+// the call's opener carries it and keeps what precedes it on the same line.
 func argsEndInBlockHug(args []parser.Expr) bool {
 	if len(args) == 0 {
 		return false

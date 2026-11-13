@@ -20,6 +20,57 @@ func buildPHP(t *testing.T, src string) string {
 	return string(BuildFile(file, config.Default()))
 }
 
+func TestMovedVerbatimKeepsMultiLineLiteralsAsWritten(t *testing.T) {
+	src := "<?php\n\nfunction g()\n{\n    $m = json_encode($contents ?? // fallback\n" +
+		"        'first\n  second' . <<<TXT\n    body\n      line\n    TXT, " +
+		"JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);\n}\n"
+	want := "<?php\n\nfunction g()\n{\n    $m = json_encode(\n        $contents ?? // fallback\n" +
+		"            'first\n  second' . <<<TXT\n    body\n      line\n    TXT,\n" +
+		"        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,\n    );\n}\n"
+
+	got := buildPHP(t, src)
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if twice := buildPHP(t, got); twice != got {
+		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
+func TestVerbatimLineLeftOfItsFirstLineMovesWithIt(t *testing.T) {
+	src := "<?php\n\nfunction g()\n{\n    $m = json_encode($contents ?? // fallback\n  [1], " +
+		"JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR | JSON_PARTIAL_OUTPUT_ON_ERROR);\n}\n"
+	want := "<?php\n\nfunction g()\n{\n    $m = json_encode(\n        $contents ?? // fallback\n        [1],\n" +
+		"        JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR | JSON_PARTIAL_OUTPUT_ON_ERROR,\n    );\n}\n"
+
+	got := buildPHP(t, src)
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if twice := buildPHP(t, got); twice != got {
+		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
+func TestOneLineVerbatimLeavesItsListFlat(t *testing.T) {
+	src := "<?php\n\nfoo($a /* c */ ?? $b);\n"
+
+	if got := buildPHP(t, src); got != src {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, src)
+	}
+}
+
+func TestVerbatimInAMixedFileKeepsItsSourceColumns(t *testing.T) {
+	src := "<div>\n    <?php $x = $a // c\n        ? 1 : 2; ?>\n</div>\n"
+
+	got := string(mustFormat(t, []byte(src), config.Default()))
+	if got != src {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, src)
+	}
+}
+
 // PHP's lexer eats the one newline after `?>`, so `?>\n\n` leaves a trailing
 // whitespace-only inline-HTML run and `?>\n` leaves none.
 func TestBuildFileIsFixedPointWithBlankHTMLAfterCloseTag(t *testing.T) {

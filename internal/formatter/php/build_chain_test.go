@@ -39,6 +39,26 @@ func TestTailRidesTheCloserOfAHuggedArrowCall(t *testing.T) {
 	}
 }
 
+func TestTailLaddersAfterAHuggedArrowReturningAChainedCall(t *testing.T) {
+	src := []byte("<?php\n\nclass A\n{\n    function a()\n    {\n" +
+		"        $b->transformWith(fn () => $query->make(['first-column' % one() % 'second-column-key' % CONSTANT])" +
+		"->makeHandler()($x % $foo % sixsix() % 'a-string-of-twenty-five-c' % formatter('abcd') % 'abcd'))->x(0 % '');\n" +
+		"    }\n}\n")
+	want := "<?php\n\nclass A\n{\n    function a()\n    {\n        $b\n" +
+		"            ->transformWith(fn () => $query->make(['first-column' % one() % 'second-column-key' % CONSTANT])\n" +
+		"                ->makeHandler()($x % $foo % sixsix() % 'a-string-of-twenty-five-c' % formatter('abcd') % 'abcd'))\n" +
+		"            ->x(0 % '');\n    }\n}\n"
+
+	got := mustFormat(t, src, config.Default())
+	if string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
 func TestArrayLinkMovesDownWhenItFitsFlat(t *testing.T) {
 	cases := []struct {
 		name string

@@ -108,6 +108,20 @@ func TestFormatInlineElementTightChildrenStayFlat(t *testing.T) {
 	}
 }
 
+func TestFormatWrappedOpenTagBeforeAMultiLineEchoIsStable(t *testing.T) {
+	src := []byte("<dd><x-tag\n>{{ ('a\nb') }}</x-tag>0</dd>\n")
+	want := "<dd>\n    <x-tag>{{ ('a\nb') }}</x-tag>0\n</dd>\n"
+
+	got := mustFormat(t, src, config.Default())
+	if string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if again := mustFormat(t, got, config.Default()); string(again) != want {
+		t.Fatalf("not idempotent:\n%s", again)
+	}
+}
+
 func TestFormatGluedInlineBodySurvivesWrappedOpenTag(t *testing.T) {
 	cases := []struct {
 		name string
@@ -2893,23 +2907,25 @@ func TestCarriageReturnDoesNotChangeLayout(t *testing.T) {
 		lf        string
 		wantLines int
 	}{
+		// PHP allows a skipped element only in a destructuring target.
+
 		// Directive argument: the host writes the built bytes as they are, and the
 		// directive's `)` counts toward the width.
-		{"arg fits flat", "@A(0%[" + zeros(91) + "\n               ,,])\n", 2},
-		{"arg on the width boundary", "@A(0%[" + zeros(92) + "\n               ,,])\n", 2},
-		{"arg breaks at the operator", "@A(0%[" + zeros(93) + "\n               ,,])\n", 3},
+		{"arg fits flat", "@A(0%([$v" + zeros(80) + "\n               ,,$y]=$q))\n", 2},
+		{"arg on the width boundary", "@A(0%([$v" + zeros(81) + "\n               ,,$y]=$q))\n", 2},
+		{"arg breaks at the operator", "@A(0%([$v" + zeros(82) + "\n               ,,$y]=$q))\n", 3},
 
 		// Control-flow condition, single line: the host re-homes the built bytes
 		// under the opener, and the width decision that a CR could tip lives here.
-		{"condition fits on the opener line", "@if(0%[" + zeros(106) + ",,])\nx\n@endif\n", 3},
-		{"condition wraps under the opener", "@if(0%[" + zeros(108) + ",,])\nx\n@endif\n", 5},
+		{"condition fits on the opener line", "@if(0%([$v" + zeros(95) + ",,$y]=$q))\nx\n@endif\n", 3},
+		{"condition wraps under the opener", "@if(0%([$v" + zeros(96) + ",,$y]=$q))\nx\n@endif\n", 5},
 
 		// Control-flow condition spanning lines: a condition carrying its own
 		// newlines can never be laid out flat, so it wraps whatever its width. Both
 		// widths land on 7 because there is no width decision left to tip, which is
 		// the point: an interior CR cannot move this path at all anymore.
-		{"multi-line condition wraps regardless", "@if(0%[" + zeros(100) + "\n     ,,])\nx\n@endif\n", 7},
-		{"multi-line condition, wider", "@if(0%[" + zeros(102) + "\n     ,,])\nx\n@endif\n", 7},
+		{"multi-line condition wraps regardless", "@if(0%([$v" + zeros(89) + "\n     ,,$y]=$q))\nx\n@endif\n", 7},
+		{"multi-line condition, wider", "@if(0%([$v" + zeros(91) + "\n     ,,$y]=$q))\nx\n@endif\n", 7},
 	}
 
 	for _, tc := range cases {

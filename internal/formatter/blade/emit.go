@@ -2970,6 +2970,15 @@ func (e *emitter) emitGluedBodyNormalized(children []htmlparser.Node, start, end
 		}
 	}
 
+	if tagRebuilt && oneLine {
+		// TryFlat measures width only; an echo printing a multi-line string
+		// still breaks the line, and the next pass reads that as a break.
+		single := false
+		fits := e.w.TryFlat(func() { single = e.w.TryOneLine(func() { e.w.WithTrailing(trailing, emit) }) })
+
+		return fits && single
+	}
+
 	if tagRebuilt {
 		return e.w.TryFlat(func() { e.w.WithTrailing(trailing, emit) })
 	}

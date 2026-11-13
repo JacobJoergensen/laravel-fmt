@@ -51,6 +51,7 @@ type Pint struct {
 	SingleImportPerStatement      *bool
 	SingleTraitInsertPerStatement *bool
 	NoClosingTag                  *bool
+	MethodChainingIndentation     *bool
 	NoMultilineDoubleArrow        *bool
 	SingleLineEmptyBody           *bool
 
@@ -125,9 +126,10 @@ type LaravelBladeOptions struct {
 var pintBladeStatements = []string{"if", "foreach", "forelse", "for", "while", "switch", config.BladeDirectivePHP}
 
 // ClassDefinition is Pint's class_definition rule; only its anonymous class
-// option is used.
+// options are used.
 type ClassDefinition struct {
-	SpaceBeforeParenthesis bool `json:"space_before_parenthesis"`
+	SpaceBeforeParenthesis     bool `json:"space_before_parenthesis"`
+	InlineConstructorArguments bool `json:"inline_constructor_arguments"`
 }
 
 // ArraySyntax is Pint's array_syntax rule.
@@ -465,7 +467,7 @@ func rulesToPint(rules map[string]jsontext.Value) Pint {
 		AllowSingleLineAnonFunctions:    true,
 	})
 	pint.SingleLineEmptyBody = ruleEnabled(rules, ruleSingleLineEmptyBody)
-	pint.ClassDefinition = ruleOptions(rules, ruleClassDefinition, ClassDefinition{})
+	pint.ClassDefinition = ruleOptions(rules, ruleClassDefinition, ClassDefinition{InlineConstructorArguments: true})
 
 	pint.ConcatSpace = ruleOptions(rules, ruleConcatSpace, ConcatSpace{Spacing: pintSpacingNone})
 	pint.NotOperatorWithSuccessorSpace = notOperatorSpace(rules)
@@ -499,6 +501,7 @@ func rulesToPint(rules map[string]jsontext.Value) Pint {
 	}
 	pint.SingleTraitInsertPerStatement = ruleEnabled(rules, ruleSingleTraitInsert)
 	pint.NoClosingTag = ruleEnabled(rules, ruleNoClosingTag)
+	pint.MethodChainingIndentation = ruleEnabled(rules, ruleMethodChainingIndentation)
 	pint.NoMultilineDoubleArrow = ruleEnabled(rules, ruleNoMultilineDoubleArrow)
 
 	if body, ok := rules[ruleHeredocIndentation]; ok {
@@ -631,12 +634,14 @@ func applyPint(cfg *config.File, p *Pint) {
 
 	setIfPresent(&cfg.PHP.SplitTraitUses, p.SingleTraitInsertPerStatement)
 	setIfPresent(&cfg.PHP.RemoveTrailingCloseTag, p.NoClosingTag)
+	setIfPresent(&cfg.PHP.ChainIndentFromLine, p.MethodChainingIndentation)
 	setIfPresent(&cfg.PHP.ArrowValueOnKeyLine, p.NoMultilineDoubleArrow)
 	applyArraySyntax(cfg, p.ArraySyntax)
 	applyEmptyBodies(cfg, p)
 
 	if p.ClassDefinition != nil {
 		cfg.PHP.AnonClassParenSpace = p.ClassDefinition.SpaceBeforeParenthesis
+		cfg.PHP.InlineAnonClassArgs = p.ClassDefinition.InlineConstructorArguments
 	}
 }
 
@@ -829,22 +834,23 @@ var (
 )
 
 const (
-	ruleArraySyntax              = "array_syntax"
-	ruleBinaryOperatorSpaces     = "binary_operator_spaces"
-	ruleBlankLineBeforeStatement = "blank_line_before_statement"
-	ruleBracesPosition           = "braces_position"
-	ruleClassDefinition          = "class_definition"
-	ruleConcatSpace              = "concat_space"
-	ruleFunctionDeclaration      = "function_declaration"
-	ruleHeredocIndentation       = "heredoc_indentation"
-	ruleNoClosingTag             = "no_closing_tag"
-	ruleNoMultilineDoubleArrow   = "no_multiline_whitespace_around_double_arrow"
-	ruleNotOperatorSpace         = "not_operator_with_successor_space"
-	ruleOrderedImports           = "ordered_imports"
-	ruleSingleImportPerStatement = "single_import_per_statement"
-	ruleSingleLineEmptyBody      = "single_line_empty_body"
-	ruleSingleTraitInsert        = "single_trait_insert_per_statement"
-	ruleUnaryOperatorSpaces      = "unary_operator_spaces"
+	ruleArraySyntax               = "array_syntax"
+	ruleBinaryOperatorSpaces      = "binary_operator_spaces"
+	ruleBlankLineBeforeStatement  = "blank_line_before_statement"
+	ruleBracesPosition            = "braces_position"
+	ruleClassDefinition           = "class_definition"
+	ruleConcatSpace               = "concat_space"
+	ruleFunctionDeclaration       = "function_declaration"
+	ruleHeredocIndentation        = "heredoc_indentation"
+	ruleMethodChainingIndentation = "method_chaining_indentation"
+	ruleNoClosingTag              = "no_closing_tag"
+	ruleNoMultilineDoubleArrow    = "no_multiline_whitespace_around_double_arrow"
+	ruleNotOperatorSpace          = "not_operator_with_successor_space"
+	ruleOrderedImports            = "ordered_imports"
+	ruleSingleImportPerStatement  = "single_import_per_statement"
+	ruleSingleLineEmptyBody       = "single_line_empty_body"
+	ruleSingleTraitInsert         = "single_trait_insert_per_statement"
+	ruleUnaryOperatorSpaces       = "unary_operator_spaces"
 
 	setPSR2       = "@PSR2"
 	setPSR12      = "@PSR12"
@@ -874,6 +880,7 @@ var pintPresets = map[string][]pintRule{
 		{ruleClassDefinition, ruleOn},
 		{ruleConcatSpace, jsontext.Value(`{"spacing":"none"}`)},
 		{ruleFunctionDeclaration, ruleOn},
+		{ruleMethodChainingIndentation, ruleOn},
 		{ruleNoClosingTag, ruleOn},
 		{ruleNoMultilineDoubleArrow, ruleOn},
 		{ruleNotOperatorSpace, ruleOn},
@@ -901,7 +908,7 @@ var pintRuleSets = map[string][]pintRule{
 		{ruleBinaryOperatorSpaces, jsontext.Value(`{"default":"at_least_single_space"}`)},
 		{ruleBracesPosition, jsontext.Value(`{"allow_single_line_anonymous_functions":false,` +
 			`"allow_single_line_empty_anonymous_classes":true}`)},
-		{ruleClassDefinition, jsontext.Value(`{"space_before_parenthesis":true}`)},
+		{ruleClassDefinition, jsontext.Value(`{"inline_constructor_arguments":false,"space_before_parenthesis":true}`)},
 		{ruleOrderedImports, jsontext.Value(`{"imports_order":["class","function","const"],"sort_algorithm":"none"}`)},
 		{ruleSingleImportPerStatement, jsontext.Value(`{"group_to_single_imports":false}`)},
 		{ruleSingleTraitInsert, ruleOn},
@@ -935,6 +942,7 @@ var pintRuleSets = map[string][]pintRule{
 	setPhpCsFixer: {
 		{setPERCS, ruleOn},
 		{setSymfony, ruleOn},
+		{ruleMethodChainingIndentation, ruleOn},
 		{ruleBlankLineBeforeStatement, jsontext.Value(`{"statements":["break","case","continue","declare",` +
 			`"default","exit","goto","include","include_once","phpdoc","require","require_once","return",` +
 			`"switch","throw","try","yield","yield_from"]}`)},

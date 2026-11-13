@@ -6,6 +6,7 @@ package php
 
 import (
 	"bytes"
+	"slices"
 	"sort"
 	"strings"
 
@@ -54,6 +55,8 @@ type builder struct {
 	// or keepComments would trust a comment the real build never printed.
 	placed     map[int]bool
 	placements []int
+	// commentTags maps each doc that prints a comment to it, for PrintCounts.
+	commentTags map[*document.Doc][]document.Tag
 	// useTrail maps a sorted import to the same-line comment written after it,
 	// which trivia stores on the token that follows it in the source; movedTrail
 	// holds those comments' offsets so the reader of that token skips them.
@@ -66,23 +69,25 @@ type builder struct {
 	useRunHeadMoved map[int]bool
 	// useRunTailMoved marks the token after an import that sorting moved off
 	// the end of its run; the comments before that token go on their own line.
-	useRunTailMoved   map[int]bool
-	groupID           int32         // last allocated document group id; 0 is "unnamed", so ids start at 1
-	alignScope        int32         // last allocated `=>` alignment scope; one per aligned array or match
-	commentGroups     map[int]int32 // trailing-comment group, by its first comment offset, to its CommentScope id
-	commentGroupIDs   int32         // last allocated commentGroups id
-	chainStmtLevel    bool          // the current expression is a statement's own value (expression statement, return, assignment RHS), the only place a preserved chain's forced break feeds no enclosing width decision
-	chainStmtLead     int           // columns that statement puts before the value on its first line (its target, `return `), which a chain must fit alongside
-	chainStmtTail     int           // columns that statement puts after the value on its last line (the terminator)
-	noHugNext         bool          // the next argList skips its last-argument hug; read and cleared on entry
-	linkArgsNext      bool          // the next argList belongs to a chain link, a level in from its head; read and cleared on entry
-	hugLeadNext       int           // the column the next argList's `(` follows, 0 when unknown; read and cleared on entry
-	stmtChain         bool          // flattenChain walks a statement's own chain, whose lead is known
-	arrowBodyNext     bool          // the next postfix is an arrow function's body, its links laddering a level in; read and cleared on entry
-	preserveChainNext bool          // the next postfix is an operand of a statement's binary, which keeps an author ladder as the statement's own chain does; read and cleared on entry
-	preserveAt        int           // source offset of a nested chain that keeps its author ladder (a Pest `->and(` argument), 0 for none
-	lineKnownNext     bool          // the next value starts a line whose column the depth gives (an array entry's value); read and cleared in exprInner
-	inKey             bool          // inside a subscript key, which lays out flat unless the author broke it
+	useRunTailMoved    map[int]bool
+	groupID            int32         // last allocated document group id; 0 is "unnamed", so ids start at 1
+	alignScope         int32         // last allocated `=>` alignment scope; one per aligned array or match
+	commentGroups      map[int]int32 // trailing-comment group, by its first comment offset, to its CommentScope id
+	commentGroupIDs    int32         // last allocated commentGroups id
+	chainStmtLevel     bool          // the current expression is a statement's own value (expression statement, return, assignment RHS), the only place a preserved chain's forced break feeds no enclosing width decision
+	chainStmtLead      int           // columns that statement puts before the value on its first line (its target, `return `), which a chain must fit alongside
+	chainStmtTail      int           // columns that statement puts after the value on its last line (the terminator)
+	noHugNext          bool          // the next argList skips its last-argument hug; read and cleared on entry
+	linkArgsNext       bool          // the next argList belongs to a chain link, a level in from its head; read and cleared on entry
+	hugLeadNext        int           // the column the next argList's `(` follows, 0 when unknown; read and cleared on entry
+	stmtChain          bool          // flattenChain walks a statement's own chain, whose lead is known
+	arrowBodyNext      bool          // the next postfix is an arrow function's body, its links laddering a level in; read and cleared on entry
+	preserveChainNext  bool          // the next postfix is an operand of a statement's binary, which keeps an author ladder as the statement's own chain does; read and cleared on entry
+	structureLinksNext bool          // the next postfix is glued to a head's closing line and indents its links from its own depth (Pint's method_chaining_indentation); read and cleared on entry
+	closureGlueDepth   int           // runs ending in a closure being built around the current expression; see maxGluedClosureNesting
+	preserveAt         int           // source offset of a nested chain that keeps its author ladder (a Pest `->and(` argument), 0 for none
+	lineKnownNext      bool          // the next value starts a line whose column the depth gives (an array entry's value); read and cleared in exprInner
+	inKey              bool          // inside a subscript key, which lays out flat unless the author broke it
 }
 
 func (b *builder) nextGroupID() int32 {
@@ -410,7 +415,137 @@ func (b *builder) verbatim(span parser.Span) *document.Doc {
 
 	b.placeRange(start, end)
 
-	return b.rehome(string(b.src[start:end]), start)
+	return b.tagCommentRange(b.rehome(string(b.src[start:end]), start), start, end)
+}
+
+// verbatimMoving is verbatim whose lines follow its first line wherever that
+// lands. A line starting inside a multi-line string keeps its bytes and the
+// break before it.
+func (b *builder) verbatimMoving(span parser.Span) *document.Doc {
+	start, end := span.Start.Offset, span.End.Offset
+	if start < 0 || end > len(b.src) || start >= end {
+		return document.Text("")
+	}
+
+	// A fragment's host writes its continuation lines where they are, so there
+	// only source columns read back the same. So does a mixed file: an island's
+	// line opens with HTML whose indent the printer does not track.
+	if b.mixed || b.embed && !b.rehomeSlices {
+		return b.verbatim(span)
+	}
+
+	first, rest := b.sourceLines(start, end)
+
+	// One line has no lines to move, and a Verbatim would read as a forced
+	// break to every group around it.
+	if len(rest) == 0 {
+		return b.verbatim(span)
+	}
+	lines, kept := relativeLines(rest, sourceIndent(b.src, start))
+
+	b.placeRange(start, end)
+
+	return b.tagCommentRange(document.VerbatimKeeping(first, lines, kept), start, end)
+}
+
+// sourceLine is a line of a verbatim piece after its first. literalBreak is
+// the line break before it when that break lies inside a literal, and empty
+// when the break is layout.
+type sourceLine struct {
+	text, literalBreak string
+}
+
+func (b *builder) sourceLines(start, end int) (string, []sourceLine) {
+	literals := b.literalsIn(start, end)
+
+	var (
+		first string
+		rest  []sourceLine
+	)
+
+	lineStart, literalBreak := start, ""
+
+	for i := start; i <= end; i++ {
+		if i < end && b.src[i] != '\n' && b.src[i] != '\r' {
+			continue
+		}
+
+		text := string(b.src[lineStart:i])
+		if lineStart == start {
+			first = text
+		} else {
+			rest = append(rest, sourceLine{text: text, literalBreak: literalBreak})
+		}
+
+		if i == end {
+			break
+		}
+
+		breakEnd := i + 1
+		if b.src[i] == '\r' && breakEnd < end && b.src[breakEnd] == '\n' {
+			breakEnd++
+		}
+
+		literalBreak = ""
+		if insideLiteral(literals, i) {
+			literalBreak = string(b.src[i:breakEnd])
+		}
+
+		lineStart, i = breakEnd, breakEnd-1
+	}
+
+	return first, rest
+}
+
+// relativeLines strips the indent the lines after a layout break share, up to
+// base, so each reads back with the same strip. A line after a literal break
+// keeps its bytes.
+func relativeLines(rest []sourceLine, base int) (lines []string, kept []bool) {
+	strip := base
+
+	for _, ln := range rest {
+		if ln.literalBreak == "" && leadingIndentWidth(ln.text) < len(ln.text) {
+			strip = min(strip, leadingIndentWidth(ln.text))
+		}
+	}
+
+	lines = make([]string, len(rest))
+	kept = make([]bool, len(rest))
+
+	for i, ln := range rest {
+		switch {
+		case ln.literalBreak != "":
+			lines[i], kept[i] = ln.literalBreak+ln.text, true
+		case leadingIndentWidth(ln.text) < len(ln.text):
+			lines[i] = ln.text[strip:]
+		}
+	}
+
+	return lines, kept
+}
+
+// literalsIn lists the spans of the tokens between lo and hi whose line breaks
+// are part of their value: strings, heredocs, shell commands and template
+// output.
+func (b *builder) literalsIn(lo, hi int) []parser.Span {
+	var out []parser.Span
+
+	i := sort.Search(len(b.tokens), func(i int) bool { return b.tokens[i].Span.Start.Offset >= lo })
+
+	for ; i < len(b.tokens) && b.tokens[i].Span.Start.Offset < hi; i++ {
+		switch b.tokens[i].Kind {
+		case parser.KindString, parser.KindShellExec, parser.KindInlineHTML:
+			out = append(out, b.tokens[i].Span)
+		}
+	}
+
+	return out
+}
+
+func insideLiteral(literals []parser.Span, offset int) bool {
+	return slices.ContainsFunc(literals, func(s parser.Span) bool {
+		return s.Start.Offset < offset && offset < s.End.Offset
+	})
 }
 
 // inlineHTML emits literal template output, normalizing only its line endings to

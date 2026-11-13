@@ -25,6 +25,46 @@ func call(name string, args ...*Doc) *Doc {
 	))
 }
 
+func TestFromStructureIndentsAGroupFromItsDepth(t *testing.T) {
+	chain := func() *Doc {
+		return GroupBreak(Concat(Text("$x"), Indent(Concat(SoftLine(), Text("->a()")))))
+	}
+	line := Indent(Concat(HardLine(), Text("->first() ?? ")))
+
+	if got, want := print80(Concat(line, chain())), "\n    ->first() ?? $x\n        ->a()"; got != want {
+		t.Fatalf("from the line: got %q, want %q", got, want)
+	}
+
+	if got, want := print80(Concat(line, FromStructure(chain()))), "\n    ->first() ?? $x\n    ->a()"; got != want {
+		t.Fatalf("from the structure: got %q, want %q", got, want)
+	}
+
+	block := GroupBreak(Concat(Text("$x(["), Indent(Concat(HardLine(), Text("1,"))), HardLine(), Text("])")))
+	nested := GroupBreak(Concat(block, Indent(Concat(SoftLine(), Text("->a()")))))
+
+	if got, want := print80(Concat(line, FromStructure(nested))), "\n    ->first() ?? $x([\n        1,\n    ])\n    ->a()"; got != want {
+		t.Fatalf("a block inside the structure: got %q, want %q", got, want)
+	}
+}
+
+func TestVerbatimStartingOnAVerbatimLineIndentsFromThatLine(t *testing.T) {
+	outer := Verbatim("a #", []string{"    b ="})
+	inner := Verbatim(" c #", []string{"    % d"})
+
+	got := print80(Indent(Concat(HardLine(), outer, inner)))
+	if want := "\n    a #\n        b = c #\n            % d"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestKeptVerbatimLinePrintsAsWritten(t *testing.T) {
+	doc := Indent(Concat(HardLine(), VerbatimKeeping("$a = 'one", []string{"\r\n  two'", "+ 1;"}, []bool{true, false})))
+
+	if got, want := print80(doc), "\n    $a = 'one\r\n  two'\n    + 1;"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestGroupStaysFlatWhenItFits(t *testing.T) {
 	d := call("foo", Text("a"), Text("b"), Text("c"))
 

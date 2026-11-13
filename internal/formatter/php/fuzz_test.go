@@ -31,6 +31,8 @@ func FuzzFormatPint(f *testing.F) {
 	cfg.PHP.AlignFatArrow = true
 	cfg.PHP.PintAlignment = true
 	cfg.PHP.ArrowValueOnKeyLine = true
+	cfg.PHP.InlineAnonClassArgs = true
+	cfg.PHP.ChainIndentFromLine = true
 
 	f.Fuzz(func(t *testing.T, src []byte) {
 		formattertest.CheckIdempotent(t, func(b []byte) ([]byte, error) {

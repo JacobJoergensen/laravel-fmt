@@ -5,7 +5,44 @@ import (
 	"testing"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
+	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/document"
+	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/php"
 )
+
+func TestKeepCommentsTrustsALayoutOnlyIfEveryVariantPrintsTheComment(t *testing.T) {
+	file, errs := parser.Parse([]byte("<?php\n\nf(/* note */ $a);\n"))
+	if len(errs) > 0 {
+		t.Fatalf("parse: %v", errs)
+	}
+
+	cases := []struct {
+		name  string
+		doc   func(note *document.Doc) *document.Doc
+		trust bool
+	}{
+		{"in every variant", func(note *document.Doc) *document.Doc {
+			return document.ConditionalGroup(document.Concat(note, document.Text("a")), document.Group(note))
+		}, true},
+		{"in one variant only", func(note *document.Doc) *document.Doc {
+			return document.ConditionalGroup(document.Concat(note, document.Text("a")), document.Text("b"))
+		}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := &builder{src: file.Src, cfg: config.Default(), tokens: file.Tokens, comments: commentOffsets(file.Tokens)}
+			stmt := file.Stmts[len(file.Stmts)-1]
+
+			b.place(b.comments[0])
+			note := b.tagComment(document.Text("/* note */ "), b.comments[0])
+			doc := tc.doc(note)
+
+			if trusted := b.keepComments(stmt.Span(), doc, stmt) == doc; trusted != tc.trust {
+				t.Fatalf("layout kept = %v, want %v", trusted, tc.trust)
+			}
+		})
+	}
+}
 
 func TestAuthorAlignedCommentsStayAlignedWhateverTheLineEnding(t *testing.T) {
 	want := "<?php\n\n$first = 1;   // one\n$second = 22; // two\n"
@@ -81,7 +118,12 @@ func TestCopiedStatementKeepsTheSemicolonACloseTagStoodIn(t *testing.T) {
 		{
 			"template region at the end of the file",
 			"<?php if ($x): ?>\n<p>hi</p>\n<?php endif ?>\n",
-			"<?php\n\nif ($x): ?>\n<p>hi</p>\n<?php endif;\n",
+			"<?php\n\nif ($x): ?>\n<p>hi</p>\n<?php endif;\n?>\n",
+		},
+		{
+			"alternative syntax ending a file of pure PHP",
+			"<?php while(0)while(0):0;endwhile?>",
+			"<?php\n\nwhile (0) {\n    while(0):0;endwhile;\n}\n",
 		},
 		{
 			"commented declare inside added braces",

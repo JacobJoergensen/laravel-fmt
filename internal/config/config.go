@@ -182,6 +182,10 @@ type PHP struct {
 	InlineEmptyClosureBodies   bool `json:"-"`
 	// AnonClassParenSpace is set by class_definition's space_before_parenthesis.
 	AnonClassParenSpace bool `json:"-"`
+	// InlineAnonClassArgs is set by class_definition's inline_constructor_arguments.
+	InlineAnonClassArgs bool `json:"-"`
+	// ChainIndentFromLine is set by method_chaining_indentation.
+	ChainIndentFromLine bool `json:"-"`
 }
 
 // Blade holds Blade formatter options.

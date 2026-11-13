@@ -461,7 +461,7 @@ func (b *builder) anonClass(n *parser.AnonClassExpr) *document.Doc {
 			head = append(head, document.Text(" "))
 		}
 
-		head = append(head, b.argList(n.Args, withTrailingComma))
+		head = append(head, b.anonClassArgs(n.Args))
 	}
 
 	if n.Parent != nil {
@@ -473,6 +473,30 @@ func (b *builder) anonClass(n *parser.AnonClassExpr) *document.Doc {
 	}
 
 	return document.Concat(document.Concat(head...), b.braceMembers(b.cfg.PHP.AnonClassBraceStyle, n.Members, n.RBrace, b.cfg.PHP.InlineEmptyAnonClassBodies))
+}
+
+// anonClassArgs joins the arguments as Pint does, author breaks included,
+// unless a comment or a body forces a break.
+func (b *builder) anonClassArgs(args []parser.Expr) *document.Doc {
+	if !b.cfg.PHP.InlineAnonClassArgs {
+		return b.argList(args, withTrailingComma)
+	}
+
+	mark := b.markComments()
+	saved := b.noAuthorBreaks
+	b.noAuthorBreaks = true
+	joined := b.argList(args, withTrailingComma)
+	b.noAuthorBreaks = saved
+
+	// A chain's ConditionalGroup hides a closure body's break from
+	// HasForcedBreak; flat, its width reads as forced.
+	if !document.HasForcedBreak(joined) && document.FlatWidth(joined, b.cfg.IndentWidth) < document.ForcedBreakWidth {
+		return b.flatDoc(joined)
+	}
+
+	b.releaseComments(mark)
+
+	return b.argList(args, withTrailingComma)
 }
 
 func (b *builder) interfaceStmt(n *parser.InterfaceStmt) *document.Doc {

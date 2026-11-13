@@ -117,6 +117,14 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 			lastOpenerWidth = b.flatSourceWidth(call.Callee.Span().Start.Offset, call.LParen.Span.End.Offset)
 		}
 
+		if endsInBodiedClosure(args[last]) {
+			lastOpenerWidth = b.measureWidth(func() int {
+				width, _ := document.FlatPrefixWidth(b.expr(args[last]), b.cfg.IndentWidth)
+
+				return width
+			})
+		}
+
 		budget := b.hugHeadBudget()
 
 		// Where the caller knows the column the `(` opens at, the hug's line is
@@ -495,7 +503,7 @@ func (b *builder) trailingArgsHug(lead parser.Expr, trailing []parser.Expr) bool
 			return false
 		}
 
-		w := b.measureWidth(func() int { return document.FlatWidth(b.expr(a), b.cfg.IndentWidth) })
+		w := b.measureWidth(func() int { return b.oneLineWidth(b.expr(a)) })
 		if w >= document.ForcedBreakWidth {
 			return false
 		}
@@ -585,6 +593,38 @@ func (b *builder) huggableArg(arg parser.Expr) bool {
 	return isHuggableArg(arg)
 }
 
+// isBodiedClosure reports whether e is a closure whose body holds a statement
+// or a comment, so its block always breaks.
+func isBodiedClosure(e parser.Expr) bool {
+	closure, ok := e.(*parser.ClosureExpr)
+	if !ok || closure.Body == nil {
+		return false
+	}
+
+	return len(closure.Body.Stmts) > 0 || commentTrivia(closure.Body.RBrace.Leading) > 0
+}
+
+func endsInBodiedClosure(arg parser.Expr) bool {
+	if n, ok := arg.(*parser.NamedArgExpr); ok {
+		arg = n.Value
+	}
+
+	switch v := arg.(type) {
+	case *parser.BinaryExpr:
+		if v.Op.Kind == parser.KindDot {
+			return false
+		}
+
+		_, tails := flattenBinary(v)
+
+		return isBodiedClosure(tails[len(tails)-1].operand)
+	case *parser.TernaryExpr:
+		return v.Then == nil && isBodiedClosure(v.Else)
+	}
+
+	return false
+}
+
 // isHuggableArg reports whether arg can carry an overflowing call's wrap without
 // forcing the preceding arguments onto their own lines: a non-empty
 // closure/array/match, a multi-line string, or a call/`new` whose own list breaks
@@ -595,9 +635,13 @@ func isHuggableArg(arg parser.Expr) bool {
 		arg = n.Value
 	}
 
+	if endsInBodiedClosure(arg) {
+		return true
+	}
+
 	switch v := arg.(type) {
 	case *parser.ClosureExpr:
-		return v.Body != nil && len(v.Body.Stmts) > 0
+		return isBodiedClosure(arg)
 	case *parser.CastExpr:
 		return castsArray(v)
 	case *parser.ArrayExpr:

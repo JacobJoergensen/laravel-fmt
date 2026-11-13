@@ -1116,6 +1116,8 @@ func TestDefaultMatchesLaravelPreset(t *testing.T) {
 	// What Pint itself will rewrite is a fact about a project running Pint, not
 	// a default laravel-fmt shares with the preset.
 	cfg.PHP.ArrowValueOnKeyLine = false
+	cfg.PHP.InlineAnonClassArgs = false
+	cfg.PHP.ChainIndentFromLine = false
 
 	if !reflect.DeepEqual(cfg.PHP, config.Default().PHP) {
 		t.Errorf("config.Default().PHP drifted from the Pint laravel preset:\napplied = %+v\ndefault = %+v", cfg.PHP, config.Default().PHP)
@@ -1554,6 +1556,62 @@ func TestRuleSetSetToFalseSwitchesItsRulesOff(t *testing.T) {
 
 	if pint.SingleTraitInsertPerStatement == nil || *pint.SingleTraitInsertPerStatement {
 		t.Fatalf("SingleTraitInsertPerStatement = %v, want false", pint.SingleTraitInsertPerStatement)
+	}
+}
+
+func TestClassDefinitionInlinesAnonymousClassArguments(t *testing.T) {
+	cases := []struct {
+		name   string
+		pint   Pint
+		inline bool
+	}{
+		{"laravel", presetPint("laravel"), true},
+		{"psr12", presetPint("psr12"), false},
+		{"per", presetPint("per"), false},
+		{"the rule on its own", resolvePintRules([]pintRule{{ruleClassDefinition, ruleOn}}), true},
+		{"the option off", resolvePintRules([]pintRule{
+			{ruleClassDefinition, jsontext.Value(`{"inline_constructor_arguments":false}`)},
+		}), false},
+		{"no class_definition", resolvePintRules(nil), false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Default()
+			applyPint(cfg, &tc.pint)
+
+			if cfg.PHP.InlineAnonClassArgs != tc.inline {
+				t.Fatalf("InlineAnonClassArgs = %v, want %v", cfg.PHP.InlineAnonClassArgs, tc.inline)
+			}
+		})
+	}
+}
+
+func TestMethodChainingIndentationIsDetected(t *testing.T) {
+	cases := []struct {
+		name string
+		pint Pint
+		on   bool
+	}{
+		{"laravel", presetPint("laravel"), true},
+		{"symfony", presetPint("symfony"), false},
+		{"@PhpCsFixer", resolvePintRules([]pintRule{{setPhpCsFixer, ruleOn}}), true},
+		{"the rule on its own", resolvePintRules([]pintRule{{ruleMethodChainingIndentation, ruleOn}}), true},
+		{"the rule off", resolvePintRules([]pintRule{
+			{"@PhpCsFixer", ruleOn},
+			{ruleMethodChainingIndentation, jsontext.Value("false")},
+		}), false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Default()
+			applyPint(cfg, &tc.pint)
+
+			if cfg.PHP.ChainIndentFromLine != tc.on {
+				t.Fatalf("ChainIndentFromLine = %v, want %v", cfg.PHP.ChainIndentFromLine, tc.on)
+			}
+		})
 	}
 }
 

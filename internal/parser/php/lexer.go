@@ -541,11 +541,8 @@ func skipToLineEnd(src []byte, p int) int {
 }
 
 func (l *lexer) maybeConsumeYieldFrom() bool {
-	p := l.Pos.Offset
-
-	for p < len(l.Src) && IsWhitespace(l.Src[p]) {
-		p++
-	}
+	// PHP lexes comments between the keywords into the one T_YIELD_FROM token.
+	p := skipTriviaBytes(l.Src, l.Pos.Offset)
 
 	if p+4 > len(l.Src) {
 		return false

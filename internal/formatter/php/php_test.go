@@ -770,7 +770,7 @@ func TestFormatWideCallArgBreaks(t *testing.T) {
 }
 
 func TestFormatCommentInPrefixedElementAfterHole(t *testing.T) {
-	cases := []string{"<?php\n[, &#c\n$b];\n", "<?php\n[, ...#c\n$b];\n"}
+	cases := []string{"<?php\n[, &#c\n$b] = $x;\n"}
 
 	for _, src := range cases {
 		t.Run(src, func(t *testing.T) {
@@ -1165,6 +1165,35 @@ func TestTrailingCloseTagSettlesInOnePass(t *testing.T) {
 
 			if got := bytes.Contains(once, []byte("?>")); got != tc.keepTag {
 				t.Fatalf("close tag kept=%v, want %v:\n%q", got, tc.keepTag, once)
+			}
+		})
+	}
+}
+
+func TestTrailingCloseTagGoesOnlyFromPurePHP(t *testing.T) {
+	cases := []struct {
+		name    string
+		src     string
+		keepTag bool
+	}{
+		{"pure PHP", "<?php\n\necho 1;\n?>\n", false},
+		{"after a shebang", "#!/usr/bin/env php\n<?php\n\necho 1;\n?>\n", false},
+		{"with blank lines after the tag", "<?php\n\necho 1;\n?>\n\n\n", false},
+		{"with HTML inside a block", "<?php if ($a) { ?> <p>x</p> <?php } ?>\n", true},
+		{"after HTML", "Hello World <?php echo $sub ?>\n", true},
+		{"after a second opening tag", "<?php echo 1; ?> <?php echo 2 ?>\n", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			once := mustFormat(t, []byte(tc.src), config.Default())
+
+			if twice := mustFormat(t, once, config.Default()); !bytes.Equal(twice, once) {
+				t.Fatalf("not idempotent.\n=== once ===\n%q\n=== twice ===\n%q", once, twice)
+			}
+
+			if got := bytes.HasSuffix(bytes.TrimSpace(once), []byte("?>")); got != tc.keepTag {
+				t.Fatalf("closing tag kept=%v, want %v:\n%q", got, tc.keepTag, once)
 			}
 		})
 	}

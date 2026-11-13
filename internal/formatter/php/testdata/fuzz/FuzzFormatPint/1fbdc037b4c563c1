@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?php ClAss A{funCtion A(){return['' ['']%#00\n    '00' = A0000000000#\n                %''%''%A[]%'' ];}}")

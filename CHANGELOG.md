@@ -1,6 +1,19 @@
 # Changelog
 
 ## Unreleased
+* Improved a closure after `??`, `?:` or another operator to stay on the operator's line, like `$a ?: function () {`
+* Fixed a closure holding only a comment breaking the call around it instead of hugging
+* Fixed a chain whose head hugs an arrow function returning a chained call changing its layout on a second run
+* Fixed a Blade element with a broken open tag and a multi-line echo changing its layout on a second run
+* Fixed `yield from` with a comment between the keywords being reported as invalid PHP, and its expression being left unformatted
+* Fixed the closing `?>` being removed from files that mix PHP with HTML
+* Fixed chain links after `??` being indented one level more than Pint's `method_chaining_indentation` puts them
+* Fixed an operand on the closing line of a broken call, array or closure being indented two levels instead of one
+* Fixed an operand holding a comment keeping its old indent when its operator moved to a new line
+* Fixed `f([, $b])` and `[...$a] = $x` being formatted instead of reported as invalid PHP
+* Fixed anonymous class constructor arguments being broken across lines where Pint's `class_definition` joins them
+* Fixed an array inside the last argument losing its indent when the first argument is an array, like `f([...], $a->b->c([...]))`
+* Fixed published mail component templates getting indented, which turned parts of Markdown emails into code blocks
 
 ## Version 0.11.0 (2026-11-12)
 * Added PHP 8.6 partial function application, like `f(?, 1)`, `f(a: ?)` and `f(1, ...)`

@@ -12,6 +12,7 @@ func Parse(src []byte) (*File, []Error) {
 	}
 
 	stmts := p.parseFile()
+	p.rejectStrayHoles()
 
 	return &File{
 		Src:    src,
@@ -30,6 +31,7 @@ func ParseFrontmatter(src []byte) (file *File, end Position, closed bool, errs [
 
 	p := &parser{tokens: tokens, errors: errs, fileEOF: true}
 	stmts := p.parseFile()
+	p.rejectStrayHoles()
 
 	return &File{Src: src[:end.Offset], Tokens: tokens, Stmts: stmts}, end, closed, p.errors
 }
@@ -47,6 +49,8 @@ func ParseFullExpression(src []byte) (Expr, []Token, []Error) {
 	if tok := p.peek(); tok.Kind != KindEOF {
 		p.addError(tok.Span.Start, "unexpected token after expression; expected a single expression")
 	}
+
+	p.rejectStrayHoles()
 
 	return expr, tokens, p.errors
 }
@@ -69,6 +73,8 @@ func ParseStatements(src []byte) ([]Stmt, []Token, []Error) {
 		stmts = append(stmts, p.parseStmt())
 	}
 
+	p.rejectStrayHoles()
+
 	return stmts, tokens, p.errors
 }
 
@@ -86,6 +92,8 @@ func ParseCallArgs(src []byte) ([]Expr, []Token, []Error) {
 	if tok := p.peek(); tok.Kind != KindEOF {
 		p.addError(tok.Span.Start, "unexpected token after arguments")
 	}
+
+	p.rejectStrayHoles()
 
 	return args, tokens, p.errors
 }

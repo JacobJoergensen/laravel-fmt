@@ -1,5 +1,7 @@
 package php
 
+import "slices"
+
 func parseTernary(p *parser, cond Expr) Expr {
 	q := p.advance()
 	var then Expr
@@ -101,7 +103,7 @@ func parseArrayShort(p *parser) Expr {
 	elements := p.parseArrayElements(KindRBracket)
 	rb := p.expect(KindRBracket)
 
-	return &ArrayExpr{Open: lb, Elements: elements, Close: rb}
+	return p.noteHoles(&ArrayExpr{Open: lb, Elements: elements, Close: rb})
 }
 
 func parseArrayLong(p *parser) Expr {
@@ -110,7 +112,15 @@ func parseArrayLong(p *parser) Expr {
 	elements := p.parseArrayElements(KindRParen)
 	rp := p.expect(KindRParen)
 
-	return &ArrayExpr{KeywordPrefix: kw, Open: lp, Elements: elements, Close: rp}
+	return p.noteHoles(&ArrayExpr{KeywordPrefix: kw, Open: lp, Elements: elements, Close: rp})
+}
+
+func (p *parser) noteHoles(arr *ArrayExpr) *ArrayExpr {
+	if slices.ContainsFunc(arr.Elements, func(el *ArrayElement) bool { return el.Value == nil && !el.Spread }) {
+		p.holed = append(p.holed, arr)
+	}
+
+	return arr
 }
 
 // `list(...)` is the long form of `[...]` destructuring and shares ArrayExpr,

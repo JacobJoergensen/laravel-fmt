@@ -148,6 +148,45 @@ func TestUnterminatedBacktickIsRejected(t *testing.T) {
 	}
 }
 
+func TestArrayHoleOutsideDestructuringIsRejected(t *testing.T) {
+	rejected := []string{
+		"<?php f([,1]);",
+		"<?php $x = [1, , 2];",
+		"<?php [, $b] + 1;",
+		"<?php foreach ([, $b] as $v) {}",
+		"<?php [...$a] = $x;",
+		"<?php [$b, [...$a]] = $x;",
+		"<?php foreach ($x as [...$a]) {}",
+	}
+
+	for _, src := range rejected {
+		t.Run("reject "+src, func(t *testing.T) {
+			if _, errs := Parse([]byte(src)); len(errs) == 0 {
+				t.Fatalf("expected a parse error for %q", src)
+			}
+		})
+	}
+
+	accepted := []string{
+		"<?php [, $b] = $arr;",
+		"<?php list(, $b) = $arr;",
+		"<?php [[, $b], $c] = $arr;",
+		"<?php ['x' => [, $b]] = $arr;",
+		"<?php foreach ($rows as [, $b]) {}",
+		"<?php foreach ($rows as $k => [, $b]) {}",
+		"<?php $x = [, $b] = $arr;",
+		"<?php [$a, $b] = [...$c];",
+	}
+
+	for _, src := range accepted {
+		t.Run("accept "+src, func(t *testing.T) {
+			if _, errs := Parse([]byte(src)); len(errs) != 0 {
+				t.Fatalf("unexpected parse errors for %q: %v", src, errs)
+			}
+		})
+	}
+}
+
 func TestAssignToNonLvalueIsRejected(t *testing.T) {
 	// PHP rejects each of these ("Can't use function return value in write
 	// context" and kin).

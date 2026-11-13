@@ -27,7 +27,7 @@ func Format(src []byte, cfg *config.File) ([]byte, error) {
 	// A file drops its terminal `?>` per config. Livewire keeps its frontmatter
 	// `?>` (the template separator) by calling BuildFile directly, so the strip
 	// lives here rather than in BuildFile.
-	if cfg.PHP.RemoveTrailingCloseTag {
+	if cfg.PHP.RemoveTrailingCloseTag && containsOnlyPHP(file.Tokens) {
 		kept := len(file.Stmts)
 		file.Stmts = stripTrailingCloseTag(file.Stmts)
 
@@ -77,6 +77,31 @@ func haltPayload(stmts []parser.Stmt) []byte {
 	}
 
 	return nil
+}
+
+// containsOnlyPHP reports whether tokens are a single PHP block, after at most
+// a shebang line. PSR-12 omits the closing tag only from a file containing only
+// PHP, as PHP-CS-Fixer's no_closing_tag does. Whitespace after the final tag
+// does not count: stripTrailingBlankHTML has already dropped it.
+func containsOnlyPHP(tokens []parser.Token) bool {
+	opens := 0
+	last := len(tokens) - 1
+
+	for i, tok := range tokens {
+		switch tok.Kind {
+		case parser.KindOpenTag, parser.KindOpenTagEcho:
+			opens++
+		case parser.KindInlineHTML:
+			shebang := i == 0 && bytes.HasPrefix(tok.Text, []byte("#!"))
+			blankTail := i == last-1 && tokens[last].Kind == parser.KindEOF && len(bytes.TrimSpace(tok.Text)) == 0
+
+			if !shebang && !blankTail {
+				return false
+			}
+		}
+	}
+
+	return opens == 1
 }
 
 // stripTrailingCloseTag drops a trailing `?>` tag. It is deliberately narrow:

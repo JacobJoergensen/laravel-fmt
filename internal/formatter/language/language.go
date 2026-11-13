@@ -26,6 +26,10 @@ func Format(lang formatter.Language, path string, src []byte, cfg *config.File) 
 			return livewirefmt.Format(src, cfg)
 		}
 
+		if bladefmt.IsMailComponentPath(path) {
+			return bladefmt.FormatMailComponent(src, cfg)
+		}
+
 		return bladefmt.Format(src, cfg)
 	case formatter.LangHTML:
 		return htmlfmt.Format(src, cfg)

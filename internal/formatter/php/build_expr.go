@@ -258,6 +258,8 @@ func (b *builder) exprInner(e parser.Expr) *document.Doc {
 		return document.Concat(b.expr(n.Left), document.Text(" instanceof "), b.expr(n.Class))
 	case *parser.YieldExpr:
 		return b.yield(n)
+	case *parser.YieldFromExpr:
+		return b.yieldFrom(n)
 	case *parser.DynamicName:
 		return document.Concat(document.Text("{"), b.expr(n.Expr), document.Text("}"))
 	}
@@ -442,8 +444,17 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 	// A comment wedged between operands (`$a . // note` chains) has no structural
 	// slot in a reflowed binary; keep the author's form so it is not lost. A
 	// concatenation keeps its authored breaks, so a comment at one has a slot.
-	if b.spanHasComment(n.Span()) && !b.concatCommentsAtBreaks(n, head, tails) {
-		return b.verbatim(n.Span())
+	if b.commentsBetweenOperands(tails) > 0 && !b.concatCommentsAtBreaks(n, head, tails) {
+		return b.verbatimMoving(n.Span())
+	}
+
+	concat := n.Op.Kind == parser.KindDot
+
+	closureGlues := !concat && isBodiedClosure(tails[len(tails)-1].operand) && b.closureGlueDepth < maxGluedClosureNesting
+	if closureGlues {
+		b.closureGlueDepth++
+
+		defer func() { b.closureGlueDepth-- }()
 	}
 
 	// Fit-first: the same-precedence run collapses to one line when it fits,
@@ -451,7 +462,6 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 	// leading (PSR-12). Concatenation is tight unless cfg.PHP.ConcatSpace is
 	// set, but a side that would fuse with a numeric literal keeps its space
 	// (concatSpaces); every other operator carries a space each side.
-	concat := n.Op.Kind == parser.KindDot
 	spaced := !concat || b.cfg.PHP.ConcatSpace
 
 	seps := make([]*document.Doc, len(tails))
@@ -530,6 +540,7 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 
 	inner := make([]*document.Doc, 0, len(tails)*3)
 	onlyTail := tails
+	innerMark := b.markComments()
 
 	// A broken operand prints one level in, so anything inside it that predicts
 	// its own width has to measure from there, or a chain in it judges itself
@@ -553,7 +564,7 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 			inner = append(inner, document.Text(glueText), step)
 		} else {
 			headBreaks := document.HasForcedBreak(headDoc)
-			inner = append(inner, b.gluedRun(tails, spaced, headBreaks, glueID, glueText, sep, plain, indented)...)
+			inner = append(inner, b.gluedRun(tails, spaced, headBreaks, glueID, glueText, plain, indented)...)
 		}
 
 		tails = nil
@@ -649,6 +660,12 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 
 	broken := document.Group(document.Concat(headDoc, document.Concat(inner...)))
 
+	if closureGlues {
+		if glued := b.gluedClosureRun(headDoc, onlyTail, ops, innerMark); glued != nil {
+			return document.Concat(document.ConditionalGroup(glued, broken), document.BreakParent())
+		}
+	}
+
 	// `$a ?? Foo::bar([` keeps the operator on the line that opens a block that
 	// breaks anyway, the block breaking below it as a hugged argument does. An
 	// operand that fits flat on its own line moves down instead, as a chain's
@@ -656,6 +673,10 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 	// that line.
 	if stmtLevel && !concat && len(onlyTail) == 1 {
 		if width, ok := b.blockOpenerWidth(onlyTail[0].operand); ok {
+			// Each variant is a build of its own, and the printer prints only
+			// one, so every build carries the operand's comments.
+			b.releaseComments(innerMark)
+
 			op := " " + string(onlyTail[0].op.Text) + " "
 			operand := b.expr(onlyTail[0].operand)
 			alone := (saved+1)*b.cfg.IndentWidth + len(op) + b.oneLineWidth(operand) + b.chainStmtTail
@@ -667,7 +688,7 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 				glued := document.Concat(headDoc, document.Text(op), document.Opener(width, operand))
 				variants := []*document.Doc{document.Opener(lead+width, glued)}
 
-				if unhugged, opener := b.unhuggedOperand(onlyTail[0].operand, width, saved+1); unhugged != nil {
+				if unhugged, opener := b.unhuggedOperand(onlyTail[0].operand, width, saved+1, innerMark); unhugged != nil {
 					gluedUnhugged := document.Concat(headDoc, document.Text(op), unhugged)
 					variants = append(variants, document.Opener(lead+opener, gluedUnhugged))
 				}
@@ -680,12 +701,49 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 	return broken
 }
 
+// maxGluedClosureNesting bounds how many runs ending in a closure, nested in
+// each other's closures, offer the glued form. Each builds its closure once
+// per form, so the work doubles with every level; deeper runs keep the
+// operator on its own line.
+const maxGluedClosureNesting = 3
+
+// gluedClosureRun is the run on one line up to its closure's `{`, or nil when
+// another part breaks and would end the printer's measure early.
+func (b *builder) gluedClosureRun(headDoc *document.Doc, tails []binaryTail, ops []string, mark commentMark) *document.Doc {
+	if document.HasForcedBreak(headDoc) {
+		return nil
+	}
+
+	// Reclaims every operand's comments, even when this build is discarded.
+	b.releaseComments(mark)
+
+	parts := []*document.Doc{headDoc}
+	middleBreaks := false
+
+	for i, t := range tails {
+		operand := b.expr(t.operand)
+
+		if i < len(tails)-1 {
+			middleBreaks = middleBreaks || document.HasForcedBreak(operand) || b.hidesForcedBreak(t.operand, operand)
+		}
+
+		parts = append(parts, document.Text(" "+ops[i]), operand)
+	}
+
+	if middleBreaks {
+		return nil
+	}
+
+	return document.Concat(parts...)
+}
+
 // unhuggedOperand builds a call operand with its list broken after `(`, and
 // that opener's width, for when it hugs its last array on the head's line but
 // not on its own line at depth. The next pass reads that break as authored and
 // glues it, so the first pass offers that form too. nil when it hugs at depth
-// as well.
-func (b *builder) unhuggedOperand(operand parser.Expr, hugged, depth int) (*document.Doc, int) {
+// as well. mark is where the other variants' builds began: this build carries
+// the operand's comments too.
+func (b *builder) unhuggedOperand(operand parser.Expr, hugged, depth int, mark commentMark) (*document.Doc, int) {
 	call, ok := operand.(*parser.CallExpr)
 	if !ok {
 		return nil, 0
@@ -706,6 +764,7 @@ func (b *builder) unhuggedOperand(operand parser.Expr, hugged, depth int) (*docu
 		return nil, 0
 	}
 
+	b.releaseComments(mark)
 	b.noHugNext = true
 
 	return b.expr(operand), moved
@@ -867,7 +926,7 @@ func endingExpr(e parser.Expr) parser.Expr {
 	}
 }
 
-func (b *builder) gluedRun(tails []binaryTail, spaced, headBreaks bool, glueID int32, glueText string, sep, plain *document.Doc, indented func(*document.Doc) *document.Doc) []*document.Doc {
+func (b *builder) gluedRun(tails []binaryTail, spaced, headBreaks bool, glueID int32, glueText string, plain *document.Doc, indented func(*document.Doc) *document.Doc) []*document.Doc {
 	steps := make([]*document.Doc, len(tails))
 	free := make([]*document.Doc, len(tails))
 	fits := true
@@ -880,11 +939,23 @@ func (b *builder) gluedRun(tails []binaryTail, spaced, headBreaks bool, glueID i
 			op += " "
 		}
 
+		// Glued to the head's closing line, a chain's links break one level in
+		// from that line, which marks them as the operand's; Pint's
+		// method_chaining_indentation indents them from the chain's base instead.
+		structure := b.cfg.PHP.ChainIndentFromLine && isFluentChain(t.operand)
+
+		mark := b.markComments()
+		b.structureLinksNext = structure
 		steps[i] = document.Concat(document.Text(op), b.expr(t.operand))
 		forced = forced || document.HasForcedBreak(steps[i]) || b.hidesForcedBreak(t.operand, steps[i])
 
+		// free is the glued variant of the same operand, printed instead of
+		// step, never beside it, so it carries the operand's comments too.
+		b.releaseComments(mark)
+
 		saved := b.noConcatBreaks
 		b.noConcatBreaks = true
+		b.structureLinksNext = structure
 		free[i] = document.Concat(document.Text(op), b.expr(t.operand))
 		b.noConcatBreaks = saved
 		freeForced = freeForced || document.HasForcedBreak(free[i]) || b.hidesForcedBreak(t.operand, free[i])
@@ -895,7 +966,11 @@ func (b *builder) gluedRun(tails []binaryTail, spaced, headBreaks bool, glueID i
 	if !fits {
 		var out []*document.Doc
 		if len(steps) == 1 {
-			out = []*document.Doc{indented(document.Concat(sep, steps[0]))}
+			// Glued, the operand continues the head's closing line, so it
+			// breaks one level in from that line, not from the run's indent.
+			glued := document.Concat(document.Text(glueText), steps[0])
+			moved := indented(document.Concat(plain, steps[0]))
+			out = []*document.Doc{document.IfBreakOf(glueID, glued, moved)}
 		} else {
 			for _, step := range steps {
 				out = append(out, indented(document.Concat(plain, step)))
@@ -942,24 +1017,32 @@ func (b *builder) gluedRun(tails []binaryTail, spaced, headBreaks bool, glueID i
 	return out
 }
 
-// concatCommentsAtBreaks reports whether every comment in a concatenation sits
-// at a break the author made between two operands, either trailing the operand
-// before it on that operand's line or on a line of its own, so each keeps its
-// line once the `.` moves to lead the next operand.
+func (b *builder) commentsBetweenOperands(tails []binaryTail) int {
+	n := 0
+
+	for _, t := range tails {
+		n += b.commentsLeading(t.op.Span.Start.Offset, t.operand.Span().Start.Offset)
+	}
+
+	return n
+}
+
+// concatCommentsAtBreaks reports whether every comment between a
+// concatenation's operands sits at a break the author made, either trailing the
+// operand before it on that operand's line or on a line of its own, so each
+// keeps its line once the `.` moves to lead the next operand.
 func (b *builder) concatCommentsAtBreaks(n *parser.BinaryExpr, head parser.Expr, tails []binaryTail) bool {
 	if n.Op.Kind != parser.KindDot || b.noConcatBreaks || b.noAuthorBreaks {
 		return false
 	}
 
-	atBreaks := 0
 	prevEnd := head.Span().End.Offset
 
 	for _, t := range tails {
 		beforeOp := b.leadingAt(t.op.Span.Start.Offset)
 		afterOp := b.leadingAt(t.operand.Span().Start.Offset)
-		count := commentTrivia(beforeOp) + commentTrivia(afterOp)
 
-		if count > 0 {
+		if commentTrivia(beforeOp)+commentTrivia(afterOp) > 0 {
 			if commentTrivia(beforeOp) > 0 && commentTrivia(afterOp) > 0 || !b.concatAuthorBroke(t) {
 				return false
 			}
@@ -971,11 +1054,10 @@ func (b *builder) concatCommentsAtBreaks(n *parser.BinaryExpr, head parser.Expr,
 			}
 		}
 
-		atBreaks += count
 		prevEnd = t.operand.Span().End.Offset
 	}
 
-	return atBreaks == b.commentsIn(n.Span())
+	return true
 }
 
 func (b *builder) keepsCommentLine(prevEnd, offset int) bool {
@@ -1922,13 +2004,27 @@ func isDefaultValue(e parser.Expr) bool {
 	return false
 }
 
+func (b *builder) ternaryPartsComment(n *parser.TernaryExpr) bool {
+	offsets := []int{n.Question.Span.Start.Offset, n.Else.Span().Start.Offset}
+
+	if has(n.Colon) {
+		offsets = append(offsets, n.Colon.Span.Start.Offset)
+	}
+
+	if n.Then != nil {
+		offsets = append(offsets, n.Then.Span().Start.Offset)
+	}
+
+	return b.commentsLeading(offsets...) > 0
+}
+
 // lineKnown: the ternary starts a line whose indent the depth gives (a
 // statement's value, an array entry's value), so its `? ` line's column is too.
 func (b *builder) ternary(n *parser.TernaryExpr, lineKnown bool) *document.Doc {
 	// A comment between the condition and a branch has no structural slot once the
 	// ternary is reflowed; keep the author's form so it is not lost.
-	if b.spanHasComment(n.Span()) {
-		return b.verbatim(n.Span())
+	if b.ternaryPartsComment(n) {
+		return b.verbatimMoving(n.Span())
 	}
 
 	cond := b.expr(n.Cond)
@@ -1938,6 +2034,14 @@ func (b *builder) ternary(n *parser.TernaryExpr, lineKnown bool) *document.Doc {
 	// Width-driven, so author breaks are ignored.
 
 	if n.Then == nil {
+		glues := isBodiedClosure(n.Else) && b.closureGlueDepth < maxGluedClosureNesting
+		if glues {
+			b.closureGlueDepth++
+
+			defer func() { b.closureGlueDepth-- }()
+		}
+
+		mark := b.markComments()
 		other := b.expr(n.Else)
 		sep := document.Line()
 
@@ -1949,8 +2053,16 @@ func (b *builder) ternary(n *parser.TernaryExpr, lineKnown bool) *document.Doc {
 		}
 
 		body := document.Concat(sep, document.Text("?: "), other)
+		broken := document.Group(document.Concat(cond, document.Indent(body)))
 
-		return document.Group(document.Concat(cond, document.Indent(body)))
+		if glues && !document.HasForcedBreak(cond) {
+			b.releaseComments(mark)
+			glued := document.Concat(cond, document.Text(" ?: "), b.expr(n.Else))
+
+			return document.Concat(document.ConditionalGroup(glued, broken), document.BreakParent())
+		}
+
+		return broken
 	}
 
 	then, other := b.expr(n.Then), b.expr(n.Else)
@@ -2067,7 +2179,9 @@ func (b *builder) closure(n *parser.ClosureExpr) *document.Doc {
 
 	parts = append(parts, b.returnType(n.ReturnColon, n.ReturnType), document.Text(" "), b.closureBody(n.Body))
 
-	return document.Concat(parts...)
+	// Grouped, its body indents from the line it opens on wherever a hug or a
+	// glued operand puts it.
+	return document.Group(document.Concat(parts...))
 }
 
 func (b *builder) closureBody(blk *parser.BlockStmt) *document.Doc {
@@ -2177,11 +2291,12 @@ func (b *builder) arrowParams(ps []*parser.Param, rparen parser.Token) (params, 
 		EOL:        b.cfg.EOL(),
 	})
 
+	text := b.inheritCommentTags(grouped, document.Text(string(flat)))
 	if len(ps) < 2 {
-		return document.Text(string(flat)), nil
+		return text, nil
 	}
 
-	return document.Text(string(flat)), delimitedListComment("(", docs, withTrailingComma, 0, comment, true)
+	return text, delimitedListComment("(", docs, withTrailingComma, 0, comment, true)
 }
 
 func (b *builder) match(n *parser.MatchExpr) *document.Doc {
@@ -2362,12 +2477,26 @@ func matchArmStartOffset(a *parser.MatchArm) int {
 	return a.Conds[0].Span().Start.Offset
 }
 
+func (b *builder) yieldPartsComment(n *parser.YieldExpr) bool {
+	var offsets []int
+
+	if n.Key != nil {
+		offsets = append(offsets, n.Key.Span().Start.Offset, n.Arrow.Span.Start.Offset)
+	}
+
+	if n.Value != nil {
+		offsets = append(offsets, n.Value.Span().Start.Offset)
+	}
+
+	return b.commentsLeading(offsets...) > 0
+}
+
 func (b *builder) yield(n *parser.YieldExpr) *document.Doc {
-	// A comment wedged inside the yield (`yield /* note */ $x`, or a comment that
-	// splits `yield from`) is dropped by the normalized form and can change how the
-	// result re-parses; keep the author's form so it round-trips.
-	if b.spanHasComment(n.Span()) {
-		return b.verbatim(n.Span())
+	// A comment wedged inside the yield (`yield /* note */ $x`) is dropped by the
+	// normalized form and can change how the result re-parses; keep the author's
+	// form so it round-trips.
+	if b.yieldPartsComment(n) {
+		return b.verbatimMoving(n.Span())
 	}
 
 	if n.Value == nil {
@@ -2379,6 +2508,19 @@ func (b *builder) yield(n *parser.YieldExpr) *document.Doc {
 	}
 
 	return document.Concat(document.Text("yield "), b.expr(n.Value))
+}
+
+func (b *builder) yieldFrom(n *parser.YieldFromExpr) *document.Doc {
+	// The keyword token holds any comment between `yield` and `from`.
+	text := n.Keyword.Text
+	gap := text[len("yield") : len(text)-len("from")]
+	keywordComment := slices.ContainsFunc(gap, func(c byte) bool { return !parser.IsWhitespace(c) })
+
+	if keywordComment || b.commentsLeading(n.Expr.Span().Start.Offset) > 0 {
+		return b.verbatimMoving(n.Span())
+	}
+
+	return document.Concat(document.Text("yield from "), b.expr(n.Expr))
 }
 
 // nonSpaceLen counts the bytes of s that are not layout whitespace, so a span
@@ -2424,12 +2566,14 @@ func (b *builder) flatText(e parser.Expr) *document.Doc {
 // flatDoc is flatText for a doc that is already built, so measuring it cannot
 // re-consume the expression's comments.
 func (b *builder) flatDoc(doc *document.Doc) *document.Doc {
-	return document.Text(string(document.Print(doc, document.Options{
+	text := document.Text(string(document.Print(doc, document.Options{
 		PrintWidth: inlineWidth,
 		TabWidth:   b.cfg.IndentWidth,
 		UseTabs:    b.cfg.UseTabs(),
 		EOL:        b.cfg.EOL(),
 	})))
+
+	return b.inheritCommentTags(doc, text)
 }
 
 // A key never carries a forced break, so the print is single-line.

@@ -7,6 +7,47 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 )
 
+func TestAnonymousClassArgumentsStayOnOneLineWhenPintJoinsThem(t *testing.T) {
+	const flat = "<?php\n\n$handler = new class($this->originalExceptionHandler, $exceptionsToReport, $more) " +
+		"implements ExceptionHandler, WithoutExceptionHandlingHandler\n{\n};\n"
+	const broken = "<?php\n\n$handler = new class(\n    $this->originalExceptionHandler,\n    $exceptionsToReport,\n    $more,\n) " +
+		"implements ExceptionHandler, WithoutExceptionHandlingHandler\n{\n};\n"
+
+	tests := []struct {
+		name   string
+		inline bool
+		src    string
+		want   string
+	}{
+		{"an over-wide list stays on one line", true, flat, flat},
+		{"an author-broken list joins", true, broken, flat},
+		{"without the rule a wide list breaks", false, flat, broken},
+		{
+			"a closure inside a chain argument keeps its indent",
+			true,
+			"<?php\n\nfunction g()\n{\n    return new class($q->where(1)->each(function ($i) { return $i; })) {};\n}\n",
+			"<?php\n\nfunction g()\n{\n    return new class($q->where(1)->each(function ($i) {\n            return $i;\n        }))\n    {\n    };\n}\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.PHP.InlineAnonClassArgs = tc.inline
+			cfg.PHP.InlineEmptyAnonClassBodies = false
+
+			got := mustFormat(t, []byte(tc.src), cfg)
+			if string(got) != tc.want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+
+			if twice := mustFormat(t, got, cfg); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
+	}
+}
+
 // Laravel's preset keeps `use A, B;` grouped, and Pint flags a split list under
 // a docblock, so only a project whose rules split trait uses gets one per line.
 func TestTraitUsesSplitOnlyWhenTheProjectSplitsThem(t *testing.T) {

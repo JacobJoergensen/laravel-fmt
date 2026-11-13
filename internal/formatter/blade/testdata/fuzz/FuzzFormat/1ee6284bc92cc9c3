@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<dd><fluX:\n>{{('\n')}}</fluX >0")

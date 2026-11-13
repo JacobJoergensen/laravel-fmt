@@ -27,6 +27,7 @@ const (
 	kindAlignGap
 	kindCondGroup
 	kindOpener
+	kindFromStructure
 )
 
 // Doc is a node in the document tree. Its fields are ordered and groupID is
@@ -37,8 +38,10 @@ type Doc struct {
 	text  string
 	parts []*Doc
 	// group: IfBreak identity; ifBreak: tracked group; alignGap: scope
-	groupID  int32
-	kind     kind
+	groupID int32
+	kind    kind
+	// group: always breaks; heredoc: one level past the code; verbatim line:
+	// printed as written, its own line break included, with no indent
 	mustWrap bool
 }
 
@@ -207,6 +210,13 @@ func Opener(width int, doc *Doc) *Doc {
 	return &Doc{kind: kindOpener, parts: []*Doc{doc}, groupID: int32(width)}
 }
 
+// FromStructure prints doc unchanged, except that its first group opening on
+// the current line indents from its depth, as Pint's method_chaining_indentation
+// indents a chain riding a `->` line.
+func FromStructure(doc *Doc) *Doc {
+	return &Doc{kind: kindFromStructure, parts: []*Doc{doc}}
+}
+
 // Indent increases the indentation of any line breaks inside doc by one level.
 func Indent(doc *Doc) *Doc { return &Doc{kind: kindIndent, parts: []*Doc{doc}} }
 
@@ -248,7 +258,7 @@ func CanBreak(d *Doc) bool {
 		return true
 	case kindText, kindAlignGap:
 		return false
-	case kindConcat, kindGroup, kindIndent, kindLineSuffix, kindIfBreak, kindLinePrefix:
+	case kindConcat, kindGroup, kindIndent, kindLineSuffix, kindIfBreak, kindLinePrefix, kindFromStructure:
 		return slices.ContainsFunc(d.parts, CanBreak)
 	case kindCondGroup, kindOpener:
 		return CanBreak(d.parts[0])
@@ -279,7 +289,7 @@ func FlatWidth(d *Doc, tabWidth int) int {
 		return 0
 	case kindHardLine, kindHeredoc, kindVerbatim:
 		return ForcedBreakWidth
-	case kindGroup, kindIndent, kindLinePrefix, kindCondGroup, kindOpener:
+	case kindGroup, kindIndent, kindLinePrefix, kindCondGroup, kindOpener, kindFromStructure:
 		return FlatWidth(d.parts[0], tabWidth)
 	case kindIfBreak:
 		return FlatWidth(d.parts[1], tabWidth)
@@ -323,7 +333,7 @@ func BrokenPrefixWidth(d *Doc, tabWidth int) (int, bool) {
 		return 0, false
 	case kindLine, kindSoftLine, kindHardLine, kindHeredoc, kindVerbatim:
 		return 0, true
-	case kindGroup, kindIndent, kindLinePrefix, kindOpener, kindIfBreak:
+	case kindGroup, kindIndent, kindLinePrefix, kindOpener, kindIfBreak, kindFromStructure:
 		return BrokenPrefixWidth(d.parts[0], tabWidth)
 	case kindCondGroup:
 		narrowest, broken := BrokenPrefixWidth(d.parts[0], tabWidth)
@@ -383,7 +393,12 @@ func suffixWidth(d *Doc, tabWidth int, broken bool) (int, bool) {
 		// The last line starts at the indent of the line the text began on,
 		// as a line after a hard break does.
 		if n := len(d.parts); n > 0 {
-			return visualWidth(d.parts[n-1].text, tabWidth), true
+			last := d.parts[n-1]
+			if last.mustWrap {
+				return visualWidth(last.text[strings.LastIndexAny(last.text, "\r\n")+1:], tabWidth), true
+			}
+
+			return visualWidth(last.text, tabWidth), true
 		}
 
 		return visualWidth(d.text, tabWidth), false
@@ -395,7 +410,7 @@ func suffixWidth(d *Doc, tabWidth int, broken bool) (int, bool) {
 		return suffixWidth(d.parts[0], tabWidth, broken)
 	case kindCondGroup:
 		return suffixWidth(d.parts[0], tabWidth, false)
-	case kindIndent, kindLinePrefix:
+	case kindIndent, kindLinePrefix, kindFromStructure:
 		return suffixWidth(d.parts[0], tabWidth, broken)
 	case kindIfBreak:
 		if broken {
@@ -446,7 +461,7 @@ func prefixWidth(d *Doc, tabWidth int, broken, wrap bool) (int, bool) {
 		return prefixWidth(d.parts[0], tabWidth, broken, wrap)
 	case kindCondGroup:
 		return prefixWidth(d.parts[0], tabWidth, false, wrap)
-	case kindIndent, kindLinePrefix:
+	case kindIndent, kindLinePrefix, kindFromStructure:
 		return prefixWidth(d.parts[0], tabWidth, broken, wrap)
 	case kindIfBreak:
 		if broken {
@@ -488,4 +503,17 @@ func Verbatim(first string, rest []string) *Doc {
 	}
 
 	return &Doc{kind: kindVerbatim, text: first, parts: parts}
+}
+
+// VerbatimKeeping is Verbatim whose rest lines with keep set carry their own
+// line break and print exactly as written, with no indent: a line inside a
+// multi-line string, where both are part of the value.
+func VerbatimKeeping(first string, rest []string, keep []bool) *Doc {
+	d := Verbatim(first, rest)
+
+	for i, kept := range keep {
+		d.parts[i].mustWrap = kept
+	}
+
+	return d
 }

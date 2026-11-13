@@ -71,13 +71,17 @@ func (b *builder) spanHasComment(span parser.Span) bool {
 	return i < len(b.comments) && b.comments[i] < hi
 }
 
-func (b *builder) commentsIn(span parser.Span) int {
-	lo, hi := span.Start.Offset, span.End.Offset
+// commentsLeading counts the comments leading the tokens that start at
+// offsets: between an expression's parts, where a comment has no slot once the
+// parts are reflowed. A comment deeper in a part is that part's to place.
+func (b *builder) commentsLeading(offsets ...int) int {
+	n := 0
 
-	first := sort.Search(len(b.comments), func(i int) bool { return b.comments[i] > lo })
-	end := sort.Search(len(b.comments), func(i int) bool { return b.comments[i] >= hi })
+	for _, offset := range offsets {
+		n += commentTrivia(b.leadingAt(offset))
+	}
 
-	return max(end-first, 0)
+	return n
 }
 
 func commentTrivia(trivia []parser.Trivia) int {
@@ -141,17 +145,78 @@ func (b *builder) placeRange(lo, hi int) {
 	}
 }
 
-// keepComments returns doc, the layout built for span, unless building it left
-// a comment behind; then the span goes out as written. A comment on a token
-// the layout prints as fixed text (a list's `,`, a union's `|`) has no reader
-// otherwise. Checked per statement and class member, so the fallback covers
-// the smallest unit that lost one.
+var printedOnce = document.Count{Min: 1, Max: 1}
+
+// A width probe's docs never print, so they go untagged.
+func (b *builder) tagComment(d *document.Doc, offset int) *document.Doc {
+	if b.measuring {
+		return d
+	}
+
+	if b.commentTags == nil {
+		b.commentTags = make(map[*document.Doc][]document.Tag, len(b.comments))
+	}
+
+	b.commentTags[d] = append(b.commentTags[d], document.Tag{ID: offset, Count: printedOnce})
+
+	return d
+}
+
+func (b *builder) tagCommentRange(d *document.Doc, lo, hi int) *document.Doc {
+	i := sort.Search(len(b.comments), func(i int) bool { return b.comments[i] >= lo })
+
+	for ; i < len(b.comments) && b.comments[i] < hi; i++ {
+		b.tagComment(d, b.comments[i])
+	}
+
+	return d
+}
+
+func (b *builder) inheritCommentTags(doc, text *document.Doc) *document.Doc {
+	if b.measuring || len(b.commentTags) == 0 {
+		return text
+	}
+
+	for offset, c := range document.PrintCounts(doc, b.commentTags) {
+		b.commentTags[text] = append(b.commentTags[text], document.Tag{ID: offset, Count: c})
+	}
+
+	return text
+}
+
+// commentsPrintOnce reports whether doc prints every comment in span exactly
+// once, whichever variant the printer picks.
+func (b *builder) commentsPrintOnce(span parser.Span, doc *document.Doc) bool {
+	lo, hi := span.Start.Offset, span.End.Offset
+
+	i := sort.Search(len(b.comments), func(i int) bool { return b.comments[i] >= lo })
+	if i == len(b.comments) || b.comments[i] >= hi {
+		return true
+	}
+
+	counts := document.PrintCounts(doc, b.commentTags)
+
+	for ; i < len(b.comments) && b.comments[i] < hi; i++ {
+		if counts[b.comments[i]] != printedOnce {
+			return false
+		}
+	}
+
+	return true
+}
+
+// keepComments returns doc, the layout built for span, unless printing it can
+// lose or repeat a comment; then the span goes out as written. A comment on a
+// token the layout prints as fixed text (a list's `,`, a union's `|`) has no
+// reader otherwise, and one built into only some of the variants a layout
+// offers is lost when the printer picks another. Checked per statement and
+// class member, so the fallback covers the smallest unit at risk.
 //
 // node is the statement or member the span belongs to, or nil. A `?>` or the
 // end of a fragment can stand in for its `;`, which the parser then only
 // synthesizes, so the verbatim span gets one written after it.
 func (b *builder) keepComments(span parser.Span, doc *document.Doc, node any) *document.Doc {
-	if !b.spanDroppedComment(span) {
+	if !b.spanDroppedComment(span) && b.commentsPrintOnce(span, doc) {
 		return doc
 	}
 
@@ -531,7 +596,7 @@ func (b *builder) leadComment(tr parser.Trivia) *document.Doc {
 
 	if tr.Kind == parser.TriviaDocComment {
 		if d, ok := docCommentDoc(stripLineCR(tr.Text)); ok {
-			return d
+			return b.tagComment(d, tr.Span.Start.Offset)
 		}
 	}
 
@@ -566,7 +631,7 @@ func (b *builder) commentVerbatim(tr parser.Trivia) *document.Doc {
 		base = math.MaxInt
 	}
 
-	return rehomeVerbatim(text, base)
+	return b.tagComment(rehomeVerbatim(text, base), offset)
 }
 
 // stripLineCR drops the carriage returns closing each line, the same cleanup
@@ -878,7 +943,7 @@ func (b *builder) frozen(span parser.Span) *document.Doc {
 	// it.
 	b.claimRange(start, start+len(content))
 
-	return b.rehome(string(content), start)
+	return b.tagCommentRange(b.rehome(string(content), start), start, start+len(content))
 }
 
 // frozenCommentStart is the offset where a frozen node's verbatim text begins,

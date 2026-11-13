@@ -78,10 +78,13 @@ type printer struct {
 	out        bytes.Buffer
 	pos        int
 	lineIndent int
-	stack      []cmd
-	lineSuffix []cmd
-	groupMode  map[int32]mode
-	gaps       []alignGap
+	// fromStructure is set by FromStructure until the group it wraps opens or
+	// the line ends.
+	fromStructure bool
+	stack         []cmd
+	lineSuffix    []cmd
+	groupMode     map[int32]mode
+	gaps          []alignGap
 
 	fitStack []cmd
 }
@@ -94,6 +97,7 @@ func (p *printer) step(c cmd) {
 		if nl := strings.LastIndexByte(c.doc.text, '\n'); nl >= 0 {
 			p.pos = visualWidth(c.doc.text[nl+1:], p.opts.TabWidth)
 			p.lineIndent = 0
+			p.fromStructure = false
 		} else {
 			p.pos += visualWidth(c.doc.text, p.opts.TabWidth)
 		}
@@ -131,6 +135,10 @@ func (p *printer) step(c cmd) {
 	case kindLinePrefix:
 		p.push(c.indent, c.mode, c.prefix+c.doc.text, c.doc.parts[0])
 
+	case kindFromStructure:
+		p.fromStructure = true
+		p.push(c.indent, c.mode, c.prefix, c.doc.parts[0])
+
 	case kindGroup:
 		p.stepGroup(c)
 
@@ -164,6 +172,9 @@ func (p *printer) step(c cmd) {
 }
 
 func (p *printer) stepGroup(c cmd) {
+	structural := p.fromStructure
+	p.fromStructure = false
+
 	if c.mode == modeFlat && !c.doc.mustWrap {
 		p.recordGroup(c.doc, modeFlat)
 		p.push(c.indent, modeFlat, c.prefix, c.doc.parts[0])
@@ -183,7 +194,7 @@ func (p *printer) stepGroup(c cmd) {
 	// with the line that opened it (PHP-CS-Fixer statement_indentation). A group
 	// that opens with its own break has no opener on that line.
 	indent := c.indent
-	if !opensWithBreak(c.doc.parts[0]) {
+	if !opensWithBreak(c.doc.parts[0]) && !structural {
 		indent = max(indent, p.lineIndent)
 	}
 
@@ -238,6 +249,7 @@ func (p *printer) stepLine(c cmd) {
 	p.writeIndent(c.indent)
 	p.pos = c.indent
 	p.lineIndent = c.indent
+	p.fromStructure = false
 
 	if c.prefix != "" {
 		p.out.WriteString(c.prefix)
@@ -263,6 +275,7 @@ func (p *printer) stepHeredoc(c cmd) {
 	if nl := strings.LastIndexByte(out, '\n'); nl >= 0 {
 		p.pos = visualWidth(out[nl+1:], p.opts.TabWidth)
 		p.lineIndent = col
+		p.fromStructure = false
 	} else {
 		p.pos += visualWidth(out, p.opts.TabWidth)
 	}
@@ -272,7 +285,22 @@ func (p *printer) stepVerbatim(c cmd) {
 	p.out.WriteString(c.doc.text)
 	p.pos += visualWidth(c.doc.text, p.opts.TabWidth)
 
+	if len(c.doc.parts) > 0 {
+		p.fromStructure = false
+	}
+
+	// Each line is relative to the first one's line, and is the line indent a
+	// verbatim piece starting on it was measured from.
+	base := p.lineIndent
+
 	for _, ln := range c.doc.parts {
+		if ln.mustWrap {
+			p.out.WriteString(ln.text)
+			p.pos = visualWidth(ln.text[strings.LastIndexAny(ln.text, "\r\n")+1:], p.opts.TabWidth)
+
+			continue
+		}
+
 		p.out.WriteString(p.opts.EOL)
 
 		if ln.text == "" {
@@ -281,9 +309,12 @@ func (p *printer) stepVerbatim(c cmd) {
 			continue
 		}
 
-		p.writeIndent(p.lineIndent)
+		p.writeIndent(base)
 		p.out.WriteString(ln.text)
-		p.pos = p.lineIndent + visualWidth(ln.text, p.opts.TabWidth)
+		p.pos = base + visualWidth(ln.text, p.opts.TabWidth)
+
+		lead := len(ln.text) - len(strings.TrimLeft(ln.text, " \t"))
+		p.lineIndent = base + visualWidth(ln.text[:lead], p.opts.TabWidth)
 	}
 }
 
@@ -379,6 +410,9 @@ func (p *printer) fitsWith(next cmd, fm fitMode) bool {
 			p.fitStack = append(p.fitStack, cmd{c.indent + p.opts.TabWidth, c.mode, c.doc.parts[0], c.prefix})
 
 		case kindLinePrefix:
+			p.fitStack = append(p.fitStack, cmd{c.indent, c.mode, c.doc.parts[0], c.prefix})
+
+		case kindFromStructure:
 			p.fitStack = append(p.fitStack, cmd{c.indent, c.mode, c.doc.parts[0], c.prefix})
 
 		case kindGroup:
@@ -525,7 +559,7 @@ func propagateBreaks(d *Doc) bool {
 
 		return d.mustWrap
 
-	case kindIndent, kindLinePrefix, kindOpener:
+	case kindIndent, kindLinePrefix, kindOpener, kindFromStructure:
 		return propagateBreaks(d.parts[0])
 
 	case kindCondGroup:

@@ -12,6 +12,8 @@ package blade
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
@@ -23,6 +25,17 @@ import (
 // parse cleanly; the caller should keep the original bytes rather than trust a
 // partially-recovered emission.
 func Format(src []byte, cfg *config.File) ([]byte, error) {
+	return format(src, cfg, false)
+}
+
+// FormatMailComponent formats a mail component template like a template
+// without markup: Laravel renders it inside the mail's Markdown, where an
+// indent or a blank line is output.
+func FormatMailComponent(src []byte, cfg *config.File) ([]byte, error) {
+	return format(src, cfg, true)
+}
+
+func format(src []byte, cfg *config.File, keepText bool) ([]byte, error) {
 	file, errs := parser.Parse(src, Directives(cfg))
 
 	if err := formatter.JoinErrors(errs); err != nil {
@@ -33,13 +46,27 @@ func Format(src []byte, cfg *config.File) ([]byte, error) {
 
 	e := &emitter{w: w, src: src, cfg: cfg}
 
-	if hasMarkup(file.Nodes) {
+	if !keepText && hasMarkup(file.Nodes) {
 		e.emitFile(file)
 	} else {
 		e.emitTextTemplate(file.Nodes)
 	}
 
 	return w.Bytes(), nil
+}
+
+var mailComponentRoots = []string{
+	"/resources/views/vendor/mail/",
+	"/Illuminate/Mail/resources/views/",
+}
+
+// IsMailComponentPath reports whether path is a mail component template.
+func IsMailComponentPath(path string) bool {
+	slashed := "/" + strings.ReplaceAll(path, `\`, "/")
+
+	return slices.ContainsFunc(mailComponentRoots, func(root string) bool {
+		return strings.Contains(slashed, root)
+	})
 }
 
 // Directives returns the block directives a template is parsed with: Blade's own

@@ -45,6 +45,34 @@ func TestValueStaysOnItsArrowLineWhenPintJoinsIt(t *testing.T) {
 	}
 }
 
+func TestBrokenTrailingArgumentKeepsItsIndentAfterAHuggedArray(t *testing.T) {
+	cases := []struct {
+		name   string
+		callee string
+	}{
+		{"this chain", "$this->repository->get"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "<?php\n\nfunction g()\n{\n" +
+				"    f([\n        'a' => 1,\n    ], " + tc.callee + "([\n        'x',\n    ]));\n}\n"
+			want := "<?php\n\nfunction g()\n{\n" +
+				"    f(\n        [\n            'a' => 1,\n        ],\n" +
+				"        " + tc.callee + "([\n            'x',\n        ]),\n    );\n}\n"
+
+			got := string(mustFormat(t, []byte(src), config.Default()))
+			if got != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+
+			if twice := string(mustFormat(t, []byte(got), config.Default())); twice != got {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
+	}
+}
+
 // Pint's psr12 keeps the arguments on the call's line and hugs the closure.
 func TestEmptyClosureOnTwoLinesHugsAsAnArgument(t *testing.T) {
 	cfg := config.Default()
@@ -60,6 +88,15 @@ func TestEmptyClosureOnTwoLinesHugsAsAnArgument(t *testing.T) {
 
 	if again := mustFormat(t, got, cfg); !bytes.Equal(again, got) {
 		t.Fatalf("not idempotent:\n%s\nthen:\n%s", got, again)
+	}
+}
+
+func TestCommentOnlyClosureHugsAsAnArgument(t *testing.T) {
+	src := "<?php\n\n$items->each(function ($value, $key) {\n    // Silence is golden!\n});\n"
+
+	got := mustFormat(t, []byte(src), config.Default())
+	if string(got) != src {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, src)
 	}
 }
 

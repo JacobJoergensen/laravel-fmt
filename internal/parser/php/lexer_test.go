@@ -49,6 +49,11 @@ func TestYieldFromLexesAsOneToken(t *testing.T) {
 	}{
 		{"yield from", "<?php yield from $g;", KindYieldFrom},
 		{"YIELD FROM uppercase", "<?php YIELD FROM $g;", KindYieldFrom},
+		{"hash comment between", "<?php yield # c\nfrom $g;", KindYieldFrom},
+		{"comment with no spaces", "<?php yield/**/from $g;", KindYieldFrom},
+		{"several comments between", "<?php yield /* a */ /* b */\n// c\nfrom $g;", KindYieldFrom},
+		{"attribute is not a comment", "<?php yield #[A]\nfrom $g;", KindYield},
+		{"close tag ends the line comment", "<?php yield // ?> from $g;", KindYield},
 		{"yield alone", "<?php yield $v;", KindYield},
 		{"yield as a member name", "<?php $a->yield;", KindYield},
 	}
