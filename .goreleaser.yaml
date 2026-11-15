@@ -2,10 +2,6 @@ version: 2
 
 project_name: laravel-fmt
 
-before:
-  hooks:
-    - go mod tidy
-
 builds:
   - goarch: [amd64, arm64]
     env:
