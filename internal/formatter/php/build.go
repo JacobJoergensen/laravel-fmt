@@ -88,6 +88,7 @@ type builder struct {
 	preserveAt         int           // source offset of a nested chain that keeps its author ladder (a Pest `->and(` argument), 0 for none
 	lineKnownNext      bool          // the next value starts a line whose column the depth gives (an array entry's value); read and cleared in exprInner
 	inKey              bool          // inside a subscript key, which lays out flat unless the author broke it
+	probes             map[probeKey]probeBuild
 }
 
 func (b *builder) nextGroupID() int32 {

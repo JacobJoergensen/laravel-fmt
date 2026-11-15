@@ -66,6 +66,15 @@ func (b *builder) postfix(e parser.Expr, stmtLevel bool) *document.Doc {
 	head, links := b.flattenChain(e)
 	b.stmtChain = savedChain
 
+	// A ConditionalGroup in a link (a nested chain hugging a closure) hides its
+	// forced break from the groups around it, which would then print flat while
+	// their indents still move the link's broken lines.
+	for i, l := range links {
+		if !document.HasForcedBreak(l.doc) && document.HidesForcedBreak(l.doc) {
+			links[i].doc = document.Concat(l.doc, document.BreakParent())
+		}
+	}
+
 	methodCalls := 0
 	for _, l := range links {
 		if l.arrow && l.call {

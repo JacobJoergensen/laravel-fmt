@@ -2,12 +2,14 @@
 
 ## Unreleased
 * Improved a closure after `??`, `?:` or another operator to stay on the operator's line, like `$a ?: function () {`
+* Optimized formatting of deeply nested chains and arrow functions
 * Fixed a closure holding only a comment breaking the call around it instead of hugging
-* Fixed a chain whose head hugs an arrow function returning a chained call changing its layout on a second run
+* Fixed nested chains with a hugged closure or arrow function changing their layout on a second run
 * Fixed a Blade element with a broken open tag and a multi-line echo changing its layout on a second run
-* Fixed `yield from` with a comment between the keywords being reported as invalid PHP, and its expression being left unformatted
+* Fixed `yield from` with a comment between the keywords being reported as invalid PHP
+* Fixed the expression after `yield from` being left unformatted
 * Fixed the closing `?>` being removed from files that mix PHP with HTML
-* Fixed chain links after `??` being indented one level more than Pint's `method_chaining_indentation` puts them
+* Fixed chain links after `??` getting one indent level more than Pint's `method_chaining_indentation`
 * Fixed an operand on the closing line of a broken call, array or closure being indented two levels instead of one
 * Fixed an operand holding a comment keeping its old indent when its operator moved to a new line
 * Fixed `f([, $b])` and `[...$a] = $x` being formatted instead of reported as invalid PHP

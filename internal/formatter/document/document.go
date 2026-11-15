@@ -251,6 +251,28 @@ func HasForcedBreak(d *Doc) bool {
 	return propagateBreaks(d)
 }
 
+// HidesForcedBreak reports whether d holds a ConditionalGroup that breaks
+// whichever variant it prints, a break HasForcedBreak does not see.
+func HidesForcedBreak(d *Doc) bool {
+	switch d.kind {
+	case kindCondGroup:
+		for _, variant := range d.parts {
+			if !HasForcedBreak(variant) && !HidesForcedBreak(variant) {
+				return false
+			}
+		}
+
+		return true
+	case kindConcat, kindGroup, kindIndent, kindLinePrefix, kindOpener, kindFromStructure:
+		return slices.ContainsFunc(d.parts, HidesForcedBreak)
+	case kindText, kindLine, kindSoftLine, kindHardLine, kindLineSuffix, kindBreakParent,
+		kindIfBreak, kindHeredoc, kindVerbatim, kindAlignGap:
+		return false
+	}
+
+	return false
+}
+
 // CanBreak reports whether d holds any line-break opportunity.
 func CanBreak(d *Doc) bool {
 	switch d.kind {

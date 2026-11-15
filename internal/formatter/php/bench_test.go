@@ -106,3 +106,17 @@ func BenchmarkParseVsBuild(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkFormatNested(b *testing.B) {
+	cfg := config.Default()
+	src := nestedArrowChains(6)
+
+	b.SetBytes(int64(len(src)))
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if _, err := Format(src, cfg); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

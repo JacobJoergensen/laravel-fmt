@@ -22,11 +22,129 @@ func (b *builder) exprList(exprs []parser.Expr) *document.Doc {
 }
 
 func (b *builder) expr(e parser.Expr) *document.Doc {
+	if b.measuring {
+		return b.probeExpr(e)
+	}
+
 	if lead := b.exprLeadComments(e); lead != nil {
 		return document.Concat(lead, b.exprInner(e))
 	}
 
 	return b.exprInner(e)
+}
+
+// buildState is every builder field an expression's layout reads. A layout
+// field missing here lets probeExpr reuse a build made under other state.
+type buildState struct {
+	depth              int
+	firstLineColumn    int
+	stmtStart          int
+	elemStart          int
+	armStart           int
+	chainStmtLead      int
+	chainStmtTail      int
+	hugLeadNext        int
+	closureGlueDepth   int
+	preserveAt         int
+	noConcatBreaks     bool
+	noAuthorBreaks     bool
+	chainStmtLevel     bool
+	noHugNext          bool
+	linkArgsNext       bool
+	stmtChain          bool
+	arrowBodyNext      bool
+	preserveChainNext  bool
+	structureLinksNext bool
+	lineKnownNext      bool
+	inKey              bool
+}
+
+type probeKey struct {
+	expr  parser.Expr
+	state buildState
+}
+
+type probeBuild struct {
+	doc   *document.Doc
+	after buildState
+}
+
+func (b *builder) state() buildState {
+	return buildState{
+		depth:              b.depth,
+		firstLineColumn:    b.firstLineColumn,
+		stmtStart:          b.stmtStart,
+		elemStart:          b.elemStart,
+		armStart:           b.armStart,
+		chainStmtLead:      b.chainStmtLead,
+		chainStmtTail:      b.chainStmtTail,
+		hugLeadNext:        b.hugLeadNext,
+		closureGlueDepth:   b.closureGlueDepth,
+		preserveAt:         b.preserveAt,
+		noConcatBreaks:     b.noConcatBreaks,
+		noAuthorBreaks:     b.noAuthorBreaks,
+		chainStmtLevel:     b.chainStmtLevel,
+		noHugNext:          b.noHugNext,
+		linkArgsNext:       b.linkArgsNext,
+		stmtChain:          b.stmtChain,
+		arrowBodyNext:      b.arrowBodyNext,
+		preserveChainNext:  b.preserveChainNext,
+		structureLinksNext: b.structureLinksNext,
+		lineKnownNext:      b.lineKnownNext,
+		inKey:              b.inKey,
+	}
+}
+
+func (b *builder) restoreState(s buildState) {
+	b.depth = s.depth
+	b.firstLineColumn = s.firstLineColumn
+	b.stmtStart = s.stmtStart
+	b.elemStart = s.elemStart
+	b.armStart = s.armStart
+	b.chainStmtLead = s.chainStmtLead
+	b.chainStmtTail = s.chainStmtTail
+	b.hugLeadNext = s.hugLeadNext
+	b.closureGlueDepth = s.closureGlueDepth
+	b.preserveAt = s.preserveAt
+	b.noConcatBreaks = s.noConcatBreaks
+	b.noAuthorBreaks = s.noAuthorBreaks
+	b.chainStmtLevel = s.chainStmtLevel
+	b.noHugNext = s.noHugNext
+	b.linkArgsNext = s.linkArgsNext
+	b.stmtChain = s.stmtChain
+	b.arrowBodyNext = s.arrowBodyNext
+	b.preserveChainNext = s.preserveChainNext
+	b.structureLinksNext = s.structureLinksNext
+	b.lineKnownNext = s.lineKnownNext
+	b.inKey = s.inKey
+}
+
+// Each width probe rebuilds its subtree, probes included, so without reusing
+// builds from the same state nested chains and arrow functions cost
+// exponential time. A probe doc is never printed, and a span holding a
+// comment is not reused, since whether a probe sees that comment depends on
+// what is claimed so far.
+func (b *builder) probeExpr(e parser.Expr) *document.Doc {
+	if b.spanHasComment(e.Span()) {
+		return b.exprInner(e)
+	}
+
+	key := probeKey{expr: e, state: b.state()}
+	if built, ok := b.probes[key]; ok {
+		b.restoreState(built.after)
+
+		return built.doc
+	}
+
+	doc := b.exprInner(e)
+
+	if b.probes == nil {
+		b.probes = make(map[probeKey]probeBuild)
+	}
+
+	b.probes[key] = probeBuild{doc: doc, after: b.state()}
+
+	return doc
 }
 
 // exprLeadComments claims the comments sitting immediately before an

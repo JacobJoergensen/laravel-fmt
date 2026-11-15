@@ -59,6 +59,20 @@ func TestTailLaddersAfterAHuggedArrowReturningAChainedCall(t *testing.T) {
 	}
 }
 
+func TestAuthorBrokenTailLaddersAfterANestedChainHuggingAClosure(t *testing.T) {
+	src := []byte("<?php\n\n$x->foo($a->b()->c(function () { x(); }))\n->d();\n")
+	want := "<?php\n\n$x\n    ->foo($a->b()->c(function () {\n            x();\n        }))\n    ->d();\n"
+
+	got := mustFormat(t, src, config.Default())
+	if string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
 func TestArrayLinkMovesDownWhenItFitsFlat(t *testing.T) {
 	cases := []struct {
 		name string

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 )
@@ -814,4 +815,64 @@ func TestPartialApplicationPlaceholdersFormatAsArguments(t *testing.T) {
 	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
 		t.Fatalf("not idempotent:\n%s\n---\n%s", got, twice)
 	}
+}
+
+func TestNestedArrowFunctionsInChainsFormatWithoutExponentialCost(t *testing.T) {
+	const depth = 10
+	const budget = 2 * time.Second
+
+	start := time.Now()
+	got := mustFormat(t, nestedArrowChains(depth), config.Default())
+
+	if took := time.Since(start); took > budget {
+		t.Fatalf("formatting %d nested levels took %v, want under %v", depth, took, budget)
+	}
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
+func TestCommentInsideAWidthProbeKeepsTheLayout(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "comment in an arrow function's parameters inside a closure",
+			src:  "<?php\nt(function(){n(fn(#\n$s)=>f>e);});\n",
+			want: "<?php\n\nt(function () {\n    n(fn (\n        #\n        $s,\n    ) => f > e);\n});\n",
+		},
+		{
+			name: "trailing comment in a chained call's argument",
+			src: "<?php class A{function a(){0(0)->a(0('00000000000000000000000000000000'#$width%'second-part-of-the-label'\n" +
+				".($kind%2?'odd':'even')));}}\n",
+			want: "<?php\n\nclass A\n{\n    function a()\n    {\n        0(0)->a(0(\n" +
+				"            '00000000000000000000000000000000' #$width%'second-part-of-the-label'\n" +
+				"                .($kind % 2 ? 'odd' : 'even'),\n        ));\n    }\n}\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
+	}
+}
+
+func nestedArrowChains(depth int) []byte {
+	inner := "$q->a()->x(function () { x(); })"
+	for range depth {
+		inner = "$q->a()->m(fn () => " + inner + ")"
+	}
+
+	return []byte("<?php\n\n$v = " + inner + ";\n")
 }
