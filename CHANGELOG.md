@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.12.0 (2026-11-16)
 * Improved a closure after `??`, `?:` or another operator to stay on the operator's line, like `$a ?: function () {`
 * Optimized formatting of deeply nested chains and arrow functions
 * Fixed a closure holding only a comment breaking the call around it instead of hugging
