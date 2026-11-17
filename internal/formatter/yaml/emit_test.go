@@ -562,11 +562,83 @@ func TestFormatKeepsCommentsThatCloseABlockAtItsDepth(t *testing.T) {
 	}
 }
 
-func TestFormatKeepsAnAnchorHoldingAColonBelowItsKey(t *testing.T) {
-	for _, src := range []string{"key:\n  &a: 1\n", "key:\n  !t &a: 1\n"} {
+func TestFormatKeepsAValueThatCannotJoinItsKeyBelowIt(t *testing.T) {
+	for _, src := range []string{"key:\n  &a: 1\n", "key:\n  !t &a: 1\n", "key:\n  ? a\n"} {
 		t.Run(src, func(t *testing.T) {
 			if got := mustFormat(t, []byte(src), config.Default()); string(got) != src {
 				t.Fatalf("got %q, want it unchanged", got)
+			}
+		})
+	}
+}
+
+func TestFormatKeepsBlockScalarContentBehindAnAnchorOrTag(t *testing.T) {
+	cases := []string{
+		"k: &x\n  y: |\n    a  \n  z: 1\n",
+		"k: !t\n  - |+\n    a\n\n",
+		"k: !t\n  - |+\n    a\n\nz: 1\n",
+		"k: !t\n  >\n   a\n    \n",
+		"k: !t\n    \n  >\n   a\n",
+		"k: &x\n  y: |\n    a\n    # b\nz: 1\n",
+		"k: &x\n  y: |\n    a\n      \nz: 1\n",
+		"0:\n\n |\n 0\n  \n",
+	}
+
+	for _, src := range cases {
+		t.Run(src, func(t *testing.T) {
+			if got := mustFormat(t, []byte(src), config.Default()); string(got) != src {
+				t.Fatalf("got %q, want it unchanged", got)
+			}
+		})
+	}
+}
+
+func TestFormatLaysOutAnAnchoredCollection(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"mapping under a key", "x-php: &php # base\n    image:   php\n", "x-php: &php # base\n  image: php\n"},
+		{"sequence under a key", "k: !t\n    - a\n", "k: !t\n  - a\n"},
+		{"mapping under a dash stays below it", "- &x\n    a: 1\n", "- &x\n  a: 1\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+
+			if again := mustFormat(t, got, config.Default()); !bytes.Equal(again, got) {
+				t.Fatalf("not idempotent: %q -> %q", got, again)
+			}
+		})
+	}
+}
+
+func TestFormatReadsAHeaderWithAGluedCommentAsAHeader(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"comment holding a colon", "k:\n  >#a: b\n   x\n", "k: >#a: b\n  x\n"},
+		{"digit in the comment", "k: |#5\n     a\n", "k: |#5\n  a\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mustFormat(t, []byte(tc.src), config.Default()); string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatMovesAnExplicitKeyUpToItsDashOnlyOnOneLine(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"one line", "list:\n  -\n    ? a\n", "list:\n  - ? a\n"},
+		{"more lines", "-\n ?\n >\n", "-\n ?\n >\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mustFormat(t, []byte(tc.src), config.Default()); string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
 	}

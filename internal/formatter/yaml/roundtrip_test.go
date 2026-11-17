@@ -53,6 +53,8 @@ func coverNode(t *testing.T, c *formattertest.SpanCoverage, src []byte, node par
 
 	switch n := node.(type) {
 	case *parser.Mapping:
+		coverProperties(t, c, src, n.Properties)
+
 		for _, e := range n.Entries {
 			coverTrivia(c, e.Leading)
 
@@ -69,6 +71,8 @@ func coverNode(t *testing.T, c *formattertest.SpanCoverage, src []byte, node par
 			coverComment(c, e.Comment)
 		}
 	case *parser.Sequence:
+		coverProperties(t, c, src, n.Properties)
+
 		for _, item := range n.Items {
 			coverTrivia(c, item.Leading)
 			c.Cover(item.Dash.Start.Offset, item.Dash.End.Offset)
@@ -89,6 +93,14 @@ func coverNode(t *testing.T, c *formattertest.SpanCoverage, src []byte, node par
 		coverLeaf(t, c, src, n.Range, n.Raw)
 	default:
 		t.Fatalf("unhandled YAML node %T", node)
+	}
+}
+
+func coverProperties(t *testing.T, c *formattertest.SpanCoverage, src []byte, properties *parser.Scalar) {
+	t.Helper()
+
+	if properties != nil {
+		coverLeaf(t, c, src, properties.Range, properties.Raw)
 	}
 }
 

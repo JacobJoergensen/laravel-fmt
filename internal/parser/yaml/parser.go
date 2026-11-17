@@ -182,6 +182,10 @@ func (p *yamlParser) checkStrandedKey() {
 	p.Pos = saved
 }
 
+// documentOwnerIndent is the indent a document body's lines need only pass:
+// none, so a header at column 0 still belongs to the node above it.
+const documentOwnerIndent = -1
+
 func (p *yamlParser) parseDocBody() Node {
 	if p.Eof() {
 		return nil
@@ -214,14 +218,14 @@ func (p *yamlParser) parseDocBody() Node {
 	// A document that is one block scalar belongs to the stream, so its body
 	// need only sit past column 0, wherever the header is, and its
 	// whitespace-only lines are content a value's body would leave out.
-	if blockIndicator(p.Src[p.Pos.Offset:]) != nil {
+	if rest := p.Src[p.Pos.Offset:]; blockIndicator(rest) != nil || leadAboveHeader(rest, documentOwnerIndent) {
 		start := p.Pos
-		end := p.consumeValueBlock(0, blockIsScalarBody)
+		end := p.consumeHeaderBelowLead(0)
 
 		return &Verbatim{Range: mkspan(start, end), Raw: p.slice(start, end), Bail: true, Indent: ind}
 	}
 
-	return p.bailLine(ind)
+	return p.bailLine(ind, documentOwnerIndent)
 }
 
 // Whether a block sequence may start at its parent's own column, the one
@@ -257,13 +261,13 @@ func (p *yamlParser) parseBlockValue(parentIndent int, sameIndentSequence bool, 
 			return nil
 		}
 
-		return p.bailLine(ind)
+		return p.bailLine(ind, parentIndent)
 	}
 
 	ind := p.measureIndent()
 
 	if ind > parentIndent {
-		return p.parseNodeAt(ind, parentIndent, leafIndent, leafOK)
+		return p.parseNodeAt(ind, parentIndent, leafIndent, leafOK, sameIndentSequence)
 	}
 
 	if sameIndentSequence && ind == parentIndent && p.isSeqDash(ind) {
@@ -281,7 +285,10 @@ func (p *yamlParser) parseBlockValue(parentIndent int, sameIndentSequence bool, 
 	return nil
 }
 
-func (p *yamlParser) parseNodeAt(ind, parentIndent, leafIndent int, leafOK bool) Node {
+// underKey is the owner's kind, as parseBlockValue's sameIndentSequence: a
+// dash may hold a compact `- ? a`, a key may not. A key running onto more
+// lines would sit no deeper than the `?` once moved up.
+func (p *yamlParser) parseNodeAt(ind, parentIndent, leafIndent int, leafOK, underKey bool) Node {
 	if p.isSeqDash(ind) {
 		return p.parseSequence(ind, false)
 	}
@@ -290,18 +297,23 @@ func (p *yamlParser) parseNodeAt(ind, parentIndent, leafIndent int, leafOK bool)
 		return p.parseMapping(ind, false)
 	}
 
-	if !leafOK || anchorHasColon(p.Src[p.Pos.Offset+ind:]) {
-		return p.bailLine(ind)
+	line := p.Src[p.Pos.Offset+ind:]
+	explicitKey := opensExplicitKey(line)
+
+	if !leafOK || anchorHasColon(line) || (underKey && explicitKey) {
+		return p.bailLine(ind, parentIndent)
 	}
 
 	saved := p.Pos
 	p.AdvanceN(ind)
 
 	node, comment := p.parseInlineValue(leafIndent, parentIndent)
-	if comment != nil {
+	_, oneLine := node.(*Scalar)
+
+	if comment != nil || (explicitKey && !oneLine) {
 		p.Pos = saved
 
-		return p.bailLine(ind)
+		return p.bailLine(ind, parentIndent)
 	}
 
 	return node
@@ -324,6 +336,14 @@ func anchorHasColon(line []byte) bool {
 	}
 
 	return false
+}
+
+func opensExplicitKey(line []byte) bool {
+	if len(line) == 0 || line[0] != '?' {
+		return false
+	}
+
+	return len(line) == 1 || line[1] == ' ' || line[1] == '\t' || line[1] == '\r' || line[1] == '\n'
 }
 
 func (p *yamlParser) parseMapping(indent int, inlineFirst bool) *Mapping {
@@ -651,7 +671,7 @@ func (p *yamlParser) parseInlineValue(indent, parentIndent int) (Node, *Trivia) 
 
 		return node, p.finishLine()
 	case '&', '*', '!':
-		return p.parseAnchoredValue(indent, parentIndent), nil
+		return p.parseAnchoredValue(indent, parentIndent)
 	case '"', '\'':
 		scalar := p.parseQuotedScalar(indent)
 
@@ -853,26 +873,99 @@ func blockIndicator(span []byte) []byte {
 }
 
 // keepChomped reads past line breaks, since a property may stand on a line of
-// its own above the header. A `+` in the header's comment chomps nothing.
+// its own above the header.
 func keepChomped(span []byte) bool {
 	return bytes.IndexByte(headerAfterLead(span), '+') >= 0
 }
 
-func headerAfterLead(text []byte) []byte {
-	for field := range bytes.FieldsSeq(text) {
-		switch {
-		case field[0] == '&' || field[0] == '!':
-			continue
-		case len(field) == 1 && (field[0] == '?' || field[0] == ':'):
-			continue
-		case field[0] == '|' || field[0] == '>':
-			return field
+func keepChompedOnAnyLine(span []byte) bool {
+	for line := range bytes.Lines(span) {
+		if bytes.IndexByte(lastHeaderField(line), '+') >= 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// A `+` in the header's comment chomps nothing.
+func lastHeaderField(line []byte) []byte {
+	var last []byte
+
+	for field := range bytes.FieldsSeq(line) {
+		if field[0] == '#' {
+			break
 		}
 
+		last = field
+
+		if bytes.IndexByte(field, '#') > 0 && blockHeader(field) != nil {
+			break
+		}
+	}
+
+	if len(last) == 0 {
 		return nil
 	}
 
+	return blockHeader(last)
+}
+
+func leadAboveHeader(text []byte, ownerIndent int) bool {
+	first := true
+
+	for line := range bytes.Lines(text) {
+		blank := len(bytes.TrimSpace(line)) == 0
+
+		if !first && !blank && commentColumn(line) <= ownerIndent {
+			return false
+		}
+
+		if !onlyLead(line) {
+			return !first && headerAfterLead(line) != nil
+		}
+
+		first = false
+	}
+
+	return false
+}
+
+func onlyLead(line []byte) bool {
+	for field := range bytes.FieldsSeq(line) {
+		if !isLeadField(field) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func headerAfterLead(text []byte) []byte {
+	for field := range bytes.FieldsSeq(text) {
+		if !isLeadField(field) {
+			return blockHeader(field)
+		}
+	}
+
 	return nil
+}
+
+func isLeadField(field []byte) bool {
+	lone := len(field) == 1 && (field[0] == '?' || field[0] == ':')
+
+	return field[0] == '&' || field[0] == '!' || lone
+}
+
+// libyaml ends a header at a `#` glued to it.
+func blockHeader(field []byte) []byte {
+	if field[0] != '|' && field[0] != '>' {
+		return nil
+	}
+
+	header, _, _ := bytes.Cut(field, []byte("#"))
+
+	return header
 }
 
 // consumeTrailingBlanks returns the end before the run's last line break,
@@ -887,24 +980,110 @@ func (p *yamlParser) consumeTrailingBlanks(end Position) Position {
 
 // A value whose header goes on to `|` or `>` is a block scalar: its trailing
 // whitespace and kept breaks are value, which only a BlockScalar preserves.
-// The value owns every line indented past its owner, parentIndent, so `- &a`
-// takes the mapping that starts below it at the column after the dash.
-func (p *yamlParser) parseAnchoredValue(indent, parentIndent int) Node {
-	start := p.Pos
-	isBlockScalar := blockIndicator(p.Src[p.Pos.Offset:]) != nil
-	end := p.consumeValueBlock(parentIndent, isBlockScalar)
-	raw := p.slice(start, end)
-
-	if isBlockScalar {
-		return &BlockScalar{Range: mkspan(start, end), Raw: raw, Indent: parentIndent, ContentIndent: contentIndent(raw, parentIndent)}
+func (p *yamlParser) parseAnchoredValue(indent, parentIndent int) (Node, *Trivia) {
+	if collection, comment, ok := p.parsePropertiedCollection(parentIndent); ok {
+		return collection, comment
 	}
 
-	return &Verbatim{Range: mkspan(start, end), Raw: raw, Indent: indent}
+	start := p.Pos
+	rest := p.Src[p.Pos.Offset:]
+
+	if blockIndicator(rest) != nil {
+		end := p.consumeValueBlock(parentIndent, blockIsScalarBody)
+		raw := p.slice(start, end)
+
+		return &BlockScalar{Range: mkspan(start, end), Raw: raw, Indent: parentIndent, ContentIndent: contentIndent(raw, parentIndent)}, nil
+	}
+
+	if leadAboveHeader(rest, parentIndent) {
+		end := p.consumeHeaderBelowLead(parentIndent)
+
+		return &Verbatim{Range: mkspan(start, end), Raw: p.slice(start, end), Indent: indent, HoldsBlockScalar: true}, nil
+	}
+
+	end := p.consumeValueBlock(parentIndent, blockIsValue)
+
+	return &Verbatim{Range: mkspan(start, end), Raw: p.slice(start, end), Indent: indent}, nil
 }
 
-func (p *yamlParser) bailLine(indent int) *Verbatim {
+func (p *yamlParser) parsePropertiedCollection(parentIndent int) (Node, *Trivia, bool) {
+	line, _, _ := bytes.Cut(p.Src[p.Pos.Offset:], []byte("\n"))
+	if anchorHasColon(line) {
+		return nil, nil, false
+	}
+
+	saved, errorsBefore, pendingBefore := p.Pos, len(p.errors), len(p.pending)
+	propertiesStart := p.Pos
+
+	var properties *Scalar
+
+	for !p.Eof() && (p.Peek() == '&' || p.Peek() == '!') {
+		for !p.Eof() && !p.atLineEnd() && p.Peek() != ' ' && p.Peek() != '\t' {
+			p.Advance()
+		}
+
+		properties = &Scalar{Range: mkspan(propertiesStart, p.Pos), Raw: p.slice(propertiesStart, p.Pos)}
+		p.skipInlineSpace()
+	}
+
+	if !p.Eof() && !p.atLineEnd() && p.Peek() != '#' {
+		p.Pos = saved
+
+		return nil, nil, false
+	}
+
+	comment := p.finishLine()
+
+	switch node := p.parseBlockValue(parentIndent, sequenceMustIndent, parentIndent, true).(type) {
+	case *Mapping:
+		node.Properties = properties
+
+		return node, comment, true
+	case *Sequence:
+		node.Properties = properties
+
+		return node, comment, true
+	}
+
+	p.Pos = saved
+	p.errors = p.errors[:errorsBefore]
+	p.pending = p.pending[:pendingBefore]
+
+	return nil, nil, false
+}
+
+// consumeHeaderBelowLead reads the lines above a block scalar header that
+// hold only properties or a lone `?` or `:` as separation, and only the
+// header's body as scalar text.
+func (p *yamlParser) consumeHeaderBelowLead(indent int) Position {
+	for !p.Eof() {
+		line, _, _ := bytes.Cut(p.Src[p.Pos.Offset:], []byte("\n"))
+		if !onlyLead(line) {
+			break
+		}
+
+		p.consumeLine()
+	}
+
+	return p.consumeValueBlock(indent, blockIsScalarBody)
+}
+
+// The span freezes the file, so a `+` scalar anywhere in it keeps its
+// trailing line breaks; blank lines claimed for none stay as written.
+func (p *yamlParser) bailLine(indent, ownerIndent int) *Verbatim {
 	start := p.Pos
-	end := p.consumeValueBlock(indent, blockIsValue)
+
+	var end Position
+
+	if rest := p.Src[p.Pos.Offset:]; blockIndicator(rest) != nil || leadAboveHeader(rest, ownerIndent) {
+		end = p.consumeHeaderBelowLead(ownerIndent)
+	} else {
+		end = p.consumeValueBlock(indent, blockIsValue)
+	}
+
+	if keepChompedOnAnyLine(p.slice(start, end)) {
+		end = p.consumeTrailingBlanks(end)
+	}
 
 	return &Verbatim{Range: mkspan(start, end), Raw: p.slice(start, end), Bail: true, Indent: indent}
 }
@@ -1351,6 +1530,12 @@ func (p *yamlParser) findSeparatorOnCurrentLine() int {
 			}
 
 			continue
+		// A block scalar header is never a key, even with libyaml's glued
+		// comment holding a colon (`>#a: b`).
+		case atNodeStart && (c == '|' || c == '>'):
+			p.Pos = saved
+
+			return -1
 		case atNodeStart && (c == '\'' || c == '"' || c == '[' || c == '{'):
 			line := p.Pos.Line
 

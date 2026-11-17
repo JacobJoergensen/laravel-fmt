@@ -227,6 +227,7 @@ func emitMappingEntry(w *formatter.Writer, src []byte, e *parser.MappingEntry) {
 		return
 	}
 
+	emitProperties(w, e.Value)
 	emitInlineComment(w, e.Comment)
 	w.Newline()
 	w.Indent()
@@ -268,7 +269,11 @@ func emitItemValue(w *formatter.Writer, src []byte, value parser.Node, comment *
 		// the mapping's first entry ends it too: written after the dash it comes
 		// back as the ITEM's inline comment, which moves what a comment annotates
 		// and stops a `laravel-fmt-ignore` from freezing the entry.
-		if comment != nil || firstEntryHasTrivia(v) {
+		//
+		// Properties end it as well: `- &x a: 1` would anchor the key, not the
+		// mapping.
+		if comment != nil || firstEntryHasTrivia(v) || v.Properties != nil {
+			emitProperties(w, v)
 			emitInlineComment(w, comment)
 			w.Newline()
 			w.Indent()
@@ -283,6 +288,7 @@ func emitItemValue(w *formatter.Writer, src []byte, value parser.Node, comment *
 		w.Space()
 		w.WithAlign(seqValueOffset, func() { emitMapping(w, src, v) })
 	case *parser.Sequence:
+		emitProperties(w, v)
 		emitInlineComment(w, comment)
 		w.Newline()
 		w.Indent()
@@ -293,6 +299,22 @@ func emitItemValue(w *formatter.Writer, src []byte, value parser.Node, comment *
 
 func firstEntryHasTrivia(m *parser.Mapping) bool {
 	return len(m.Entries) > 0 && len(m.Entries[0].Leading) > 0
+}
+
+func emitProperties(w *formatter.Writer, collection parser.Node) {
+	var properties *parser.Scalar
+
+	switch c := collection.(type) {
+	case *parser.Mapping:
+		properties = c.Properties
+	case *parser.Sequence:
+		properties = c.Properties
+	}
+
+	if properties != nil {
+		w.Space()
+		w.WriteBytes(properties.Raw)
+	}
 }
 
 // seqValueOffset is how far past the Writer's indent a sequence item's value
@@ -343,6 +365,13 @@ func emitLeafValue(w *formatter.Writer, src []byte, value parser.Node, comment *
 
 		for start < end && (src[start] == ' ' || src[start] == '\t') {
 			start++
+		}
+
+		if v.HoldsBlockScalar {
+			formatter.EmitVerbatimStrippingKeepTrailing(w, src[start:end], max(v.Indent-baseOffset, 0))
+			w.Newline()
+
+			return true
 		}
 
 		for end > start && (src[end-1] == ' ' || src[end-1] == '\t' || src[end-1] == '\r' || src[end-1] == '\n') {

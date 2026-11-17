@@ -54,9 +54,10 @@ type Document struct {
 
 // Mapping is a block mapping.
 type Mapping struct {
-	Range    Span
-	Entries  []*MappingEntry
-	Trailing []Trivia
+	Range      Span
+	Entries    []*MappingEntry
+	Trailing   []Trivia
+	Properties *Scalar
 }
 
 // Span returns the source extent of the mapping.
@@ -74,9 +75,10 @@ type MappingEntry struct {
 
 // Sequence is a block sequence.
 type Sequence struct {
-	Range    Span
-	Items    []*SequenceItem
-	Trailing []Trivia
+	Range      Span
+	Items      []*SequenceItem
+	Trailing   []Trivia
+	Properties *Scalar
 }
 
 // Span returns the source extent of the sequence.
@@ -148,6 +150,9 @@ type Verbatim struct {
 	// re-home the span, because that distance, not the span's own column, is
 	// what keeps those lines part of the node.
 	Indent int
+	// HoldsBlockScalar marks a block scalar whose header sits below its
+	// properties: its line-trailing whitespace and kept line breaks are content.
+	HoldsBlockScalar bool
 }
 
 // Span returns the source extent of the preserved span.
