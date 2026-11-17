@@ -162,53 +162,76 @@ func mustSkip(t *testing.T, skip func(string) (bool, error), relPath string) boo
 	return skipped
 }
 
-func TestFilesSkipsHiddenDirs(t *testing.T) {
+func TestFilesWalksDotfilesButNotVCSFolders(t *testing.T) {
 	root := buildTree(t, map[string]string{
 		".github/workflows/ci.yml": "on: push",
-		".cursor/rules.json":       "{}",
+		".prettierrc.json":         "{}",
+		".git/config.json":         "{}",
+		".jj/repo/store.json":      "{}",
 		"app/User.php":             "<?php",
 	})
 
 	got := mustFiles(t, root, config.Default())
 
-	if containsRel(got, root, ".github/workflows/ci.yml") || containsRel(got, root, ".cursor/rules.json") {
-		t.Fatalf("hidden directory file leaked into walk result: %v", got)
+	for _, rel := range []string{".github/workflows/ci.yml", ".prettierrc.json", "app/User.php"} {
+		if !containsRel(got, root, rel) {
+			t.Errorf("%s missing from walk result: %v", rel, got)
+		}
 	}
 
-	if !containsRel(got, root, "app/User.php") {
-		t.Fatalf("app file missing from walk result: %v", got)
+	for _, rel := range []string{".git/config.json", ".jj/repo/store.json"} {
+		if containsRel(got, root, rel) {
+			t.Errorf("%s is inside a version control folder but was selected: %v", rel, got)
+		}
 	}
 }
 
-func TestFilesSkipsRootDotfile(t *testing.T) {
+func TestFilesSkipsToolOwnedDotPaths(t *testing.T) {
 	root := buildTree(t, map[string]string{
-		".prettierrc.json": "{}",
-		"app/User.php":     "<?php",
+		".idea/workspace.xml":                 "<project/>",
+		".phpstorm.meta.php":                  "<?php",
+		".claude/worktrees/feature/app/A.php": "<?php",
+		".claude/skills/pest/SKILL.md":        "# Pest",
+		".vite/manifest.json":                 "{}",
+		".claude/settings.json":               "{}",
+		".ai/skills/pest/SKILL.md":            "# Pest",
 	})
 
 	got := mustFiles(t, root, config.Default())
 
-	if containsRel(got, root, ".prettierrc.json") {
-		t.Fatalf("root dotfile leaked into walk result: %v", got)
+	owned := []string{
+		".idea/workspace.xml",
+		".phpstorm.meta.php",
+		".claude/worktrees/feature/app/A.php",
+		".claude/skills/pest/SKILL.md",
+		".vite/manifest.json",
+	}
+
+	for _, rel := range owned {
+		if containsRel(got, root, rel) {
+			t.Errorf("%s is owned by a tool but was selected: %v", rel, got)
+		}
+	}
+
+	for _, rel := range []string{".claude/settings.json", ".ai/skills/pest/SKILL.md"} {
+		if !containsRel(got, root, rel) {
+			t.Errorf("%s missing from walk result: %v", rel, got)
+		}
 	}
 }
 
-func TestFilesExplicitHiddenDirArgIncluded(t *testing.T) {
+func TestFilesHonorsAGitignoredSkillsSource(t *testing.T) {
 	root := buildTree(t, map[string]string{
-		".github/workflows/ci.yml": "on: push",
+		".gitignore":               ".ai/skills/\n",
+		".ai/skills/pest/SKILL.md": "# Pest",
 	})
 
-	got, err := Files(root, root, config.Default(), []string{filepath.Join(root, ".github")}, nil)
-	if err != nil {
-		t.Fatalf("Files: %v", err)
-	}
-
-	if !containsRel(got, root, ".github/workflows/ci.yml") {
-		t.Fatalf("explicitly named hidden directory was not formatted: %v", got)
+	if got := mustFiles(t, root, config.Default()); containsRel(got, root, ".ai/skills/pest/SKILL.md") {
+		t.Fatalf("a gitignored .ai/skills was walked: %v", got)
 	}
 }
 
-func TestIgnoreFilterSkipsHiddenSegments(t *testing.T) {
+func TestIgnoreFilterSkipsVCSFoldersOnly(t *testing.T) {
 	root := buildTree(t, nil)
 
 	skip, err := IgnoreFilter(root, root, config.Default(), nil)
@@ -216,12 +239,12 @@ func TestIgnoreFilterSkipsHiddenSegments(t *testing.T) {
 		t.Fatalf("IgnoreFilter: %v", err)
 	}
 
-	if !mustSkip(t, skip, ".github/workflows/ci.yml") {
-		t.Error("IgnoreFilter did not skip a file under a hidden directory")
+	if !mustSkip(t, skip, ".jj/repo/store.json") {
+		t.Error("IgnoreFilter did not skip a file under a version control folder")
 	}
 
-	if mustSkip(t, skip, "app/User.php") {
-		t.Error("IgnoreFilter wrongly skipped a non-hidden file")
+	if mustSkip(t, skip, ".github/workflows/ci.yml") {
+		t.Error("IgnoreFilter wrongly skipped a file under a hidden folder")
 	}
 }
 
@@ -933,6 +956,7 @@ func TestIgnoresFileAgreesWithTheWalk(t *testing.T) {
 		"resources/views/.gitignore":      "local.blade.php\n",
 		"resources/views/local.blade.php": "<div></div>",
 		"resources/views/keep.blade.php":  "<div></div>",
+		".git/config.json":                "{}",
 	})
 
 	cfg := config.Default()
@@ -943,6 +967,7 @@ func TestIgnoresFileAgreesWithTheWalk(t *testing.T) {
 		"app/User.php", "app/Secret.php", "app/Kept.php", "generated/a.php",
 		"vendor/foo/Bar.php", "composer.lock", "public/build/manifest.json",
 		"resources/views/local.blade.php", "resources/views/keep.blade.php",
+		".git/config.json",
 	}
 
 	for _, rel := range candidates {

@@ -19,7 +19,7 @@ const prettierIgnoreFileName = ".prettierignore"
 // regex delimiter.
 const finderRegexModifiers = "imsxuADUn"
 
-var oxfmtLanguages = []string{"*.css", "*.html", "*.md", "*.json", "*.jsonc", "*.yml", "*.yaml"}
+var oxfmtLanguages = []string{"*.css", "*.html", "*.md", "*.json", "*.jsonc", "*.webmanifest", "*.yml", "*.yaml"}
 
 var viteConfigNames = []string{
 	"vite.config.ts", "vite.config.mts", "vite.config.cts", "vite.config.js", "vite.config.mjs", "vite.config.cjs",

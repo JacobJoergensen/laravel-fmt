@@ -539,6 +539,39 @@ func TestFormatKeepsEmptyItemSiblings(t *testing.T) {
 	}
 }
 
+func TestFormatKeepsCommentsThatCloseABlockAtItsDepth(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"commented-out last item", "a:\n  - x: 1\n  # - y: 2\nb: 2\n", "a:\n  - x: 1\n  # - y: 2\nb: 2\n"},
+		{"at end of file", "a:\n  b:\n    - x: 1\n      # tail\n    # step\n", "a:\n  b:\n    - x: 1\n      # tail\n    # step\n"},
+		{"blank line inside the run", "a:\n  b: 1\n  # one\n\n  # two\nc: 1\n", "a:\n  b: 1\n  # one\n\n  # two\nc: 1\n"},
+		{"shallower comment leads the next key", "a:\n  b: 1\n# about c\nc: 1\n", "a:\n  b: 1\n# about c\nc: 1\n"},
+		{"under an item with dashes at the key column", "a:\n- x\n  # note\n# about b\nb: 1\n", "a:\n  - x\n  # note\n# about b\nb: 1\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+
+			if again := mustFormat(t, got, config.Default()); !bytes.Equal(again, got) {
+				t.Fatalf("not idempotent: %q -> %q", got, again)
+			}
+		})
+	}
+}
+
+func TestFormatKeepsAnAnchorHoldingAColonBelowItsKey(t *testing.T) {
+	for _, src := range []string{"key:\n  &a: 1\n", "key:\n  !t &a: 1\n"} {
+		t.Run(src, func(t *testing.T) {
+			if got := mustFormat(t, []byte(src), config.Default()); string(got) != src {
+				t.Fatalf("got %q, want it unchanged", got)
+			}
+		})
+	}
+}
+
 func TestFormatKeepsItemFirstEntryTrivia(t *testing.T) {
 	cases := []struct{ name, src, want string }{
 		{"comment", "-\n  # note\n  a: 1\n", "-\n  # note\n  a: 1\n"},

@@ -68,11 +68,19 @@ func EmitScriptBody(w *formatter.Writer, src []byte) bool {
 	return true
 }
 
-var jsoncFilenames = []string{"devcontainer.json", ".devcontainer.json"}
+var jsoncFilenames = []string{
+	"devcontainer.json",
+	".devcontainer.json",
+	".eslintrc.json",
+	".markdownlint.json",
+	".oxlintrc.json",
+	"opencode.json",
+}
 
-// isJSONCFilename reports whether filename is read only by a JSONC reader:
-// TypeScript's for tsconfig.* and jsconfig.*, and VS Code's for its .vscode
-// files and a dev container, which Laravel Sail writes with comments.
+var jsoncFolders = []string{".vscode", ".zed"}
+
+// isJSONCFilename reports whether filename is read only by a JSONC reader;
+// Laravel Sail writes its dev container with comments.
 func isJSONCFilename(filename string) bool {
 	base := strings.ToLower(filepath.Base(filename))
 
@@ -87,7 +95,7 @@ func isJSONCFilename(filename string) bool {
 	dir := filepath.Dir(filename)
 	folder := filepath.Base(dir)
 
-	if slices.Contains(jsoncFilenames, base) || strings.EqualFold(folder, ".vscode") {
+	if slices.Contains(jsoncFilenames, base) || slices.Contains(jsoncFolders, strings.ToLower(folder)) {
 		return true
 	}
 

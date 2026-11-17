@@ -70,7 +70,7 @@ func DetectLanguage(path string) Language {
 		return LangYAML
 	case strings.HasSuffix(lower, ".xml"):
 		return LangXML
-	case strings.HasSuffix(lower, ".json"), strings.HasSuffix(lower, ".jsonc"):
+	case strings.HasSuffix(lower, ".json"), strings.HasSuffix(lower, ".jsonc"), strings.HasSuffix(lower, ".webmanifest"):
 		return LangJSON
 	}
 

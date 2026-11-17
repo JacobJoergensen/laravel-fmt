@@ -24,6 +24,7 @@ func TestDetectLanguageByExtension(t *testing.T) {
 		{"jsconfig.base.json", LangJSON},
 		{"TSCONFIG.JSON", LangJSON},
 		{"settings.jsonc", LangJSON},
+		{"public/site.webmanifest", LangJSON},
 		{"main.go", LangUnknown},
 		{"no-extension", LangUnknown},
 		{"dir/nested.blade.php", LangBlade},

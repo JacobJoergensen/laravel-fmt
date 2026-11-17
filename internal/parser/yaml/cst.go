@@ -20,6 +20,10 @@ type Node interface {
 type File struct {
 	Src  []byte
 	Docs []*Document
+	// BOMAfterWhitespace marks a byte order mark after leading whitespace,
+	// which libyaml reads as content; dropping the whitespace would turn it
+	// into the file's mark instead.
+	BOMAfterWhitespace bool
 }
 
 // TriviaKind categorizes a non-structural line.
@@ -50,8 +54,9 @@ type Document struct {
 
 // Mapping is a block mapping.
 type Mapping struct {
-	Range   Span
-	Entries []*MappingEntry
+	Range    Span
+	Entries  []*MappingEntry
+	Trailing []Trivia
 }
 
 // Span returns the source extent of the mapping.
@@ -69,8 +74,9 @@ type MappingEntry struct {
 
 // Sequence is a block sequence.
 type Sequence struct {
-	Range Span
-	Items []*SequenceItem
+	Range    Span
+	Items    []*SequenceItem
+	Trailing []Trivia
 }
 
 // Span returns the source extent of the sequence.

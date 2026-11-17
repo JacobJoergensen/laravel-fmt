@@ -1,6 +1,14 @@
 # Changelog
 
 ## Unreleased
+* Added formatting of `.webmanifest` files as JSON
+* Added formatting of dotfiles and hidden folders, like `.github/workflows`, skipping version control folders
+* Added `.idea`, `.phpstorm.meta.php`, `.vite`, `.claude/worktrees` and Laravel Boost's agent skill copies to the default ignores
+* Improved `.eslintrc.json`, `.markdownlint.json`, `.oxlintrc.json`, `opencode.json` and `.zed` settings to keep their comments, like `tsconfig.json`
+* Fixed YAML comments after the last item of a nested block, like a commented-out workflow step, moving to column 0
+* Fixed a YAML anchor holding `:`, like `&a: 1` or `!t &a: 1`, being moved onto its key's line
+* Fixed a YAML `>+` or `|+` block scalar after `? ` or below its tag losing its kept trailing line breaks
+* Fixed a YAML file with a byte order mark after a blank line changing its value
 
 ## Version 0.12.0 (2026-11-16)
 * Improved a closure after `??`, `?:` or another operator to stay on the operator's line, like `$a ?: function () {`

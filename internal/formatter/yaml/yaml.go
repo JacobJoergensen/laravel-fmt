@@ -34,6 +34,10 @@ func Format(src []byte, cfg *config.File) ([]byte, error) {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
 
+	if file.BOMAfterWhitespace {
+		return src, nil
+	}
+
 	yamlCfg := *cfg
 	yamlCfg.IndentStyle = config.IndentStyleSpace
 

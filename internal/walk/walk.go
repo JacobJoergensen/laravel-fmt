@@ -155,7 +155,7 @@ func IgnoreFilter(root, runAnchor string, runCfg *config.File, projectOf Project
 	return func(relPath string) (bool, error) {
 		slash := filepath.ToSlash(relPath)
 
-		if hasHiddenSegment(slash) {
+		if hasVCSSegment(slash) {
 			return true, nil
 		}
 
@@ -185,9 +185,7 @@ func IgnoreFilter(root, runAnchor string, runCfg *config.File, projectOf Project
 	}, nil
 }
 
-// IgnoresFile reports whether a walk from anchor would leave out file by its
-// ignore rules, every .gitignore down to it included. The walk's hidden-name
-// skip does not apply: a dotfile being edited is formatted on save.
+// IgnoresFile reports whether a walk from anchor would leave out file.
 func IgnoresFile(anchor string, cfg *config.File, file string) (bool, error) {
 	absPath, err := filepath.Abs(file)
 	if err != nil {
@@ -203,16 +201,20 @@ func IgnoresFile(anchor string, cfg *config.File, file string) (bool, error) {
 		return false, err
 	}
 
-	return set.matchFile(prefix + filepath.Base(absPath)), nil
+	rel := prefix + filepath.Base(absPath)
+
+	return hasVCSSegment(rel) || set.matchFile(rel), nil
 }
 
-func isHidden(name string) bool {
-	return strings.HasPrefix(name, ".")
+var vcsDirs = []string{".git", ".hg", ".jj", ".sl", ".svn"}
+
+func isVCSDir(name string) bool {
+	return slices.Contains(vcsDirs, name)
 }
 
-func hasHiddenSegment(slashPath string) bool {
+func hasVCSSegment(slashPath string) bool {
 	for seg := range strings.SplitSeq(slashPath, "/") {
-		if isHidden(seg) {
+		if isVCSDir(seg) {
 			return true
 		}
 	}
@@ -579,7 +581,7 @@ func walkTree(dir, ignoreRoot string, cfg ignoreRules, projectOf ProjectIgnore, 
 				return nil
 			}
 
-			if isHidden(d.Name()) {
+			if isVCSDir(d.Name()) {
 				return filepath.SkipDir
 			}
 
@@ -604,10 +606,6 @@ func walkTree(dir, ignoreRoot string, cfg ignoreRules, projectOf ProjectIgnore, 
 		// a FIFO from blocking the read. Naming one on the command line still
 		// formats it.
 		if !d.Type().IsRegular() {
-			return nil
-		}
-
-		if isHidden(d.Name()) {
 			return nil
 		}
 

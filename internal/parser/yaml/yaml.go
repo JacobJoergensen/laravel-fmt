@@ -4,6 +4,7 @@
 package yaml
 
 import (
+	"bytes"
 	"fmt"
 	"unicode/utf8"
 )
@@ -19,7 +20,15 @@ func Parse(src []byte) (*File, []Error) {
 	p := &yamlParser{Src: src, Pos: Position{Line: 1, Column: 1}}
 	docs := p.parseStream()
 
-	return &File{Src: src, Docs: docs}, p.errors
+	return &File{Src: src, Docs: docs, BOMAfterWhitespace: bomAfterWhitespace(src)}, p.errors
+}
+
+var byteOrderMark = []byte{0xEF, 0xBB, 0xBF}
+
+func bomAfterWhitespace(src []byte) bool {
+	rest := bytes.TrimLeft(src, " \t\r\n")
+
+	return len(rest) < len(src) && bytes.HasPrefix(rest, byteOrderMark)
 }
 
 func firstNonPrintable(src []byte) (Position, bool) {

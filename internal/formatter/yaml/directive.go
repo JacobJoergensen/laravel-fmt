@@ -17,6 +17,38 @@ func leadingHasIgnore(leading []parser.Trivia) bool {
 	return false
 }
 
+// closesWithIgnore reports whether an ignore comment closes the block before
+// a sibling, at any depth: written deeper than the sibling, it still sits
+// above it and freezes it.
+func closesWithIgnore(previous parser.Node) bool {
+	for {
+		switch n := previous.(type) {
+		case *parser.Mapping:
+			if leadingHasIgnore(n.Trailing) {
+				return true
+			}
+
+			if len(n.Entries) == 0 {
+				return false
+			}
+
+			previous = n.Entries[len(n.Entries)-1].Value
+		case *parser.Sequence:
+			if leadingHasIgnore(n.Trailing) {
+				return true
+			}
+
+			if len(n.Items) == 0 {
+				return false
+			}
+
+			previous = n.Items[len(n.Items)-1].Value
+		default:
+			return false
+		}
+	}
+}
+
 // trimFrozenTrailing returns where a frozen span's content ends, with its
 // trailing line breaks and blank lines dropped: the caller writes the closing
 // break, and keeping them would double it on the next pass.

@@ -3,6 +3,7 @@ package yaml
 import (
 	"bytes"
 	"fmt"
+	"slices"
 
 	parserpkg "github.com/JacobJoergensen/laravel-fmt/internal/parser"
 )
@@ -266,7 +267,15 @@ func (p *yamlParser) parseBlockValue(parentIndent int, sameIndentSequence bool, 
 	}
 
 	if sameIndentSequence && ind == parentIndent && p.isSeqDash(ind) {
-		return p.parseSequence(parentIndent, false)
+		seq := p.parseSequence(parentIndent, false)
+
+		// Its dashes share the key's column, so a comment there may as well
+		// lead the next key: from the first one on, they stay with the mapping.
+		cut := commentRun(seq.Trailing, parentIndent+1)
+		p.pending = append(seq.Trailing[cut:], p.pending...)
+		seq.Trailing = seq.Trailing[:cut]
+
+		return seq
 	}
 
 	return nil
@@ -281,7 +290,7 @@ func (p *yamlParser) parseNodeAt(ind, parentIndent, leafIndent int, leafOK bool)
 		return p.parseMapping(ind, false)
 	}
 
-	if !leafOK {
+	if !leafOK || anchorHasColon(p.Src[p.Pos.Offset+ind:]) {
 		return p.bailLine(ind)
 	}
 
@@ -298,8 +307,28 @@ func (p *yamlParser) parseNodeAt(ind, parentIndent, leafIndent int, leafOK bool)
 	return node
 }
 
+// libyaml ends an anchor name at a colon, which the spec allows in it, so
+// behind a key the rest of the line would read as a nested key.
+func anchorHasColon(line []byte) bool {
+	for len(line) > 0 && (line[0] == '&' || line[0] == '!') {
+		end := bytes.IndexAny(line, " \t\r\n")
+		if end < 0 {
+			end = len(line)
+		}
+
+		if line[0] == '&' && bytes.IndexByte(line[:end], ':') >= 0 {
+			return true
+		}
+
+		line = bytes.TrimLeft(line[end:], " \t")
+	}
+
+	return false
+}
+
 func (p *yamlParser) parseMapping(indent int, inlineFirst bool) *Mapping {
 	m := &Mapping{}
+	own := len(p.pending)
 
 	var seen map[string]bool
 
@@ -320,11 +349,14 @@ func (p *yamlParser) parseMapping(indent int, inlineFirst bool) *Mapping {
 			p.AdvanceN(indent)
 		}
 
+		own = 0
 		entry := p.parseMappingEntry(indent)
 		entry.Leading = leading
 		seen = p.checkDuplicateKey(m.Entries, entry.Key, seen)
 		m.Entries = append(m.Entries, entry)
 	}
+
+	m.Trailing = p.claimTrailing(own, indent)
 
 	if len(m.Entries) > 0 {
 		m.Range = mkspan(m.Entries[0].Range.Start, m.Entries[len(m.Entries)-1].Range.End)
@@ -475,6 +507,7 @@ func (p *yamlParser) parseValueAfterColon(indent int) (Node, *Trivia) {
 
 func (p *yamlParser) parseSequence(indent int, inlineFirst bool) *Sequence {
 	s := &Sequence{}
+	own := len(p.pending)
 
 	for {
 		var leading []Trivia
@@ -489,6 +522,7 @@ func (p *yamlParser) parseSequence(indent int, inlineFirst bool) *Sequence {
 			}
 
 			leading = p.drainPending()
+			own = 0
 			p.AdvanceN(indent)
 		}
 
@@ -497,11 +531,49 @@ func (p *yamlParser) parseSequence(indent int, inlineFirst bool) *Sequence {
 		s.Items = append(s.Items, item)
 	}
 
+	s.Trailing = p.claimTrailing(own, indent)
+
 	if len(s.Items) > 0 {
 		s.Range = mkspan(s.Items[0].Range.Start, s.Items[len(s.Items)-1].Range.End)
 	}
 
 	return s
+}
+
+// Left pending, a block's closing comments would lead the next shallower line
+// and move to its column. Trivia before own was pending before the block began.
+func (p *yamlParser) claimTrailing(own, indent int) []Trivia {
+	end := own + commentRun(p.pending[own:], indent)
+	if end == own {
+		return nil
+	}
+
+	claimed := slices.Clone(p.pending[own:end])
+	p.pending = slices.Delete(p.pending, own, end)
+
+	return claimed
+}
+
+func commentRun(trivia []Trivia, column int) int {
+	run := 0
+
+	for i, tr := range trivia {
+		if tr.Kind != TriviaComment {
+			continue
+		}
+
+		if commentColumn(tr.Text) < column {
+			break
+		}
+
+		run = i + 1
+	}
+
+	return run
+}
+
+func commentColumn(line []byte) int {
+	return len(line) - len(bytes.TrimLeft(line, " \t"))
 }
 
 // Trivia parked in p.pending belongs to an enclosing scope, so a node's range
@@ -777,11 +849,23 @@ func indentIndicator(span []byte) int {
 func blockIndicator(span []byte) []byte {
 	header, _, _ := bytes.Cut(span, []byte("\n"))
 
-	for field := range bytes.FieldsSeq(header) {
-		switch field[0] {
-		case '&', '!':
+	return headerAfterLead(header)
+}
+
+// keepChomped reads past line breaks, since a property may stand on a line of
+// its own above the header. A `+` in the header's comment chomps nothing.
+func keepChomped(span []byte) bool {
+	return bytes.IndexByte(headerAfterLead(span), '+') >= 0
+}
+
+func headerAfterLead(text []byte) []byte {
+	for field := range bytes.FieldsSeq(text) {
+		switch {
+		case field[0] == '&' || field[0] == '!':
 			continue
-		case '|', '>':
+		case len(field) == 1 && (field[0] == '?' || field[0] == ':'):
+			continue
+		case field[0] == '|' || field[0] == '>':
 			return field
 		}
 
@@ -789,11 +873,6 @@ func blockIndicator(span []byte) []byte {
 	}
 
 	return nil
-}
-
-// A `+` in the header's comment chomps nothing.
-func keepChomped(span []byte) bool {
-	return bytes.IndexByte(blockIndicator(span), '+') >= 0
 }
 
 // consumeTrailingBlanks returns the end before the run's last line break,

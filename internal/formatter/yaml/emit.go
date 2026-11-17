@@ -199,10 +199,15 @@ func emitNode(w *formatter.Writer, src []byte, node parser.Node) {
 }
 
 func emitMapping(w *formatter.Writer, src []byte, m *parser.Mapping) {
+	var previous parser.Node
+
 	for _, e := range m.Entries {
 		emitTrivia(w, e.Leading)
 
-		if leadingHasIgnore(e.Leading) {
+		ignored := leadingHasIgnore(e.Leading) || closesWithIgnore(previous)
+		previous = e.Value
+
+		if ignored {
 			emitFrozen(w, src, e.Range, e.Value)
 
 			continue
@@ -210,6 +215,8 @@ func emitMapping(w *formatter.Writer, src []byte, m *parser.Mapping) {
 
 		emitMappingEntry(w, src, e)
 	}
+
+	emitTrivia(w, m.Trailing)
 }
 
 func emitMappingEntry(w *formatter.Writer, src []byte, e *parser.MappingEntry) {
@@ -228,10 +235,15 @@ func emitMappingEntry(w *formatter.Writer, src []byte, e *parser.MappingEntry) {
 }
 
 func emitSequence(w *formatter.Writer, src []byte, s *parser.Sequence) {
+	var previous parser.Node
+
 	for _, item := range s.Items {
 		emitTrivia(w, item.Leading)
 
-		if leadingHasIgnore(item.Leading) {
+		ignored := leadingHasIgnore(item.Leading) || closesWithIgnore(previous)
+		previous = item.Value
+
+		if ignored {
 			emitFrozen(w, src, item.Range, item.Value)
 
 			continue
@@ -240,6 +252,8 @@ func emitSequence(w *formatter.Writer, src []byte, s *parser.Sequence) {
 		w.Write("-")
 		emitItemValue(w, src, item.Value, item.Comment)
 	}
+
+	emitTrivia(w, s.Trailing)
 }
 
 func emitItemValue(w *formatter.Writer, src []byte, value parser.Node, comment *parser.Trivia) {

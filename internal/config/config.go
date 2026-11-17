@@ -322,6 +322,21 @@ func Default() *File {
 			"yarn.lock",
 			// barryvdh/laravel-ide-helper regenerates these whole.
 			"_ide_helper*.php",
+			".phpstorm.meta.php",
+			".idea/",
+			// Claude Code checks out other branches here.
+			".claude/worktrees/",
+			// Laravel Boost copies its skills from .ai into each agent's folder.
+			".agents/skills/",
+			".claude/skills/",
+			".cursor/skills/",
+			".factory/skills/",
+			".github/skills/",
+			".grok/skills/",
+			".junie/skills/",
+			".kiro/skills/",
+			".pi/skills/",
+			".vite/",
 		},
 		PrintWidth:  120,
 		IndentStyle: IndentStyleSpace,

@@ -21,3 +21,18 @@ func TestFrozenSpanKeepsAKeepChompedScalarsBlankLines(t *testing.T) {
 		})
 	}
 }
+
+func TestIgnoreCommentClosingTheBlockAboveFreezesTheNextKey(t *testing.T) {
+	cases := []struct{ name, src string }{
+		{"under a mapping", "a:\n  b: 1\n  # laravel-fmt-ignore\nc:   [ x,   y ]\n"},
+		{"under a nested sequence", "a:\n  - b:\n      - 1\n      # laravel-fmt-ignore\nc:   [ x,   y ]\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mustFormat(t, []byte(tc.src), config.Default()); string(got) != tc.src {
+				t.Fatalf("the ignored key changed.\n=== in ===\n%q\n=== out ===\n%q", tc.src, got)
+			}
+		})
+	}
+}
