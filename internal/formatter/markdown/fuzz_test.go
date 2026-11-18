@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/yuin/goldmark"
 	goldmarkhtml "github.com/yuin/goldmark/renderer/html"
@@ -38,7 +39,7 @@ func FuzzFormat(f *testing.F) {
 //   - A last line with no line break: `~~~0` loses its info string and
 //     `* ~~~\n ` its blank code line.
 //   - `<!` and a lowercase letter, which opens a declaration only since 0.31.
-//   - A tab right after a tag name: `<p\t` opens no HTML block for it.
+//   - A tab inside a tag: `<p\t` or `<A \t>` opens no HTML block for it.
 //   - An empty list item, after which it misplaces what follows a blank line:
 //     `* * \n\n  0` puts the `0` outside the list.
 //   - A vertical tab or form feed, which it keeps in an info string where
@@ -48,6 +49,8 @@ func FuzzFormat(f *testing.F) {
 //   - An indented fence, whose indent it leaves on whitespace-only lines.
 //   - A `*` or `_` run straight after a `>` marker, which it flanks by the
 //     marker: `>0*0\n>*!` reads `<em>`.
+//   - A `*` or `_` run after a stray UTF-8 continuation byte, which it skips
+//     to flank the run by the character before: `>0*0\n> \x89*` reads no `<em>`.
 //
 // Tables are GFM, where readers disagree on rows without pipes, so a document
 // the formatter reads a table in is left to the table tests.
@@ -61,10 +64,33 @@ func checkFormatKeepsMeaning(t *testing.T, cfg *config.File, src []byte) {
 		return
 	}
 
-	want := renderedMeaning(src)
-	if got := renderedMeaning(out); got != want {
+	srcMatter, srcBody := splitFrontmatter(src)
+	outMatter, outBody := splitFrontmatter(out)
+	if !bytes.Equal(srcMatter, outMatter) {
+		t.Fatalf("frontmatter differs\ninput  %q\noutput %q", src, out)
+	}
+
+	want := renderedMeaning(srcBody)
+	if got := renderedMeaning(outBody); got != want {
 		t.Fatalf("meaning differs\ninput  %q\noutput %q\nwant %s\ngot  %s", src, out, want, got)
 	}
+}
+
+// goldmark has no frontmatter, so it would read the fences as Markdown.
+func splitFrontmatter(src []byte) ([]byte, []byte) {
+	file, _ := parser.Parse(src)
+	if len(file.Blocks) == 0 {
+		return nil, src
+	}
+
+	matter, ok := file.Blocks[0].(*parser.Frontmatter)
+	if !ok {
+		return nil, src
+	}
+
+	lines := formatter.NormalizeLoneCR(matter.Content)
+
+	return formatter.NormalizeLineTerminators(lines, "\n"), src[matter.CloseFence.End.Offset:]
 }
 
 func oracleMisreads(src []byte) bool {
@@ -72,10 +98,26 @@ func oracleMisreads(src []byte) bool {
 		hasTabAfterNestedMarker(src) ||
 		endsWithoutLineBreak(src) ||
 		lowercaseDeclaration.Match(src) ||
-		tabAfterTagName.Match(src) ||
+		tabInTag.Match(src) ||
 		emptyListItemLine.Match(src) ||
 		delimiterAfterQuoteMarker.Match(src) ||
+		hasDelimiterAfterStrayByte(src) ||
 		bytes.ContainsAny(src, "\v\f")
+}
+
+func hasDelimiterAfterStrayByte(src []byte) bool {
+	for i := 1; i < len(src); i++ {
+		if src[i] != '*' && src[i] != '_' {
+			continue
+		}
+
+		r, size := utf8.DecodeLastRune(src[:i])
+		if r == utf8.RuneError && size == 1 && !utf8.RuneStart(src[i-1]) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func hasLoneCR(src []byte) bool {
@@ -115,7 +157,7 @@ func lineHasTabAfterNestedMarker(line []byte) bool {
 		switch {
 		case c == '\t':
 			offStop := col%4 != 0
-			plainGap := markers == 1 && firstMarkerCol == 0 && !tabBefore
+			plainGap := markers == 1 && firstMarkerCol == 0 && !tabBefore && line[i-1] != ' '
 
 			if markers >= 2 || (markers >= 1 && (tabBefore || firstMarkerCol > 0)) || (offStop && !plainGap) {
 				return true
@@ -188,7 +230,7 @@ var (
 	listMarkerBytes           = []byte("*-+.)0123456789")
 	oracle                    = goldmark.New(goldmark.WithRendererOptions(goldmarkhtml.WithUnsafe()))
 	lowercaseDeclaration      = regexp.MustCompile(`<![a-z]`)
-	tabAfterTagName           = regexp.MustCompile(`</?[A-Za-z][A-Za-z0-9-]*\t`)
+	tabInTag                  = regexp.MustCompile(`</?[A-Za-z][A-Za-z0-9-]*[^<>\n]*\t`)
 	delimiterAfterQuoteMarker = regexp.MustCompile(`(?m)^[ >]*>[*_]`)
 	emptyListItemLine         = regexp.MustCompile(`(?m)^[ \t>]*(?:(?:[-+*]|[0-9]{1,9}[.)])[ \t]+[ \t>]*)*(?:[-+*]|[0-9]{1,9}[.)])[ \t\r]*$`)
 	codeBlockPattern          = regexp.MustCompile(`(?s)<pre><code(?: class="language-([^"]*)")?>.*?</code></pre>`)

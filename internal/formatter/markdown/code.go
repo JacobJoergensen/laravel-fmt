@@ -51,11 +51,13 @@ func formatCode(b *parser.FencedCodeBlock, cfg *config.File) ([]byte, bool) {
 	codeCfg := *cfg
 	codeCfg.EndOfLine = config.EndOfLineLF
 
-	// A lone CR ends a line in Markdown, which the fence emitter writes as one,
-	// so the code has to be formatted with that line break, not as a CR byte.
-	// Content drops its last line break, which belongs to the code: a YAML `|+`
-	// keeps it as value.
-	src := slices.Concat(formatter.NormalizeLoneCR(b.Content), []byte("\n"))
+	// A lone CR or a CRLF ends a line in Markdown, which the fence emitter
+	// writes as the file's line ending, so the code formats with LF as it will
+	// on the next pass. Content drops its last line break, which belongs to the
+	// code: a YAML `|+` keeps it as value.
+	lines := formatter.NormalizeLoneCR(b.Content)
+	lf := formatter.NormalizeLineTerminators(lines, "\n")
+	src := slices.Concat(lf, []byte("\n"))
 
 	var (
 		out []byte

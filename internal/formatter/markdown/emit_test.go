@@ -818,6 +818,12 @@ func TestFormatKeepsLazyContinuationInItem(t *testing.T) {
 		// would escape a space, which renders as a literal backslash.
 		{"setext_underline_escaped_indented_in_quote", "> foo\n ===\n", "> foo\n> \\===\n"},
 		{"setext_underline_escaped_indented_in_item", "- foo\n ===\n", "- foo\n  \\===\n"},
+		{"fence_indented_not_paired_below", ">0\n\t```\n0``\n", "> 0\n>     ```\n> 0``\n"},
+		{"fence_indented_not_paired_above", ">`\n\t```\n", "> `\n>     ```\n"},
+		{"tilde_fence_indented", "> foo\n\t~~~\n", "> foo\n>     ~~~\n"},
+		{"heading_inside_span_closed_below", " >`\n\t#\n`\n", "> `\n>     #\n> `\n"},
+		{"heading_after_lazy_fence_in_item", "1.   foo\n    ```\n     \t# h\n", "1. foo\n       ```\n   # h\n"},
+		{"html_block_after_nested_list", " * * 0\n   \t<P\n", "* * 0\n   <P\n"},
 		// A delimiter row is no more allowed to arrive lazily than an underline is,
 		// so it was text too; the escape keeps it text now that it sits under the
 		// line it would otherwise promote into a table header.

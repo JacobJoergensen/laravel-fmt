@@ -1035,3 +1035,37 @@ func TestListItemKeepsTheBytesOfAFenceBehindANestedMarker(t *testing.T) {
 		})
 	}
 }
+
+func TestHTMLBlockInItemKeepsTabsPastItsIndent(t *testing.T) {
+	cases := []struct {
+		name        string
+		src         string
+		wantContent string
+	}{
+		{"tab in the indent becomes its width in spaces", " * * 0\n   \t<P\n", " <P"},
+		{"tab after the tag stays", " * * 0\n   \t<pre>\t\n", " <pre>\t"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			file, _ := Parse([]byte(tc.src))
+
+			list, ok := file.Blocks[0].(*List)
+			if !ok {
+				t.Fatalf("block 0 is %T, want *List", file.Blocks[0])
+			}
+
+			body := list.Items[0].Body.Blocks
+			last := body[len(body)-1]
+
+			block, ok := last.(*HTMLBlock)
+			if !ok {
+				t.Fatalf("last item block is %T, want *HTMLBlock", last)
+			}
+
+			if string(block.Content) != tc.wantContent {
+				t.Fatalf("Content=%q, want %q", string(block.Content), tc.wantContent)
+			}
+		})
+	}
+}

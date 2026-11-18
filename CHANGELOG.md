@@ -11,6 +11,9 @@
 * Fixed YAML block scalars below a tag, anchor or `?` losing kept line breaks, trailing spaces or lines holding only spaces or a `#`
 * Fixed a YAML file with a byte order mark after a blank line changing its value
 * Fixed a YAML block scalar header with a comment glued to it, like `>#note: x`, being read as a key
+* Fixed a Markdown HTML block indented with a tab inside a nested list moving into the inner list item
+* Fixed a Markdown line continuing a quote or list item getting a backslash that paired backticks or tildes, broke a code span, or turned a heading below it into text
+* Fixed code in a Markdown fence with Windows line endings changing on a second run
 
 ## Version 0.12.0 (2026-11-16)
 * Improved a closure after `??`, `?:` or another operator to stay on the operator's line, like `$a ?: function () {`

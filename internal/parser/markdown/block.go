@@ -569,7 +569,15 @@ func (p *parser) parseHTMLBlock() Node {
 			break
 		}
 
-		lines = append(lines, p.verbatimLine(line))
+		// The opening line keeps the strip's spaces: its indent is structure, and
+		// a raw tab there widens on a new column, moving the block into a nested
+		// list item.
+		if len(lines) == 0 {
+			lines = append(lines, line)
+		} else {
+			lines = append(lines, p.verbatimLine(line))
+		}
+
 		p.advancePastLine()
 		endPos = p.pos
 
@@ -703,7 +711,7 @@ func (p *parser) parseBlockquote() Node {
 		}
 
 		lazyOpen = true
-		contentLines = append(contentLines, escapeLazyBlockStart(contentLines, line))
+		contentLines = append(contentLines, p.escapeLazyBlockStart(contentLines, line))
 		p.advancePastLine()
 		endPos = p.pos
 	}
@@ -1237,7 +1245,9 @@ func (p *parser) parseListItem(marker []byte, contentColumn int) (*ListItem, boo
 			}
 
 			lazyOpen = true
-			absorbed := escapeLazyBlockStart(contentLines, fence.strip(line))
+			// Paragraph text opens no fence, so the tracker must not record one.
+			unindented := stripIndentColumnsAligned(line, contIndent)
+			absorbed := p.escapeLazyBlockStart(contentLines, unindented)
 			contentLines = append(contentLines, absorbed)
 			p.advancePastLine()
 			endPos = p.pos
@@ -2031,10 +2041,11 @@ func tagNameEnds(after []byte, selfClosing bool) bool {
 // escapes its delimiter (`1\.`) for the same reason: a backslash before a digit
 // is literal.
 //
-// Raw HTML, and a line that starts inside a code span or raw tag opened above
-// it, take four columns of indent instead, as a backslash there would make the
-// tag text or is literal; the emitter keeps that indent.
-func escapeLazyBlockStart(above [][]byte, line []byte) []byte {
+// Raw HTML, a fence, and a line that starts inside a code span or raw tag
+// opened above it take four columns of indent instead: there a backslash
+// would make the tag text, split the fence into shorter runs that pair up,
+// or be literal. The emitter keeps that indent.
+func (p *parser) escapeLazyBlockStart(above [][]byte, line []byte) []byte {
 	indent := len(line) - len(bytes.TrimLeft(line, " \t"))
 	text := line[indent:]
 	rawHTML := htmlBlockInterruptsParagraph(text)
@@ -2046,7 +2057,7 @@ func escapeLazyBlockStart(above [][]byte, line []byte) []byte {
 
 	// The gap after a marker is written as spaces, as the next pass's strip
 	// writes it.
-	if rawHTML || startsInsideSpan(above, line) {
+	if rawHTML || OpensFence(text) || startsInsideSpan(above, line, p.paragraphBelow()) {
 		indented := make([]byte, 0, indentedCodeWidth+len(text))
 		indented = append(indented, bytes.Repeat([]byte{' '}, indentedCodeWidth)...)
 
@@ -2580,17 +2591,19 @@ func destParensBalanced(dest []byte) bool {
 	return depth == 0
 }
 
-// startsInsideSpan looks back only to the last blank line, as far as the
-// paragraph the line continues can reach.
-func startsInsideSpan(above [][]byte, line []byte) bool {
+// startsInsideSpan looks back to the last blank line and ahead through
+// below, since a span opened above may close only below. Below is raw
+// source, so a container marker there can read as a closer; that errs
+// toward the indent, which is always safe.
+func startsInsideSpan(above [][]byte, line, below []byte) bool {
 	from := len(above)
 	for from > 0 && !isBlankLine(above[from-1]) {
 		from--
 	}
 
-	run := append(slices.Clip(above[from:]), line)
+	run := append(slices.Clip(above[from:]), line, below)
 	joined := bytes.Join(run, []byte{'\n'})
-	textStart := len(joined) - len(bytes.TrimLeft(line, " \t"))
+	textStart := len(joined) - len(below) - 1 - len(bytes.TrimLeft(line, " \t"))
 
 	for _, span := range UnescapableSpans(joined) {
 		if span[0] < textStart && textStart < span[1] {
@@ -2599,6 +2612,22 @@ func startsInsideSpan(above [][]byte, line []byte) bool {
 	}
 
 	return false
+}
+
+func (p *parser) paragraphBelow() []byte {
+	_, start := p.peekLine()
+	end := start
+
+	for end < len(p.src) {
+		line, next := lineAt(p.src, end)
+		if isBlankLine(line) {
+			break
+		}
+
+		end = next
+	}
+
+	return p.src[start:end]
 }
 
 func isASCIIDigit(c byte) bool {

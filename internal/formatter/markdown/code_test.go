@@ -58,6 +58,12 @@ func TestFormatCodeBlocks(t *testing.T) {
 			"```php\n0('0000000\n" + strings.Repeat("0", 100) + "')\n    % ([])\n```\n",
 		},
 		{
+			"a CRLF in code formats as the LF the fence writes",
+			config.Default(),
+			"~~~blade\n@A('\r\n' )\n~~~\n",
+			"~~~blade\n@A('\n')\n~~~\n",
+		},
+		{
 			"an XML snippet of sibling elements formats as a fragment",
 			config.Default(),
 			"```xml\n<env name='A'/>\n  <env name='B'/>\n```\n",
