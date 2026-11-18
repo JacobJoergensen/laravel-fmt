@@ -137,6 +137,8 @@ func TestValueSpacing(t *testing.T) {
 		{"aspect-ratio slash preserved", "a{aspect-ratio:16/9}", "aspect-ratio: 16/9", "16 / 9"},
 		{"url slash preserved", "a{background:url(a/b.png)}", "url(a/b.png)", "a / b"},
 		{"custom property identifier preserved", "a{color:var(--accent-color)}", "var(--accent-color)", ""},
+		{"space after open paren dropped", "a{color:rgb( 0 , 0 , 0 )}", "rgb(0, 0, 0)", "( "},
+		{"space after escaped paren kept", "a{grid-area:foo\\( bar}", "foo\\( bar", ""},
 		{"empty fallback stays tight", "a{filter:var(--tw-blur,) var(--tw-brightness,)}", "var(--tw-blur,) var(--tw-brightness,)", ", )"},
 		{"space before a closing paren dropped", "a{width:calc(1px + 2px )}", "calc(1px + 2px)", " )"},
 		{"calc comment kept whole", "a{width:calc(100% - /* gutter */ 2rem)}", "calc(100% - /* gutter */ 2rem)", "/ * gutter"},
@@ -172,6 +174,20 @@ func TestValueSpacing(t *testing.T) {
 				t.Fatalf("value spacing is not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
 			}
 		})
+	}
+}
+
+func TestDeclarationWidthCountsTheIndent(t *testing.T) {
+	cfg := config.Default()
+
+	const lineOverhead = len("    x: ;")
+	filler := cfg.PrintWidth + 1 - lineOverhead - len("a , c d")
+	src := "a{x:a " + strings.Repeat("b", filler) + ", c d}"
+
+	out := string(mustFormat(t, []byte(src), cfg))
+
+	if !strings.Contains(out, "    x:\n") {
+		t.Fatalf("declaration one column too wide stayed inline:\n%s", out)
 	}
 }
 

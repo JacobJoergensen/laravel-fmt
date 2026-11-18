@@ -3,6 +3,7 @@ package css
 import (
 	"bytes"
 	"strings"
+	"unicode/utf8"
 
 	parserpkg "github.com/JacobJoergensen/laravel-fmt/internal/parser"
 )
@@ -381,7 +382,9 @@ func (p *cssParser) startsCustomProperty() bool {
 
 	off += len("--")
 
-	for off < len(src) && !IsSpaceByte(src[off]) && strings.IndexByte(":;{}", src[off]) < 0 {
+	// The name is an ident, so `--x>.a:hover {}` is a rule: the ident ends at
+	// `>`. Tailwind's theme namespaces add `*`, as in `--color-*: initial`.
+	for off < len(src) && (IsIdentByte(src[off]) || src[off] >= utf8.RuneSelf || src[off] == '*' || src[off] == '\\') {
 		if src[off] == '\\' {
 			off++
 		}

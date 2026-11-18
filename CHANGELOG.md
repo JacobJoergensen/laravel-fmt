@@ -6,6 +6,8 @@
 * Added `.idea`, `.phpstorm.meta.php`, `.vite`, `.claude/worktrees` and Laravel Boost's agent skill copies to the default ignores
 * Improved `.eslintrc.json`, `.markdownlint.json`, `.oxlintrc.json`, `opencode.json` and `.zed` settings to keep their comments, like `tsconfig.json`
 * Improved YAML mappings and lists behind an anchor or tag, like `x-php: &php` in docker-compose, to be formatted instead of kept as written
+* Improved long CSS function calls like `linear-gradient(...)` to break one argument per line
+* Improved CSS values written one item per line like a Prettier-formatted `box-shadow` to stay that way
 * Fixed YAML comments after the last item of a nested block, like a commented-out workflow step, moving to column 0
 * Fixed a YAML value on the line below its key, like `&a: 1` or `? a`, being moved onto the key's line
 * Fixed YAML block scalars below a tag, anchor or `?` losing kept line breaks, trailing spaces or lines holding only spaces or a `#`
@@ -14,6 +16,9 @@
 * Fixed a Markdown HTML block indented with a tab inside a nested list moving into the inner list item
 * Fixed a Markdown line continuing a quote or list item getting a backslash that paired backticks or tildes, broke a code span, or turned a heading below it into text
 * Fixed code in a Markdown fence with Windows line endings changing on a second run
+* Fixed CSS declarations inside a block running past the print width by the indent
+* Fixed a space after `(` in CSS values, like `rgb( 0, 0, 0)` being kept
+* Fixed a CSS selector starting with `--` like `--x > .a:hover` being read as a custom property
 
 ## Version 0.12.0 (2026-11-16)
 * Improved a closure after `??`, `?:` or another operator to stay on the operator's line, like `$a ?: function () {`

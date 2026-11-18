@@ -288,9 +288,30 @@ func emitBlockBody(w *formatter.Writer, src []byte, children []parser.Node, cfg 
 
 func emitDeclaration(w *formatter.Writer, d *parser.Declaration, cfg *config.File) {
 	property := string(collapseCSSSpace(d.Property))
-	value := normalizeQuotes(trimCSSSpace(d.Value), formatter.MarkupQuoteTarget(cfg))
+	raw := trimCSSSpace(d.Value)
+	value := normalizeQuotes(raw, formatter.MarkupQuoteTarget(cfg))
 	value = normalizeValue(value)
 	parts := splitCommaList(value)
+
+	if len(parts) == 1 && (opensBrokenCall(raw) || !fitsInline(w, cfg, property, parts, d.Important)) {
+		if name, inner, ok := splitCall(value); ok {
+			// With an empty first argument no break follows the `(`, so the next run
+			// would read the call as unbroken.
+			if args := splitCommaList(inner); len(args[0]) > 0 {
+				emitBrokenCall(w, property, name, args, d.Important)
+
+				return
+			}
+		}
+	}
+
+	atomic := len(parts) > 1 && allAtomic(parts)
+
+	if len(parts) > 1 && !atomic && breaksAfterTopLevelComma(raw) {
+		emitWrappedDeclaration(w, property, parts, d.Important)
+
+		return
+	}
 
 	if shouldEmitDeclInline(w, cfg, property, parts, d.Important) {
 		emitInlineDeclaration(w, property, parts, d.Important)
@@ -298,7 +319,7 @@ func emitDeclaration(w *formatter.Writer, d *parser.Declaration, cfg *config.Fil
 		return
 	}
 
-	if allAtomic(parts) {
+	if atomic {
 		emitFilledDeclaration(w, property, parts, d.Important, cfg.PrintWidth)
 
 		return
@@ -368,10 +389,10 @@ func emitFilledDeclaration(w *formatter.Writer, property string, parts [][]byte,
 }
 
 func shouldEmitDeclInline(w *formatter.Writer, cfg *config.File, property string, parts [][]byte, important bool) bool {
-	if len(parts) < 2 {
-		return true
-	}
+	return len(parts) < 2 || fitsInline(w, cfg, property, parts, important)
+}
 
+func fitsInline(w *formatter.Writer, cfg *config.File, property string, parts [][]byte, important bool) bool {
 	inline := len(property) + len(": ") + len(";")
 
 	for i, p := range parts {
@@ -386,7 +407,7 @@ func shouldEmitDeclInline(w *formatter.Writer, cfg *config.File, property string
 		inline += len(" !important")
 	}
 
-	return w.Column()+inline <= cfg.PrintWidth
+	return w.CursorColumn()+inline <= cfg.PrintWidth
 }
 
 func emitInlineDeclaration(w *formatter.Writer, property string, parts [][]byte, important bool) {
@@ -421,6 +442,148 @@ func emitWrappedDeclaration(w *formatter.Writer, property string, parts [][]byte
 
 	w.Dedent()
 	terminateAfterValue(w, parts, important)
+}
+
+func emitBrokenCall(w *formatter.Writer, property string, name []byte, args [][]byte, important bool) {
+	w.Write(property)
+	separate(w, []byte(property), ":")
+	w.Space()
+	w.WriteBytes(name)
+	w.Write("(")
+	w.Indent()
+
+	for i, arg := range args {
+		// An empty argument, like the fallback in `var(--a,)`, would leave a line
+		// holding only the indent.
+		if len(arg) > 0 {
+			w.Newline()
+			w.WriteBytes(arg)
+		}
+
+		if i < len(args)-1 {
+			w.Write(",")
+		}
+	}
+
+	w.Dedent()
+	w.Newline()
+	w.Write(")")
+	terminateAfterValue(w, nil, important)
+}
+
+// splitCall reports whether v is one function call, with its name and the
+// text inside. url() is left whole: a comma in an unquoted URL is part of
+// the token.
+func splitCall(v []byte) ([]byte, []byte, bool) {
+	open := 0
+	for open < len(v) && parser.IsIdentByte(v[open]) {
+		open++
+	}
+
+	if open == 0 || open == len(v) || v[open] != '(' || bytes.EqualFold(v[:open], []byte("url")) {
+		return nil, nil, false
+	}
+
+	if closeOfParen(v, open) != len(v)-1 {
+		return nil, nil, false
+	}
+
+	inner := v[open+1 : len(v)-1]
+	if len(trimCSSSpace(inner)) == 0 {
+		return nil, nil, false
+	}
+
+	return v[:open], inner, true
+}
+
+func closeOfParen(b []byte, open int) int {
+	depth := 0
+
+	for i := open; i < len(b); i++ {
+		switch c := b[i]; c {
+		case '\\':
+			i = escapeEnd(b, i) - 1
+		case '"', '\'':
+			end, _, _ := scanCSSString(b, i, c)
+			i = end
+		case '/':
+			if i+1 < len(b) && b[i+1] == '*' {
+				i = commentEnd(b, i) - 1
+			}
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+
+	return -1
+}
+
+func opensBrokenCall(raw []byte) bool {
+	_, after, found := bytes.Cut(raw, []byte("("))
+	if !found {
+		return false
+	}
+
+	rest := bytes.TrimLeft(after, " \t")
+	for bytes.HasPrefix(rest, []byte("/*")) {
+		end := commentEnd(rest, 0)
+		rest = bytes.TrimLeft(rest[end:], " \t")
+	}
+
+	return len(rest) > 0 && (rest[0] == '\n' || rest[0] == '\r')
+}
+
+// Only a break after a comma counts: that is where the wrapped layout
+// breaks, and a break inside an item would not survive it.
+func breaksAfterTopLevelComma(raw []byte) bool {
+	depth := 0
+	afterComma := false
+
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+
+		switch {
+		case c == ' ' || c == '\t':
+			continue
+		case c == '\n' || c == '\r':
+			if afterComma {
+				return true
+			}
+
+			continue
+		case c == '/' && i+1 < len(raw) && raw[i+1] == '*':
+			i = commentEnd(raw, i) - 1
+
+			continue
+		}
+
+		afterComma = false
+
+		switch c {
+		case '\\':
+			i = escapeEnd(raw, i) - 1
+		case '"', '\'':
+			end, _, _ := scanCSSString(raw, i, c)
+			i = end
+		case '(', '[':
+			depth++
+		case ')', ']':
+			// Floored as splitCommaList floors it, so an unbalanced `)` cannot
+			// move a comma inside an item to the top level.
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			afterComma = depth == 0
+		}
+	}
+
+	return false
 }
 
 func terminateAfterValue(w *formatter.Writer, parts [][]byte, important bool) {
@@ -612,6 +775,8 @@ func normalizeValue(b []byte) []byte {
 
 	var mathStack []bool
 
+	openedAt := -1
+
 	flush := func() {
 		if pendingSpace {
 			out.WriteByte(' ')
@@ -644,7 +809,9 @@ func normalizeValue(b []byte) []byte {
 		}
 
 		if parser.IsSpaceByte(c) {
-			if out.Len() > 0 {
+			// Like the space before a `)`, the one after a group's `(` means nothing;
+			// after an escaped `\(` it separates two idents.
+			if out.Len() > 0 && out.Len() != openedAt {
 				pendingSpace = true
 			}
 
@@ -692,6 +859,7 @@ func normalizeValue(b []byte) []byte {
 			flush()
 			mathStack = append(mathStack, math)
 			out.WriteByte(c)
+			openedAt = out.Len()
 		case c == ')':
 			// Whitespace before a `)` means nothing, and after a comma it would
 			// turn the empty fallback `var(--a,)` into `var(--a, )`.

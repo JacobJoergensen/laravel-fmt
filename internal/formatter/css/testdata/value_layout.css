@@ -1,0 +1,30 @@
+.banner {
+  background: linear-gradient(
+    to right,
+    var(--green) 0%,
+    var(--green) 55%,
+    var(--straw) 78%
+  );
+  background-image: conic-gradient(rgb(230, 230, 230) 25%, transparent 25% 50%, rgb(230, 230, 230) 50% 75%, transparent 75%);
+  clip-path: polygon(0 0, 100% 0);
+  mask-image: url(data:image/svg+xml;charset=utf8,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20viewBox=%270%200%2010%2010%27%3E%3C/svg%3E);
+  box-shadow:
+    0 4px 0 var(--edge),
+    inset 0 0 18px var(--shade);
+  text-shadow: 3px 3px 0 red, 6px 6px 0 blue;
+  font-family:
+    Georgia,
+    serif;
+  transform: translateX(
+    calc(var(--knob) * -1)
+  ) !important;
+  outline: 0 0 1px red, /* inner */
+    inset 0 0 2px blue;
+  border-image: linear-gradient( /* stops */
+    red,
+    blue
+  );
+  filter: var(
+    --tw-blur,
+  );
+}

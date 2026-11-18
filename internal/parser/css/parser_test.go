@@ -147,6 +147,39 @@ func TestCustomPropertyValueHoldsBlocks(t *testing.T) {
 	}
 }
 
+func TestANonIdentByteEndsACustomPropertyName(t *testing.T) {
+	src := "--x>.a:hover{color:red}"
+
+	file, errs := Parse([]byte(src))
+	if len(errs) > 0 {
+		t.Fatalf("Parse(%q) errors: %v", src, errs)
+	}
+
+	if _, ok := file.Nodes[0].(*Rule); !ok {
+		t.Fatalf("Parse(%q) = %#v, want a rule", src, file.Nodes[0])
+	}
+}
+
+func TestTailwindWildcardCustomPropertiesAreDeclarations(t *testing.T) {
+	src := "a{--*:{b};--color-*:{c}}"
+
+	file, errs := Parse([]byte(src))
+	if len(errs) > 0 {
+		t.Fatalf("Parse(%q) errors: %v", src, errs)
+	}
+
+	rule, ok := file.Nodes[0].(*Rule)
+	if !ok || len(rule.Children) != 2 {
+		t.Fatalf("Parse(%q) = %#v, want one rule holding two declarations", src, file.Nodes[0])
+	}
+
+	for _, child := range rule.Children {
+		if _, ok := child.(*Declaration); !ok {
+			t.Fatalf("child %#v, want a declaration", child)
+		}
+	}
+}
+
 func TestImportantFlagRecognizedOnTrailingKeyword(t *testing.T) {
 	cases := []struct {
 		name      string
