@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.13.0 (2026-11-18)
 * Added formatting of `.webmanifest` files as JSON
 * Added formatting of dotfiles and hidden folders, like `.github/workflows`, skipping version control folders
 * Added `.idea`, `.phpstorm.meta.php`, `.vite`, `.claude/worktrees` and Laravel Boost's agent skill copies to the default ignores
