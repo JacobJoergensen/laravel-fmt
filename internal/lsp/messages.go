@@ -63,7 +63,8 @@ type serverCapabilities struct {
 }
 
 type experimentalCapabilities struct {
-	LaravelFmtFormat bool `json:"laravelFmtFormat"`
+	LaravelFmtFormat             bool `json:"laravelFmtFormat"`
+	LaravelFmtFormattedElsewhere bool `json:"laravelFmtFormattedElsewhere"`
 }
 
 type textDocumentSyncOptions struct {
@@ -118,8 +119,9 @@ type formatParams struct {
 }
 
 type formatReply struct {
-	Edits     []TextEdit `json:"edits"`
-	EndOfLine string     `json:"endOfLine"`
+	Edits              []TextEdit `json:"edits"`
+	EndOfLine          string     `json:"endOfLine"`
+	FormattedElsewhere bool       `json:"formattedElsewhere"`
 }
 
 type rangeFormattingParams struct {

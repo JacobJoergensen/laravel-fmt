@@ -52,7 +52,7 @@ func adoptIgnores(cfg *config.File, ctx Context, anchor string) error {
 	}
 
 	if owns {
-		cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, config.IgnoreLayer{Patterns: slices.Clone(oxfmtLanguages)})
+		cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, config.IgnoreLayer{Patterns: slices.Clone(oxfmtLanguages), FormattedElsewhere: true})
 	}
 
 	if ctx.Pint != nil && filepath.Clean(filepath.Dir(ctx.Pint.Path)) == filepath.Clean(anchor) {

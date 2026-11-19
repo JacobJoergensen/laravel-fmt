@@ -99,6 +99,9 @@ var BlankLineStatements = []string{
 type IgnoreLayer struct {
 	Patterns   []string
 	IgnoreCase bool
+	// Set when the tool formats the files it lists; Prettier's and Pint's
+	// lists name files no tool should touch.
+	FormattedElsewhere bool
 }
 
 // File is the laravel-fmt.json configuration.

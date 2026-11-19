@@ -180,7 +180,7 @@ func (s *server) handleInitialize(req *request) error {
 			TextDocumentSync:                textDocumentSyncOptions{OpenClose: true, Change: syncFull},
 			DocumentFormattingProvider:      true,
 			DocumentRangeFormattingProvider: true,
-			Experimental:                    experimentalCapabilities{LaravelFmtFormat: true},
+			Experimental:                    experimentalCapabilities{LaravelFmtFormat: true, LaravelFmtFormattedElsewhere: true},
 		},
 		ServerInfo: serverInfo{Name: "laravel-fmt", Version: s.version},
 	}
@@ -310,7 +310,11 @@ func (s *server) handleFormat(req *request) error {
 
 	res, err := s.formatText(p.TextDocument.URI, *p.Text, scope)
 	if err != nil {
-		untouched := formatReply{Edits: []TextEdit{}, EndOfLine: config.EndOfLineAuto}
+		untouched := formatReply{
+			Edits:              []TextEdit{},
+			EndOfLine:          config.EndOfLineAuto,
+			FormattedElsewhere: errors.Is(err, errFormattedElsewhere),
+		}
 
 		return s.replyFailure(req.ID, untouched, err)
 	}
@@ -408,8 +412,9 @@ type formatResult struct {
 }
 
 var (
-	errUntouched   = errors.New("document left untouched")
-	errUnparseable = errors.New("cannot format")
+	errUntouched          = errors.New("document left untouched")
+	errFormattedElsewhere = fmt.Errorf("%w: formatted by another tool", errUntouched)
+	errUnparseable        = errors.New("cannot format")
 )
 
 func (s *server) format(uri string, scope formatScope) (*formatResult, error) {
@@ -421,9 +426,9 @@ func (s *server) format(uri string, scope formatScope) (*formatResult, error) {
 	return s.formatText(uri, text, scope)
 }
 
-// A document the server cannot map to a file or ignores is errUntouched. One
-// that does not parse is errUnparseable: a formatter never emits recovery
-// output.
+// A document the server cannot map to a file or ignores is errUntouched, and
+// one another tool formats is errFormattedElsewhere. One that does not parse
+// is errUnparseable: a formatter never emits recovery output.
 func (s *server) formatText(uri, text string, scope formatScope) (*formatResult, error) {
 	path, cfg, err := s.fileConfig(uri)
 	if err != nil {
@@ -475,6 +480,15 @@ func (s *server) fileConfig(uri string) (string, config.File, error) {
 	}
 
 	if ignored {
+		elsewhere, err := walk.FormattedElsewhere(project.IgnoreAnchor(), &project.Cfg, path)
+		if err != nil {
+			return "", config.File{}, err
+		}
+
+		if elsewhere {
+			return "", config.File{}, errFormattedElsewhere
+		}
+
 		return "", config.File{}, errUntouched
 	}
 

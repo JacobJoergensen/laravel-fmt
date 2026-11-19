@@ -440,6 +440,10 @@ func TestInitializeAdvertisesTheFormatRequest(t *testing.T) {
 	if !result.Capabilities.Experimental.LaravelFmtFormat {
 		t.Fatal("capabilities.experimental.laravelFmtFormat = false, want true")
 	}
+
+	if !result.Capabilities.Experimental.LaravelFmtFormattedElsewhere {
+		t.Fatal("capabilities.experimental.laravelFmtFormattedElsewhere = false, want true")
+	}
 }
 
 // Each server gets a directory of its own, so the resolver answers from an
@@ -1089,6 +1093,7 @@ func TestFormatRequestFormatsTheTextItCarries(t *testing.T) {
 
 	seedFiles(t, workspace, map[string]string{
 		".editorconfig":    "root = true\n[*.php]\nend_of_line = crlf\n",
+		".oxfmtrc.json":    "{}",
 		"laravel-fmt.json": `{"ignore": ["generated/**"]}`,
 	})
 
@@ -1104,6 +1109,7 @@ func TestFormatRequestFormatsTheTextItCarries(t *testing.T) {
 		rng           *Range
 		want          string
 		wantEndOfLine string
+		wantElsewhere bool
 	}{
 		{
 			name:          "document the server does not hold",
@@ -1141,6 +1147,22 @@ func TestFormatRequestFormatsTheTextItCarries(t *testing.T) {
 			text:          unformatted,
 			want:          unformatted,
 			wantEndOfLine: "auto",
+		},
+		{
+			name:          "file Oxfmt formats",
+			file:          "resources/css/app.css",
+			text:          "a{color:red}\n",
+			want:          "a{color:red}\n",
+			wantEndOfLine: "auto",
+			wantElsewhere: true,
+		},
+		{
+			name:          "file Oxfmt formats that laravel-fmt.json also ignores",
+			file:          "generated/app.css",
+			text:          "a{color:red}\n",
+			want:          "a{color:red}\n",
+			wantEndOfLine: "auto",
+			wantElsewhere: true,
 		},
 	}
 
@@ -1182,6 +1204,10 @@ func TestFormatRequestFormatsTheTextItCarries(t *testing.T) {
 
 			if got.EndOfLine != tc.wantEndOfLine {
 				t.Fatalf("endOfLine = %q, want %q", got.EndOfLine, tc.wantEndOfLine)
+			}
+
+			if got.FormattedElsewhere != tc.wantElsewhere {
+				t.Fatalf("formattedElsewhere = %v, want %v", got.FormattedElsewhere, tc.wantElsewhere)
 			}
 		})
 	}

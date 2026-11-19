@@ -206,6 +206,26 @@ func IgnoresFile(anchor string, cfg *config.File, file string) (bool, error) {
 	return hasVCSSegment(rel) || set.matchFile(rel), nil
 }
 
+// FormattedElsewhere reports whether a layer marked FormattedElsewhere lists
+// file. Whether that tool then formats it is its own ignore rules' call.
+func FormattedElsewhere(anchor string, cfg *config.File, file string) (bool, error) {
+	absPath, err := filepath.Abs(file)
+	if err != nil {
+		return false, fmt.Errorf("resolve %s: %w", file, err)
+	}
+
+	absPath = Precompose(absPath)
+	rel := ignorePrefix(anchor, filepath.Dir(absPath)) + filepath.Base(absPath)
+
+	for _, layer := range cfg.AdoptedIgnore {
+		if layer.FormattedElsewhere && compileMatcher(layer.Patterns, layer.IgnoreCase).match(rel, false) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 var vcsDirs = []string{".git", ".hg", ".jj", ".sl", ".svn"}
 
 func isVCSDir(name string) bool {
