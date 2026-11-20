@@ -253,6 +253,57 @@ func TestDidChangeReplacesBufferOnFullSync(t *testing.T) {
 	}
 }
 
+var initializeFrame = frame(`{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}`)
+
+func TestLifecycleBeforeAndAfterInitialize(t *testing.T) {
+	dir := t.TempDir()
+	uri := pathToURI(filepath.Join(dir, "a.php"))
+
+	didOpen := frame(fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"text":"<?php\n$a=1;\n"}}}`, uri))
+	formatting := frame(fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{"textDocument":{"uri":%q}}}`, uri))
+	end := frame(`{"jsonrpc":"2.0","id":9,"method":"shutdown"}`) + frame(`{"jsonrpc":"2.0","method":"exit"}`)
+
+	cases := []struct {
+		name      string
+		input     string
+		wantCode  int
+		wantEdits bool
+	}{
+		{"request before initialize", formatting + initializeFrame + end, codeServerNotInitialized, false},
+		{"didOpen before initialize is dropped", didOpen + initializeFrame + formatting + end, 0, false},
+		{"didOpen after initialize is kept", initializeFrame + didOpen + formatting + end, 0, true},
+		{"second initialize", initializeFrame + strings.Replace(initializeFrame, `"id":0`, `"id":2`, 1) + end, codeInvalidRequest, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := Serve(strings.NewReader(tc.input), &out, io.Discard, ""); err != nil {
+				t.Fatalf("Serve = %v, want nil", err)
+			}
+
+			resp := responseTo(t, out.Bytes(), "2")
+
+			if tc.wantCode != 0 {
+				if resp.Error == nil || resp.Error.Code != tc.wantCode {
+					t.Fatalf("error = %+v, want code %d", resp.Error, tc.wantCode)
+				}
+
+				return
+			}
+
+			var edits []TextEdit
+			if err := json.Unmarshal(resp.Result, &edits); err != nil {
+				t.Fatalf("decode edits: %v (%s)", err, resp.Result)
+			}
+
+			if got := len(edits) > 0; got != tc.wantEdits {
+				t.Fatalf("got edits %+v, want edits: %v", edits, tc.wantEdits)
+			}
+		})
+	}
+}
+
 func TestServeExitWithoutShutdownErrors(t *testing.T) {
 	input := frame(`{"jsonrpc":"2.0","method":"exit"}`)
 
@@ -263,7 +314,8 @@ func TestServeExitWithoutShutdownErrors(t *testing.T) {
 }
 
 func TestServeShutdownThenExitIsClean(t *testing.T) {
-	input := frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`) +
+	input := initializeFrame +
+		frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`) +
 		frame(`{"jsonrpc":"2.0","method":"exit"}`)
 
 	var out bytes.Buffer
@@ -271,17 +323,7 @@ func TestServeShutdownThenExitIsClean(t *testing.T) {
 		t.Fatalf("Serve = %v, want nil", err)
 	}
 
-	body, err := readFrame(bufio.NewReader(bytes.NewReader(out.Bytes())))
-	if err != nil {
-		t.Fatalf("read shutdown response: %v", err)
-	}
-
-	var resp wireResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		t.Fatalf("decode shutdown response: %v", err)
-	}
-
-	if string(resp.Result) != "null" {
+	if resp := responseTo(t, out.Bytes(), "1"); string(resp.Result) != "null" {
 		t.Fatalf("shutdown result = %q, want null", resp.Result)
 	}
 }
@@ -302,7 +344,8 @@ func TestServeAnswersAMalformedMessageAndKeepsServing(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			input := frame(tc.body) +
+			input := initializeFrame +
+				frame(tc.body) +
 				frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`) +
 				frame(`{"jsonrpc":"2.0","method":"exit"}`)
 
@@ -320,7 +363,8 @@ func TestServeAnswersAMalformedMessageAndKeepsServing(t *testing.T) {
 }
 
 func TestRequestAfterShutdownIsRefused(t *testing.T) {
-	input := frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`) +
+	input := initializeFrame +
+		frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`) +
 		frame(`{"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///x.php"}}}`) +
 		frame(`{"jsonrpc":"2.0","method":"exit"}`)
 
@@ -335,7 +379,8 @@ func TestRequestAfterShutdownIsRefused(t *testing.T) {
 }
 
 func TestExitWithAnIDEndsTheServer(t *testing.T) {
-	input := frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`) +
+	input := initializeFrame +
+		frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`) +
 		frame(`{"jsonrpc":"2.0","id":2,"method":"exit"}`) +
 		frame(`{"jsonrpc":"2.0","id":3,"method":"shutdown"}`)
 
@@ -344,8 +389,8 @@ func TestExitWithAnIDEndsTheServer(t *testing.T) {
 		t.Fatalf("Serve = %v, want nil", err)
 	}
 
-	if got := framesIn(t, out.Bytes()); got != 1 {
-		t.Fatalf("frames written = %d, want only the shutdown reply:\n%s", got, out.Bytes())
+	if got := framesIn(t, out.Bytes()); got != 2 {
+		t.Fatalf("frames written = %d, want only the initialize and shutdown replies:\n%s", got, out.Bytes())
 	}
 }
 
@@ -358,15 +403,17 @@ func TestRequestMethodSentAsNotificationIsIgnored(t *testing.T) {
 	}{
 		{
 			name: "formatting",
-			input: frame(`{"jsonrpc":"2.0","method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///x.php"}}}`) +
+			input: initializeFrame +
+				frame(`{"jsonrpc":"2.0","method":"textDocument/formatting","params":{"textDocument":{"uri":"file:///x.php"}}}`) +
 				frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`) +
 				frame(`{"jsonrpc":"2.0","method":"exit"}`),
-			wantFrames: 1,
+			wantFrames: 2,
 		},
 		{
-			name:    "shutdown",
-			input:   frame(`{"jsonrpc":"2.0","method":"shutdown"}`) + frame(`{"jsonrpc":"2.0","method":"exit"}`),
-			wantErr: ErrExitWithoutShutdown,
+			name:       "shutdown",
+			input:      initializeFrame + frame(`{"jsonrpc":"2.0","method":"shutdown"}`) + frame(`{"jsonrpc":"2.0","method":"exit"}`),
+			wantErr:    ErrExitWithoutShutdown,
+			wantFrames: 1,
 		},
 	}
 
@@ -579,6 +626,7 @@ func newRecordingServer(docs map[string]string) (*server, *bytes.Buffer) {
 		encoding:      encodingUTF8,
 		docs:          docs,
 		shownFailures: map[string]bool{},
+		initialized:   true,
 	}, &out
 }
 

@@ -64,6 +64,8 @@ const (
 	codeMethodNotFound = -32601
 	codeInvalidParams  = -32602
 
+	codeServerNotInitialized = -32002
+
 	maxPreallocatedBody = 1 << 20
 )
 

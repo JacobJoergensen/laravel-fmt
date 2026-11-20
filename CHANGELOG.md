@@ -1,7 +1,9 @@
 # Changelog
 
 ## Unreleased
-* Added `formattedElsewhere` to the `laravel-fmt/format` reply, so editor plugins can hand a file another tool formats to that tool
+* Added `formattedElsewhere` to the `laravel-fmt/format` reply for files another tool formats
+* Fixed the language server sending edits some editors apply wrongly when a file's last line changes
+* Fixed the language server formatting before `initialize` and accepting a second `initialize`
 
 ## Version 0.13.0 (2026-11-18)
 * Added formatting of `.webmanifest` files as JSON

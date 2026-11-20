@@ -14,23 +14,11 @@ import (
 // line-model mismatch.
 func applyEditsUTF8(src string, edits []TextEdit) string {
 	b := []byte(src)
+	starts := clientLineStarts(b)
 
-	starts := []int{0}
-
-	for i := 0; i < len(b); i++ {
-		switch b[i] {
-		case '\n':
-			starts = append(starts, i+1)
-		case '\r':
-			if i+1 < len(b) && b[i+1] == '\n' {
-				i++
-			}
-
-			starts = append(starts, i+1)
-		}
+	offset := func(p Position) int {
+		return min(starts[p.Line]+p.Character, clientLineEnd(b, starts, p.Line))
 	}
-
-	offset := func(p Position) int { return starts[p.Line] + p.Character }
 
 	type span struct {
 		start, end int
@@ -42,7 +30,7 @@ func applyEditsUTF8(src string, edits []TextEdit) string {
 		spans = append(spans, span{offset(e.Range.Start), offset(e.Range.End), e.NewText})
 	}
 
-	slices.SortFunc(spans, func(a, b span) int { return cmp.Compare(b.start, a.start) })
+	slices.SortStableFunc(spans, func(x, y span) int { return cmp.Compare(y.start, x.start) })
 
 	for _, s := range spans {
 		next := make([]byte, 0, len(b)-(s.end-s.start)+len(s.text))
@@ -76,6 +64,8 @@ func TestBuildEditsRoundTrip(t *testing.T) {
 		{"full rewrite", "one\ntwo\n", "uno\ndos\ntres\n"},
 		{"empty to content", "", "a\nb\n"},
 		{"content to empty", "a\nb\n", ""},
+		{"insert before a removed last line", "\nx", "0\n"},
+		{"final newline added to a CRLF document", "a\r\nb", "a\r\nb\r\n"},
 	}
 
 	for _, tc := range cases {
@@ -226,11 +216,7 @@ func applyEditsUTF16(src string, edits []TextEdit) string {
 
 	offset := func(p Position) int {
 		lineStart := starts[p.Line]
-		lineEnd := len(b)
-
-		if p.Line+1 < len(starts) {
-			lineEnd = starts[p.Line+1]
-		}
+		lineEnd := clientLineEnd(b, starts, p.Line)
 
 		units := 0
 
@@ -266,6 +252,24 @@ func applyEditsUTF16(src string, edits []TextEdit) string {
 	}
 
 	return string(b)
+}
+
+func clientLineEnd(b []byte, starts []int, line int) int {
+	if line+1 >= len(starts) {
+		return len(b)
+	}
+
+	end := starts[line+1]
+
+	if end > starts[line] && b[end-1] == '\n' {
+		end--
+	}
+
+	if end > starts[line] && b[end-1] == '\r' {
+		end--
+	}
+
+	return end
 }
 
 // clientLineStarts follows LSP 3.17: \n, \r\n and a lone \r end a line.

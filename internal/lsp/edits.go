@@ -8,26 +8,56 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/diff"
 )
 
+type byteEdit struct {
+	start, end int
+	text       string
+}
+
 // Identical inputs return an empty, non-nil slice, so the reply is [] rather
 // than null.
+//
+// A hunk at the end of a document reaches back for the newline before it, so
+// it can start where the previous hunk ends. Such hunks are merged: an insert
+// and a removal sharing a start depend on the client ordering them as LSP
+// says, and not every client does.
 func buildEdits(src, out []byte, enc string) []TextEdit {
 	if bytes.Equal(src, out) {
 		return []TextEdit{}
 	}
 
 	lfStart := diff.LineStarts(src)
-	lspStart := lspLineStarts(src)
 	hunks := diff.LineEdits(string(src), string(out))
 
-	edits := make([]TextEdit, 0, len(hunks))
+	spans := make([]byteEdit, 0, len(hunks))
 
 	for _, h := range hunks {
-		startByte, endByte, newText := h.Replacement(src, lfStart)
+		start, end, text := h.Replacement(src, lfStart)
 
-		edits = append(edits, TextEdit{
-			Range:   Range{Start: byteToPosition(src, lspStart, startByte, enc), End: byteToPosition(src, lspStart, endByte, enc)},
-			NewText: newText,
-		})
+		// A hunk at the end can start on the \n of a \r\n. No position lies
+		// between the two, so the span takes the \r along.
+		if start > 0 && start < len(src) && src[start-1] == '\r' && src[start] == '\n' {
+			start--
+			text = "\r" + text
+		}
+
+		if last := len(spans) - 1; last >= 0 && spans[last].end == start {
+			spans[last].end = end
+			spans[last].text += text
+
+			continue
+		}
+
+		spans = append(spans, byteEdit{start: start, end: end, text: text})
+	}
+
+	lspStart := lspLineStarts(src)
+	edits := make([]TextEdit, 0, len(spans))
+
+	for _, s := range spans {
+		start := byteToPosition(src, lspStart, s.start, enc)
+		end := byteToPosition(src, lspStart, s.end, enc)
+
+		edits = append(edits, TextEdit{Range: Range{Start: start, End: end}, NewText: s.text})
 	}
 
 	return edits

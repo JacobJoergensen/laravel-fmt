@@ -27,7 +27,7 @@ import (
 var ErrExitWithoutShutdown = errors.New("lsp: exit without prior shutdown")
 
 // CONTRACT: handle runs one request at a time on Serve's goroutine, so docs
-// and shutdownRequested are unsynchronized on purpose. Handling requests
+// and the lifecycle flags are unsynchronized on purpose. Handling requests
 // concurrently needs a lock.
 type server struct {
 	conn *conn
@@ -42,6 +42,7 @@ type server struct {
 	// again only after a document formats.
 	shownFailures map[string]bool
 
+	initialized       bool
 	shutdownRequested bool
 }
 
@@ -123,7 +124,7 @@ func (s *server) handle(req *request) (bool, error) {
 }
 
 func (s *server) handleNotification(req *request) {
-	if s.shutdownRequested {
+	if !s.initialized || s.shutdownRequested {
 		return
 	}
 
@@ -142,8 +143,16 @@ func (s *server) handleRequest(req *request) error {
 		return s.conn.replyError(req.ID, codeInvalidRequest, "server is shutting down")
 	}
 
+	if !s.initialized && req.Method != "initialize" {
+		return s.conn.replyError(req.ID, codeServerNotInitialized, "server is not initialized")
+	}
+
 	switch req.Method {
 	case "initialize":
+		if s.initialized {
+			return s.conn.replyError(req.ID, codeInvalidRequest, "server is already initialized")
+		}
+
 		return s.handleInitialize(req)
 	case "shutdown":
 		s.shutdownRequested = true
@@ -173,6 +182,8 @@ func (s *server) handleInitialize(req *request) error {
 	if slices.Contains(p.Capabilities.General.PositionEncodings, encodingUTF8) {
 		s.encoding = encodingUTF8
 	}
+
+	s.initialized = true
 
 	result := initializeResult{
 		Capabilities: serverCapabilities{
