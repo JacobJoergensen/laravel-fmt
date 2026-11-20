@@ -163,6 +163,27 @@ func TestConcatSpaceNone(t *testing.T) {
 	}
 }
 
+func TestTypesSpaceSingle(t *testing.T) {
+	cfg := config.Default()
+	cfg.PHP.TypesSpace = true
+	cfg.PHP.CatchTypesSpace = true
+
+	input := formattertest.ReadFixture(t, "types_spaces_single_input.php")
+	want := formattertest.ReadFixture(t, "types_spaces_single.formatted.php")
+
+	got := mustFormat(t, input, cfg)
+
+	if !bytes.Equal(got, want) {
+		t.Fatalf("output differs.\n=== got ===\n%s\n=== want ===\n%s", got, want)
+	}
+
+	twice := mustFormat(t, got, cfg)
+
+	if !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent with TypesSpace.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
 // Each `!` is its own UnaryExpr, so `!!` becomes `! ! `.
 func TestNotOperatorSpaceEnabled(t *testing.T) {
 	cfg := config.Default()
@@ -1706,6 +1727,9 @@ func configForFixture(base string) *config.File {
 		cfg.PHP.ExpandUseGroups = false
 	case base == "single_quote_prefer_double":
 		cfg.QuoteStyle = config.QuoteStyleDouble
+	case base == "types_spaces_single":
+		cfg.PHP.TypesSpace = true
+		cfg.PHP.CatchTypesSpace = true
 	}
 
 	return cfg

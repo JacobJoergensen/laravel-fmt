@@ -36,9 +36,9 @@ func (b *builder) typeHintRaw(t parser.TypeHint) *document.Doc {
 	case *parser.NullableType:
 		return document.Concat(document.Text("?"), b.typeHintRaw(n.Type))
 	case *parser.UnionType:
-		return b.joinTypes(n.Types, "|")
+		return b.joinTypes(n.Types, typeSeparator("|", b.cfg.PHP.TypesSpace))
 	case *parser.IntersectionType:
-		return b.joinTypes(n.Types, "&")
+		return b.joinTypes(n.Types, typeSeparator("&", b.cfg.PHP.TypesSpace))
 	case *parser.ParenType:
 		return document.Concat(document.Text("("), b.typeHintRaw(n.Type), document.Text(")"))
 	}
@@ -53,6 +53,14 @@ func (b *builder) joinTypes(types []parser.TypeHint, sep string) *document.Doc {
 	}
 
 	return document.Join(document.Text(sep), docs)
+}
+
+func typeSeparator(op string, spaced bool) string {
+	if spaced {
+		return " " + op + " "
+	}
+
+	return op
 }
 
 func extractSimpleNullable(t parser.TypeHint) (parser.TypeHint, bool) {

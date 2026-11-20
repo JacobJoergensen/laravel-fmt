@@ -216,9 +216,14 @@ func FormattedElsewhere(anchor string, cfg *config.File, file string) (bool, err
 
 	absPath = Precompose(absPath)
 	rel := ignorePrefix(anchor, filepath.Dir(absPath)) + filepath.Base(absPath)
+	segments := strings.Split(rel, "/")
 
 	for _, layer := range cfg.AdoptedIgnore {
-		if layer.FormattedElsewhere && compileMatcher(layer.Patterns, layer.IgnoreCase).match(rel, false) {
+		if !layer.FormattedElsewhere {
+			continue
+		}
+
+		if compiled, ok := compileLayer(layer, anchor); ok && compiled.matchSegments(segments, false) {
 			return true, nil
 		}
 	}

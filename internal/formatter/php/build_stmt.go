@@ -364,7 +364,8 @@ func (b *builder) tryStmt(n *parser.TryStmt) *document.Doc {
 			types[i] = b.expr(t)
 		}
 
-		catch := document.Concat(b.controlLead(), document.Text("catch ("), document.Join(document.Text("|"), types))
+		separator := document.Text(typeSeparator("|", b.cfg.PHP.CatchTypesSpace))
+		catch := document.Concat(b.controlLead(), document.Text("catch ("), document.Join(separator, types))
 		if c.Var != nil {
 			catch = document.Concat(catch, document.Text(" "), b.tok(c.Var.Token))
 		}

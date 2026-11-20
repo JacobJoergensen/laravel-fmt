@@ -18,7 +18,7 @@ import (
 // one-line block through singleLineDocComment. A tag type an earlier reflow
 // split across lines is rejoined, so the result is idempotent. The second
 // result is false for any other block (emit it verbatim).
-func docCommentDoc(text []byte) (*document.Doc, bool) {
+func docCommentDoc(text []byte, spaced bool) (*document.Doc, bool) {
 	// A bare carriage return (a CR that is not part of a CRLF) is a hidden line
 	// break the reflow would mangle; leave such a block verbatim so it is stable.
 	if hasBareCR(text) {
@@ -26,7 +26,7 @@ func docCommentDoc(text []byte) (*document.Doc, bool) {
 	}
 
 	if bytes.IndexByte(text, '\n') < 0 {
-		return singleLineDocComment(text)
+		return singleLineDocComment(text, spaced)
 	}
 
 	rawLines := bytes.Split(text, []byte("\n"))
@@ -50,7 +50,7 @@ func docCommentDoc(text []byte) (*document.Doc, bool) {
 	inner := make([]*document.Doc, 0, len(contents)*2)
 
 	for i := 0; i < len(contents); i++ {
-		lineDoc, consumed, shape := docTagLine(contents, i)
+		lineDoc, consumed, shape := docTagLine(contents, i, spaced)
 
 		if shape {
 			inner = append(inner, document.HardLine(), lineDoc)
@@ -59,7 +59,7 @@ func docCommentDoc(text []byte) (*document.Doc, bool) {
 			continue
 		}
 
-		inner = append(inner, document.HardLine(), document.Text(string(normalizeDocContent(contents[i]))))
+		inner = append(inner, document.HardLine(), document.Text(string(normalizeDocContent(contents[i], spaced))))
 	}
 
 	return document.Concat(document.Text("/**"), document.LinePrefix(" *", document.Concat(inner...))), true
@@ -67,7 +67,7 @@ func docCommentDoc(text []byte) (*document.Doc, bool) {
 
 // singleLineDocComment normalizes the tag type in a one-line `/** ... */` block,
 // keeping the rest; a non-canonical or empty block is left verbatim.
-func singleLineDocComment(text []byte) (*document.Doc, bool) {
+func singleLineDocComment(text []byte, spaced bool) (*document.Doc, bool) {
 	if !bytes.HasPrefix(text, []byte("/**")) || !bytes.HasSuffix(text, []byte("*/")) || len(text) < 5 {
 		return nil, false
 	}
@@ -79,8 +79,8 @@ func singleLineDocComment(text []byte) (*document.Doc, bool) {
 
 	// Only rewrite when the normalization is a fixed point; otherwise the block
 	// would keep changing across passes, so leave it verbatim.
-	norm := normalizeDocContent(inner)
-	if !bytes.Equal(norm, normalizeDocContent(norm)) {
+	norm := normalizeDocContent(inner, spaced)
+	if !bytes.Equal(norm, normalizeDocContent(norm, spaced)) {
 		return nil, false
 	}
 
@@ -101,7 +101,7 @@ func hasBareCR(text []byte) bool {
 // continuation lines until brackets balance. It returns the laid-out line, lines
 // consumed, and whether the type carries a breakable shape (false = emit line i
 // alone).
-func docTagLine(contents [][]byte, i int) (*document.Doc, int, bool) {
+func docTagLine(contents [][]byte, i int, spaced bool) (*document.Doc, int, bool) {
 	content := contents[i]
 
 	prefixEnd := tagTypeStart(content)
@@ -153,7 +153,7 @@ func docTagLine(contents [][]byte, i int) (*document.Doc, int, bool) {
 
 	lineDoc := document.Concat(
 		document.Text(string(content[:prefixEnd])),
-		buildDocType(parsed, 0),
+		buildDocType(parsed, 0, spaced),
 		document.Text(string(suffix)),
 	)
 
@@ -247,20 +247,20 @@ func bracketDepth(s []byte) (int, bool) {
 // buildDocType lays out a docblock type, breaking an array shape it carries
 // (directly or in a generic argument) when its single-line form overflows. depth
 // is the shape nesting level, setting the indent of broken members.
-func buildDocType(t phpdoc.Type, depth int) *document.Doc {
+func buildDocType(t phpdoc.Type, depth int, spaced bool) *document.Doc {
 	switch n := t.(type) {
 	case *phpdoc.ShapeType:
-		return buildDocShape(n, depth)
+		return buildDocShape(n, depth, spaced)
 	case *phpdoc.NullableType:
-		return document.Concat(document.Text("?"), buildDocType(n.Inner, depth))
+		return document.Concat(document.Text("?"), buildDocType(n.Inner, depth, spaced))
 	case *phpdoc.ParenType:
-		return document.Concat(document.Text("("), buildDocType(n.Inner, depth), document.Text(")"))
+		return document.Concat(document.Text("("), buildDocType(n.Inner, depth, spaced), document.Text(")"))
 	case *phpdoc.UnionType:
-		return buildDocTypeList(n.Members, "|", depth)
+		return buildDocTypeList(n.Members, typeSeparator("|", spaced), depth, spaced)
 	case *phpdoc.IntersectionType:
-		return buildDocTypeList(n.Members, "&", depth)
+		return buildDocTypeList(n.Members, typeSeparator("&", spaced), depth, spaced)
 	case *phpdoc.GenericType:
-		parts := []*document.Doc{buildDocType(n.Base, depth), document.Text("<")}
+		parts := []*document.Doc{buildDocType(n.Base, depth, spaced), document.Text("<")}
 
 		for i, arg := range n.Args {
 			if i > 0 {
@@ -271,21 +271,21 @@ func buildDocType(t phpdoc.Type, depth int) *document.Doc {
 				parts = append(parts, document.Text(string(arg.Variance)+" "))
 			}
 
-			parts = append(parts, buildDocType(arg.Type, depth))
+			parts = append(parts, buildDocType(arg.Type, depth, spaced))
 		}
 
 		parts = append(parts, document.Text(">"))
 
 		return document.Concat(parts...)
 	default:
-		return document.Text(string(printPHPDocType(t)))
+		return document.Text(string(printPHPDocType(t, spaced)))
 	}
 }
 
-// buildDocTypeList joins union or intersection members with sep (no surrounding
-// spaces, matching the printer), so a shape carried by a member still breaks while
-// the `|null` or `&Other` alternatives stay attached.
-func buildDocTypeList(members []phpdoc.Type, sep string, depth int) *document.Doc {
+// buildDocTypeList joins union or intersection members with sep (spaced as the
+// printer spaces it), so a shape carried by a member still breaks while the
+// `|null` or `&Other` alternatives stay attached.
+func buildDocTypeList(members []phpdoc.Type, sep string, depth int, spaced bool) *document.Doc {
 	shared := countShapes(members) >= 2
 	parts := make([]*document.Doc, 0, len(members)*2-1)
 
@@ -295,12 +295,12 @@ func buildDocTypeList(members []phpdoc.Type, sep string, depth int) *document.Do
 		}
 
 		if shape, ok := m.(*phpdoc.ShapeType); ok && shared {
-			parts = append(parts, docShapeBody(shape, depth))
+			parts = append(parts, docShapeBody(shape, depth, spaced))
 
 			continue
 		}
 
-		parts = append(parts, buildDocType(m, depth))
+		parts = append(parts, buildDocType(m, depth, spaced))
 	}
 
 	if shared {
@@ -322,13 +322,13 @@ func countShapes(members []phpdoc.Type) int {
 	return n
 }
 
-func buildDocShape(s *phpdoc.ShapeType, depth int) *document.Doc {
-	return document.Group(docShapeBody(s, depth))
+func buildDocShape(s *phpdoc.ShapeType, depth int, spaced bool) *document.Doc {
+	return document.Group(docShapeBody(s, depth, spaced))
 }
 
 // The spaces after each line's LinePrefix `*` are baked in here so no
 // document.Indent shifts the star column.
-func docShapeBody(s *phpdoc.ShapeType, depth int) *document.Doc {
+func docShapeBody(s *phpdoc.ShapeType, depth int, spaced bool) *document.Doc {
 	// A broken shape gives each member a trailing comma; with no member, a
 	// broken `array{,` would no longer parse.
 	if len(s.Items) == 0 && !s.HasRest {
@@ -356,7 +356,7 @@ func docShapeBody(s *phpdoc.ShapeType, depth int) *document.Doc {
 			parts = append(parts, document.Text(key+": "))
 		}
 
-		parts = append(parts, buildDocType(it.Value, depth+1))
+		parts = append(parts, buildDocType(it.Value, depth+1, spaced))
 	}
 
 	if s.HasRest {
@@ -391,7 +391,7 @@ const (
 // canonical PHPDoc spacing. The tag, the $variable, and the description are kept
 // byte-for-byte; only the type tokens change. Content that is not a recognized
 // type-bearing tag, or whose type does not fully parse, is returned unchanged.
-func normalizeDocContent(content []byte) []byte {
+func normalizeDocContent(content []byte, spaced bool) []byte {
 	i := skipSpaceTab(content, 0)
 
 	if i >= len(content) || content[i] != '@' {
@@ -407,13 +407,13 @@ func normalizeDocContent(content []byte) []byte {
 
 	switch {
 	case methodTags[string(tag)]:
-		return normalizeMethodTag(content, tagEnd)
+		return normalizeMethodTag(content, tagEnd, spaced)
 	case typeAliasTags[string(tag)]:
-		return normalizeTypeAliasTag(content, tagEnd)
+		return normalizeTypeAliasTag(content, tagEnd, spaced)
 	case templateTags[string(tag)]:
-		return normalizeTemplateTag(content, tagEnd)
+		return normalizeTemplateTag(content, tagEnd, spaced)
 	case assertTags[string(tag)]:
-		return normalizeAssertTag(content, tagEnd)
+		return normalizeAssertTag(content, tagEnd, spaced)
 	case typeFirstTags[string(tag)], requireTags[string(tag)]:
 		typeStart := skipSpaceTab(content, tagEnd)
 
@@ -422,12 +422,12 @@ func normalizeDocContent(content []byte) []byte {
 		}
 
 		if requireTags[string(tag)] {
-			out, _ := rewriteType(content, typeStart, phpdoc.ParseBoundPrefix)
+			out, _ := rewriteType(content, typeStart, phpdoc.ParseBoundPrefix, spaced)
 
 			return out
 		}
 
-		return normalizeTypeAt(content, typeStart)
+		return normalizeTypeAt(content, typeStart, spaced)
 	default:
 		return content
 	}
@@ -509,8 +509,8 @@ var assertTags = map[string]bool{
 
 // normalizeTypeAt rewrites the type beginning at content[start] into canonical
 // spacing, returning content unchanged when no complete type parses there.
-func normalizeTypeAt(content []byte, start int) []byte {
-	out, _ := rewriteType(content, start, phpdoc.ParseTypePrefix)
+func normalizeTypeAt(content []byte, start int, spaced bool) []byte {
+	out, _ := rewriteType(content, start, phpdoc.ParseTypePrefix, spaced)
 
 	return out
 }
@@ -522,6 +522,7 @@ func rewriteType(
 	content []byte,
 	start int,
 	parse func([]byte) (phpdoc.Type, int),
+	spaced bool,
 ) (out []byte, after int) {
 	parsed, n := parse(content[start:])
 
@@ -534,7 +535,7 @@ func rewriteType(
 		return content, -1
 	}
 
-	normalized := printPHPDocType(parsed)
+	normalized := printPHPDocType(parsed, spaced)
 
 	if bytes.Equal(normalized, content[start:start+n]) {
 		return content, start + n
@@ -550,7 +551,7 @@ func rewriteType(
 
 // normalizeTemplateTag canonicalizes the bound (after of/as) and the default
 // (after =) of a @template declaration, leaving the parameter name verbatim.
-func normalizeTemplateTag(content []byte, afterTag int) []byte {
+func normalizeTemplateTag(content []byte, afterTag int, spaced bool) []byte {
 	i := skipSpaceTab(content, afterTag)
 	nameEnd := skipName(content, i)
 
@@ -563,7 +564,7 @@ func normalizeTemplateTag(content []byte, afterTag int) []byte {
 
 	if hasWord(out, i, "of") || hasWord(out, i, "as") {
 		var after int
-		out, after = rewriteType(out, skipSpaceTab(out, i+len("of")), phpdoc.ParseBoundPrefix)
+		out, after = rewriteType(out, skipSpaceTab(out, i+len("of")), phpdoc.ParseBoundPrefix, spaced)
 
 		if after < 0 {
 			return out
@@ -575,7 +576,7 @@ func normalizeTemplateTag(content []byte, afterTag int) []byte {
 	j := skipSpaceTab(out, i)
 
 	if j < len(out) && out[j] == '=' {
-		out, _ = rewriteType(out, skipSpaceTab(out, j+1), phpdoc.ParseBoundPrefix)
+		out, _ = rewriteType(out, skipSpaceTab(out, j+1), phpdoc.ParseBoundPrefix, spaced)
 	}
 
 	return out
@@ -583,7 +584,7 @@ func normalizeTemplateTag(content []byte, afterTag int) []byte {
 
 // normalizeTypeAliasTag canonicalizes the type definition of a @phpstan-type or
 // @psalm-type alias, skipping the alias name and an optional `=`.
-func normalizeTypeAliasTag(content []byte, afterTag int) []byte {
+func normalizeTypeAliasTag(content []byte, afterTag int, spaced bool) []byte {
 	i := skipSpaceTab(content, afterTag)
 	nameEnd := skipName(content, i)
 
@@ -601,13 +602,13 @@ func normalizeTypeAliasTag(content []byte, afterTag int) []byte {
 		return content
 	}
 
-	return normalizeTypeAt(content, i)
+	return normalizeTypeAt(content, i, spaced)
 }
 
 // normalizeMethodTag canonicalizes the return type of an @method tag, skipping
 // an optional `static` modifier. The method name and its parameter list are
 // left verbatim.
-func normalizeMethodTag(content []byte, afterTag int) []byte {
+func normalizeMethodTag(content []byte, afterTag int, spaced bool) []byte {
 	i := skipSpaceTab(content, afterTag)
 
 	if hasWord(content, i, "static") {
@@ -618,12 +619,12 @@ func normalizeMethodTag(content []byte, afterTag int) []byte {
 		return content
 	}
 
-	return normalizeTypeAt(content, i)
+	return normalizeTypeAt(content, i, spaced)
 }
 
 // normalizeAssertTag canonicalizes the asserted type, preserving an optional
 // leading ! negation and the trailing $variable.
-func normalizeAssertTag(content []byte, afterTag int) []byte {
+func normalizeAssertTag(content []byte, afterTag int, spaced bool) []byte {
 	i := skipSpaceTab(content, afterTag)
 
 	if i < len(content) && content[i] == '!' {
@@ -634,7 +635,7 @@ func normalizeAssertTag(content []byte, afterTag int) []byte {
 		return content
 	}
 
-	return normalizeTypeAt(content, i)
+	return normalizeTypeAt(content, i, spaced)
 }
 
 func typeHasBreakableShape(t phpdoc.Type) bool {

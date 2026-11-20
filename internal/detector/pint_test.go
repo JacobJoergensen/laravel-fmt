@@ -949,6 +949,40 @@ func TestApplyPintDisabledRuleSwitchesItsBehaviorOff(t *testing.T) {
 	}
 }
 
+func TestApplyPintTypesSpaces(t *testing.T) {
+	cases := []struct {
+		name      string
+		rules     string
+		wantTypes bool
+		wantCatch bool
+	}{
+		{"single spaces types and catch", `{"types_spaces": {"space": "single"}}`, true, true},
+		{"space_multiple_catch overrides catch", `{"types_spaces": {"space": "single", "space_multiple_catch": "none"}}`, true, false},
+		{"catch alone can be spaced", `{"types_spaces": {"space": "none", "space_multiple_catch": "single"}}`, false, true},
+		{"true is the fixer default none", `{"types_spaces": true}`, false, false},
+		{"absent rule keeps types tight", `{}`, false, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var rules map[string]jsontext.Value
+			if err := json.Unmarshal([]byte(tc.rules), &rules); err != nil {
+				t.Fatalf("rules: %v", err)
+			}
+
+			pint := rulesToPint(rules)
+
+			cfg := config.Default()
+			applyPint(cfg, &pint)
+
+			if cfg.PHP.TypesSpace != tc.wantTypes || cfg.PHP.CatchTypesSpace != tc.wantCatch {
+				t.Fatalf("TypesSpace=%v CatchTypesSpace=%v, want %v %v",
+					cfg.PHP.TypesSpace, cfg.PHP.CatchTypesSpace, tc.wantTypes, tc.wantCatch)
+			}
+		})
+	}
+}
+
 func TestApplyPintHeredocIndentation(t *testing.T) {
 	modes := []string{
 		config.HeredocIndentStartPlusOne,

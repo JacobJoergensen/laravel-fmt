@@ -35,7 +35,6 @@ type emitter struct {
 	livewireView   bool
 	livewireBlocks int
 	dirs           *parser.Directives
-	roots          []parser.Node
 	srcCopied      bool
 	hangClose      *htmlparser.Element
 	hangCloseAtTag *htmlparser.Element
@@ -90,7 +89,6 @@ func (e *emitter) voidNamePaired(name []byte) bool {
 
 func (e *emitter) emitFile(file *parser.File) {
 	e.dirs = file.Directives
-	e.roots = file.Nodes
 
 	if e.cfg.Tailwind {
 		for _, n := range file.Nodes {
@@ -945,7 +943,7 @@ func (e *emitter) emitElement(el *htmlparser.Element) {
 
 	switch {
 	case htmlparser.IsRcdataElement(el.Name):
-		htmlfmt.EmitRcdataContent(e.w, el.Children)
+		htmlfmt.EmitRcdataContent(e.w, el)
 	case htmlparser.IsPreformattedElement(el.Name):
 		htmlfmt.EmitPreformattedContent(e.w, e.src, el, e.bodyPHPSpans(el))
 	case e.isWhitespacePreservingElement(el) || htmlfmt.IsEmptinessSensitiveElement(el):
@@ -1885,7 +1883,7 @@ func (e *emitter) emitAttr(a *htmlparser.Attr, component bool) {
 	// string it is.
 	if hasValueLineBreak(a.Value, component) {
 		if !a.MayRenderDelimiter {
-			quote = formatter.AttrQuote(quote, a.Value, e.cfg)
+			quote = formatter.AttrQuote(quote, a.Value)
 		}
 
 		e.w.Write(string(quote))
@@ -1923,7 +1921,7 @@ func (e *emitter) emitAttr(a *htmlparser.Attr, component bool) {
 		return
 	}
 
-	formatter.WriteAttrValue(e.w, quote, value, e.cfg)
+	formatter.WriteAttrValue(e.w, quote, value)
 }
 
 // unquotedDelimiter returns the quote an unquoted attribute value adopts, or 0
@@ -1975,10 +1973,10 @@ func (e *emitter) unquotedDelimiter(a *htmlparser.Attr) byte {
 			return 0
 		}
 
-		return formatter.MarkupQuoteTarget(e.cfg)
+		return formatter.AttrDelimiter
 	}
 
-	return formatter.UnquotedAttrDelimiter(a.Value, e.cfg)
+	return formatter.UnquotedAttrDelimiter(a.Value)
 }
 
 // attrDelimiterFor returns the quote to delimit an attribute whose formatted value
@@ -2859,53 +2857,10 @@ func (e *emitter) emitStructuralChildren(el *htmlparser.Element) {
 		nodes[i] = c
 	}
 
-	if e.isDocumentHTML(el) {
-		e.emitInterleaved(nodes, true)
-		e.w.Newline()
-
-		return
-	}
-
 	e.w.Indent()
 	e.emitInterleaved(nodes, true)
 	e.w.Dedent()
 	e.w.Newline()
-}
-
-// isDocumentHTML reports whether el is a root <html> whose only elements are
-// <head> and <body>, which then stay at its column: prettier-plugin-blade, and
-// so Pint, lays a page out that way.
-func (e *emitter) isDocumentHTML(el *htmlparser.Element) bool {
-	if !bytes.EqualFold(el.Name, []byte("html")) || !e.isRoot(el) {
-		return false
-	}
-
-	sections := 0
-
-	for _, c := range el.Children {
-		child, ok := c.(*htmlparser.Element)
-		if !ok {
-			continue
-		}
-
-		if !bytes.EqualFold(child.Name, []byte("head")) && !bytes.EqualFold(child.Name, []byte("body")) {
-			return false
-		}
-
-		sections++
-	}
-
-	return sections > 0
-}
-
-func (e *emitter) isRoot(el *htmlparser.Element) bool {
-	for _, n := range e.roots {
-		if root, ok := n.(*htmlparser.Element); ok && root == el {
-			return true
-		}
-	}
-
-	return false
 }
 
 // emitGluedBodyNormalized rebuilds each echo and directive of a single-line

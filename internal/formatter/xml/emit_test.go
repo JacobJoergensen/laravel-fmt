@@ -83,8 +83,7 @@ func TestAttrQuoteStyle(t *testing.T) {
 		input        string
 		wantContains string
 	}{
-		{"auto canonicalizes to double", config.QuoteStyleAuto, `<tag a='x'/>`, `a="x"`},
-		{"single forces single", config.QuoteStyleSingle, `<tag a="x"/>`, `a='x'`},
+		{"single style leaves attr double", config.QuoteStyleSingle, `<tag a='x'/>`, `a="x"`},
 		{"conflicting inner quote left untouched", config.QuoteStyleDouble, `<tag a='say "hi"'/>`, `a='say "hi"'`},
 	}
 

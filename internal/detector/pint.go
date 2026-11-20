@@ -21,6 +21,7 @@ const (
 	pintBraceNextLine = "next_line_unless_newline_at_signature_end"
 	pintSpacingOne    = "one"
 	pintSpacingNone   = "none"
+	pintSpacingSingle = "single"
 	pintAlign         = "align"
 	pintSingleSpace   = "single_space"
 	pintSortAlpha     = "alpha"
@@ -43,6 +44,7 @@ type Pint struct {
 	BladeBlankLineBeforeStatement *BlankLineBeforeStatement
 	OrderedImports                *OrderedImports
 	ArraySyntax                   *ArraySyntax
+	TypesSpaces                   *TypesSpaces
 
 	HeredocIndentation *string
 
@@ -130,6 +132,12 @@ var pintBladeStatements = []string{"if", "foreach", "forelse", "for", "while", "
 type ClassDefinition struct {
 	SpaceBeforeParenthesis     bool `json:"space_before_parenthesis"`
 	InlineConstructorArguments bool `json:"inline_constructor_arguments"`
+}
+
+// TypesSpaces is Pint's types_spaces rule; a nil SpaceMultipleCatch follows Space.
+type TypesSpaces struct {
+	Space              string  `json:"space"`
+	SpaceMultipleCatch *string `json:"space_multiple_catch"`
 }
 
 // ArraySyntax is Pint's array_syntax rule.
@@ -478,6 +486,7 @@ func rulesToPint(rules map[string]jsontext.Value) Pint {
 	})
 	pint.OrderedImports = ruleOptions(rules, ruleOrderedImports, OrderedImports{SortAlgorithm: pintSortAlpha})
 	pint.ArraySyntax = ruleOptions(rules, ruleArraySyntax, ArraySyntax{Syntax: "short"})
+	pint.TypesSpaces = ruleOptions(rules, ruleTypesSpaces, TypesSpaces{Space: pintSpacingNone})
 
 	if on := ruleEnabled(rules, ruleBlankLineBeforeStatement); on != nil && !*on {
 		pint.BlankLineBeforeStatement = &BlankLineBeforeStatement{}
@@ -637,6 +646,7 @@ func applyPint(cfg *config.File, p *Pint) {
 	setIfPresent(&cfg.PHP.ChainIndentFromLine, p.MethodChainingIndentation)
 	setIfPresent(&cfg.PHP.ArrowValueOnKeyLine, p.NoMultilineDoubleArrow)
 	applyArraySyntax(cfg, p.ArraySyntax)
+	applyTypesSpaces(cfg, p.TypesSpaces)
 	applyEmptyBodies(cfg, p)
 
 	if p.ClassDefinition != nil {
@@ -821,6 +831,19 @@ func applyArraySyntax(cfg *config.File, as *ArraySyntax) {
 	}
 }
 
+func applyTypesSpaces(cfg *config.File, ts *TypesSpaces) {
+	if ts == nil {
+		return
+	}
+
+	cfg.PHP.TypesSpace = ts.Space == pintSpacingSingle
+	cfg.PHP.CatchTypesSpace = cfg.PHP.TypesSpace
+
+	if ts.SpaceMultipleCatch != nil {
+		cfg.PHP.CatchTypesSpace = *ts.SpaceMultipleCatch == pintSpacingSingle
+	}
+}
+
 // Order matters: a later entry replaces an earlier one's whole body, as PHP's
 // array_merge does, and a set expands where it is listed.
 type pintRule struct {
@@ -850,6 +873,7 @@ const (
 	ruleSingleImportPerStatement  = "single_import_per_statement"
 	ruleSingleLineEmptyBody       = "single_line_empty_body"
 	ruleSingleTraitInsert         = "single_trait_insert_per_statement"
+	ruleTypesSpaces               = "types_spaces"
 	ruleUnaryOperatorSpaces       = "unary_operator_spaces"
 
 	setPSR2       = "@PSR2"

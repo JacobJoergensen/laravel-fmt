@@ -37,6 +37,18 @@ function g()
         expect(true)->toBeTrue();
     });
 
+    it('describes a behaviour in a sentence that is long enough to overflow the line', function () use ($apply): void {
+        expect($apply)->toBeTrue();
+    });
+
+    Transactions::registerCallbackForRollbackAfterTheOuterTransactionCommitsSuccessfully(function () use ($listener): void {
+        $listener->handle();
+    });
+
+    $this->transactions->registerCallbackForRollbackAfterTheOuterTransactionCommitsSuccessfully(function () use ($listener) {
+        $listener->handle();
+    });
+
     $callback = function () use (
         $value, // captured
     ) {

@@ -145,6 +145,37 @@ func TestFormatNormalizesLineTerminatorsInVerbatimBody(t *testing.T) {
 	}
 }
 
+func TestFormatRehomesTitleBody(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			"body on its own lines follows the tag",
+			"<div>\n<div>\n<title>\n    Page\n    Name\n</title>\n</div>\n</div>\n",
+			"<div>\n    <div>\n        <title>\n            Page\n            Name\n        </title>\n    </div>\n</div>\n",
+		},
+		{"one-line body stays inline", "<div>\n<title>Page</title>\n</div>\n", "<div>\n    <title>Page</title>\n</div>\n"},
+		{"glued body stays verbatim", "<div>\n<title>Page\n  Name</title>\n</div>\n", "<div>\n    <title>Page\n  Name</title>\n</div>\n"},
+		{"textarea stays verbatim", "<div>\n<textarea>\n    keep\n</textarea>\n</div>\n", "<div>\n    <textarea>\n    keep\n</textarea>\n</div>\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+
+			if string(got) != tc.want {
+				t.Fatalf("Format output differs.\n=== got ===\n%s\n=== want ===\n%s", got, tc.want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent.\n=== once ===\n%q\n=== twice ===\n%q", got, twice)
+			}
+		})
+	}
+}
+
 func TestFormatReadsALoneCRAsItsLFTwin(t *testing.T) {
 	cases := map[string]string{
 		"text":                          "<p>a\rb</p>\n",
@@ -277,8 +308,7 @@ func TestAttrQuoteStyle(t *testing.T) {
 		wantContains string
 		wantAbsent   string
 	}{
-		{"auto canonicalizes to double", config.QuoteStyleAuto, "<div class='x'></div>", `class="x"`, `class='x'`},
-		{"single forces single", config.QuoteStyleSingle, `<div class="x"></div>`, `class='x'`, `class="x"`},
+		{"single style leaves attr double", config.QuoteStyleSingle, `<div class='x'></div>`, `class="x"`, `class='x'`},
 		{"conflicting inner quote left untouched", config.QuoteStyleDouble, `<a title='say "hi"'></a>`, `title='say "hi"'`, ""},
 	}
 

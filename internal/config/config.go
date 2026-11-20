@@ -30,8 +30,9 @@ const (
 	IndentStyleTab   = "tab"
 )
 
-// "auto" means each language's convention: single quotes in PHP, double in CSS,
-// HTML and XML.
+// The quote style governs strings, and "auto" means each language's convention:
+// single quotes in PHP, double in CSS. Markup attributes always take double
+// quotes, as Prettier gives them whatever its singleQuote says.
 const (
 	QuoteStyleAuto   = "auto"
 	QuoteStyleSingle = "single"
@@ -99,6 +100,9 @@ var BlankLineStatements = []string{
 type IgnoreLayer struct {
 	Patterns   []string
 	IgnoreCase bool
+	// Anchor is the directory the patterns are written from, when the tool's
+	// config sits above the project; empty means the project's ignore anchor.
+	Anchor string
 	// Set when the tool formats the files it lists; Prettier's and Pint's
 	// lists name files no tool should touch.
 	FormattedElsewhere bool
@@ -189,6 +193,10 @@ type PHP struct {
 	InlineAnonClassArgs bool `json:"-"`
 	// ChainIndentFromLine is set by method_chaining_indentation.
 	ChainIndentFromLine bool `json:"-"`
+	// TypesSpace and CatchTypesSpace come from types_spaces single; TypesSpace
+	// also spaces PHPDoc types.
+	TypesSpace      bool `json:"-"`
+	CatchTypesSpace bool `json:"-"`
 }
 
 // Blade holds Blade formatter options.

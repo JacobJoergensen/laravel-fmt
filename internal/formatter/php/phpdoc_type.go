@@ -9,15 +9,15 @@ import (
 // printPHPDocType renders t with canonical PHPDoc spacing. An *Invalid is
 // written back unchanged, so a type the parser could not read survives
 // byte for byte.
-func printPHPDocType(t phpdoc.Type) []byte {
+func printPHPDocType(t phpdoc.Type, spaced bool) []byte {
 	var b bytes.Buffer
 
-	writePHPDocType(&b, t)
+	writePHPDocType(&b, t, spaced)
 
 	return b.Bytes()
 }
 
-func writePHPDocType(b *bytes.Buffer, t phpdoc.Type) {
+func writePHPDocType(b *bytes.Buffer, t phpdoc.Type, spaced bool) {
 	switch n := t.(type) {
 	case *phpdoc.IdentType:
 		b.Write(n.Name)
@@ -25,29 +25,29 @@ func writePHPDocType(b *bytes.Buffer, t phpdoc.Type) {
 		b.Write(n.Raw)
 	case *phpdoc.NullableType:
 		b.WriteByte('?')
-		writePHPDocType(b, n.Inner)
+		writePHPDocType(b, n.Inner, spaced)
 	case *phpdoc.UnionType:
 		for i, m := range n.Members {
 			if i > 0 {
-				b.WriteByte('|')
+				b.WriteString(typeSeparator("|", spaced))
 			}
 
-			writePHPDocType(b, m)
+			writePHPDocType(b, m, spaced)
 		}
 	case *phpdoc.IntersectionType:
 		for i, m := range n.Members {
 			if i > 0 {
-				b.WriteByte('&')
+				b.WriteString(typeSeparator("&", spaced))
 			}
 
-			writePHPDocType(b, m)
+			writePHPDocType(b, m, spaced)
 		}
 	case *phpdoc.ParenType:
 		b.WriteByte('(')
-		writePHPDocType(b, n.Inner)
+		writePHPDocType(b, n.Inner, spaced)
 		b.WriteByte(')')
 	case *phpdoc.GenericType:
-		writePHPDocType(b, n.Base)
+		writePHPDocType(b, n.Base, spaced)
 		b.WriteByte('<')
 
 		for i, a := range n.Args {
@@ -60,45 +60,45 @@ func writePHPDocType(b *bytes.Buffer, t phpdoc.Type) {
 				b.WriteByte(' ')
 			}
 
-			writePHPDocType(b, a.Type)
+			writePHPDocType(b, a.Type, spaced)
 		}
 
 		b.WriteByte('>')
 	case *phpdoc.ShapeType:
-		writePHPDocShape(b, n)
+		writePHPDocShape(b, n, spaced)
 	case *phpdoc.ArraySuffixType:
-		writePHPDocType(b, n.Inner)
+		writePHPDocType(b, n.Inner, spaced)
 		b.WriteString("[]")
 	case *phpdoc.OffsetAccessType:
-		writePHPDocType(b, n.Inner)
+		writePHPDocType(b, n.Inner, spaced)
 		b.WriteByte('[')
-		writePHPDocType(b, n.Offset)
+		writePHPDocType(b, n.Offset, spaced)
 		b.WriteByte(']')
 	case *phpdoc.ConstFetchType:
 		b.Write(n.Class)
 		b.WriteString("::")
 		b.Write(n.Member)
 	case *phpdoc.CallableType:
-		writePHPDocCallable(b, n)
+		writePHPDocCallable(b, n, spaced)
 	case *phpdoc.ConditionalType:
-		writePHPDocType(b, n.Subject)
+		writePHPDocType(b, n.Subject, spaced)
 		b.WriteString(" is ")
 
 		if n.Negated {
 			b.WriteString("not ")
 		}
 
-		writePHPDocType(b, n.Target)
+		writePHPDocType(b, n.Target, spaced)
 		b.WriteString(" ? ")
-		writePHPDocType(b, n.If)
+		writePHPDocType(b, n.If, spaced)
 		b.WriteString(" : ")
-		writePHPDocType(b, n.Else)
+		writePHPDocType(b, n.Else, spaced)
 	case *phpdoc.Invalid:
 		b.Write(n.Raw)
 	}
 }
 
-func writePHPDocCallable(b *bytes.Buffer, c *phpdoc.CallableType) {
+func writePHPDocCallable(b *bytes.Buffer, c *phpdoc.CallableType, spaced bool) {
 	b.Write(c.Keyword)
 	b.WriteByte('(')
 
@@ -107,7 +107,7 @@ func writePHPDocCallable(b *bytes.Buffer, c *phpdoc.CallableType) {
 			b.WriteString(", ")
 		}
 
-		writePHPDocType(b, pm.Type)
+		writePHPDocType(b, pm.Type, spaced)
 
 		if pm.ByRef || pm.Variadic || pm.Name != nil {
 			b.WriteByte(' ')
@@ -132,11 +132,11 @@ func writePHPDocCallable(b *bytes.Buffer, c *phpdoc.CallableType) {
 
 	if c.Return != nil {
 		b.WriteString(": ")
-		writePHPDocType(b, c.Return)
+		writePHPDocType(b, c.Return, spaced)
 	}
 }
 
-func writePHPDocShape(b *bytes.Buffer, s *phpdoc.ShapeType) {
+func writePHPDocShape(b *bytes.Buffer, s *phpdoc.ShapeType, spaced bool) {
 	b.Write(s.Keyword)
 	b.WriteByte('{')
 
@@ -155,7 +155,7 @@ func writePHPDocShape(b *bytes.Buffer, s *phpdoc.ShapeType) {
 			b.WriteString(": ")
 		}
 
-		writePHPDocType(b, it.Value)
+		writePHPDocType(b, it.Value, spaced)
 	}
 
 	if s.HasRest {

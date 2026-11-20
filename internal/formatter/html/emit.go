@@ -117,7 +117,7 @@ func emitElement(w *formatter.Writer, src []byte, idx *docIndex, el *parser.Elem
 
 	switch {
 	case parser.IsRcdataElement(el.Name):
-		EmitRcdataContent(w, el.Children)
+		EmitRcdataContent(w, el)
 	case parser.IsPreformattedElement(el.Name), idx.preservesWhitespace(el):
 		EmitPreformattedContent(w, src, el, nil)
 	case parser.IsRawTextElement(el.Name):
@@ -246,7 +246,7 @@ func emitAttr(w *formatter.Writer, src []byte, a *parser.Attr, cfg *config.File)
 
 	quote := a.Quote
 	if quote == 0 {
-		quote = formatter.UnquotedAttrDelimiter(a.Value, cfg)
+		quote = formatter.UnquotedAttrDelimiter(a.Value)
 
 		if quote == 0 {
 			w.WriteBytes(a.Value)
@@ -256,7 +256,7 @@ func emitAttr(w *formatter.Writer, src []byte, a *parser.Attr, cfg *config.File)
 	}
 
 	if HasLineBreak(a.Value) {
-		quote = formatter.AttrQuote(quote, a.Value, cfg)
+		quote = formatter.AttrQuote(quote, a.Value)
 		w.Write(string(quote))
 		EmitMultilineAttrValue(w, src, a, cfg.PHP.NotOperatorSpace)
 		w.Write(string(quote))
@@ -276,7 +276,7 @@ func emitAttr(w *formatter.Writer, src []byte, a *parser.Attr, cfg *config.File)
 		}
 	}
 
-	formatter.WriteAttrValue(w, quote, value, cfg)
+	formatter.WriteAttrValue(w, quote, value)
 }
 
 // IsClassAttr reports whether name is `class`, case-insensitively.
@@ -614,25 +614,29 @@ func EmitRawTextContent(w *formatter.Writer, el *parser.Element, cfg *config.Fil
 	rehomable := bytes.EqualFold(name, []byte("style")) && styleBodyRehomable(lines)
 
 	if rehomable {
-		common := commonRawIndent(lines)
-
-		w.Indent()
-
-		for _, line := range lines {
-			w.Newline()
-
-			if body := bytes.TrimRight(line[dropIndent(line, common):], " \t\r"); len(body) > 0 {
-				w.WriteBytes(body)
-			}
-		}
-
-		w.Dedent()
-		w.Newline()
+		emitRehomedLines(w, lines)
 
 		return
 	}
 
 	writeVerbatimLines(w, lines)
+}
+
+func emitRehomedLines(w *formatter.Writer, lines [][]byte) {
+	common := commonRawIndent(lines)
+
+	w.Indent()
+
+	for _, line := range lines {
+		w.Newline()
+
+		if body := bytes.TrimRight(line[dropIndent(line, common):], " \t\r"); len(body) > 0 {
+			w.WriteBytes(body)
+		}
+	}
+
+	w.Dedent()
+	w.Newline()
 }
 
 // EmitVerbatimLines writes raw at its source columns without its blank edge
@@ -749,12 +753,47 @@ func emitScriptJSON(w *formatter.Writer, raw []byte, php []parser.Span) bool {
 	return jsonfmt.EmitScriptBody(w, raw)
 }
 
-// EmitRcdataContent writes a <textarea> or <title> body untrimmed, since its
-// content is a literal value.
-func EmitRcdataContent(w *formatter.Writer, children []parser.Node) {
-	raw, base, php := rawBody(children)
+// EmitRcdataContent writes a <textarea> body untrimmed, since its content is
+// the field's value. A <title> body written on lines of its own is re-homed
+// under the tag instead: the document title collapses whitespace.
+func EmitRcdataContent(w *formatter.Writer, el *parser.Element) {
+	raw, base, php := rawBody(el.Children)
+
+	if bytes.EqualFold(el.Name, []byte("title")) && titleBodyRehomable(raw, base, php) {
+		emitRehomedLines(w, trimRawTextLines(raw, base, php))
+
+		return
+	}
 
 	EmitVerbatimBytes(w, raw, base, php, false)
+}
+
+func isLineBreakByte(c byte) bool {
+	return c == '\n' || c == '\r'
+}
+
+// A PHP island across a line keeps the body verbatim: re-indenting it would
+// change a string inside it.
+func titleBodyRehomable(raw []byte, base int, php []parser.Span) bool {
+	head := bytes.TrimLeft(raw, " \t")
+	tail := bytes.TrimRight(raw, " \t")
+
+	if len(head) == 0 || !isLineBreakByte(head[0]) || !isLineBreakByte(tail[len(tail)-1]) {
+		return false
+	}
+
+	if len(bytes.Trim(raw, " \t\r\n")) == 0 {
+		return false
+	}
+
+	for _, span := range php {
+		island := raw[span.Start.Offset-base : span.End.Offset-base]
+		if bytes.ContainsAny(island, "\r\n") {
+			return false
+		}
+	}
+
+	return true
 }
 
 // EmitPreformattedContent writes the source between el's tags verbatim, for an

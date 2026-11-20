@@ -1,12 +1,12 @@
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
-<head>
-    <title>{{ $title }}</title>
-</head>
-{{-- shell --}}
-@include('partials.banner')
-<body class="antialiased">
-    <main>{{ $slot }}</main>
-</body>
+    <head>
+        <title>{{ $title }}</title>
+    </head>
+    {{-- shell --}}
+    @include('partials.banner')
+    <body class="antialiased">
+        <main>{{ $slot }}</main>
+    </body>
 </html>
 <div>
     <html>

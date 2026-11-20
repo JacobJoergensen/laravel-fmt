@@ -2,6 +2,15 @@
 
 ## Unreleased
 * Added `formattedElsewhere` to the `laravel-fmt/format` reply for files another tool formats
+* Improved long CSS selectors to break at combinators, then inside `:is()` or `:not()`
+* Improved a closure after other arguments, like Pest's `it('…', function () use ($x) {`, to stay hugged past the print width
+* Improved `<head>` and `<body>` in Blade to indent under `<html>`, as Laravel's docs write them
+* Improved the error for an inline `@php(…)` that a later `@endphp` closes, naming both lines
+* Fixed `types_spaces` in `pint.json` being ignored, so `int | string` lost its spaces
+* Fixed `quoteStyle` and Prettier's `singleQuote` switching HTML, Blade and XML attributes to single quotes
+* Fixed a multi-line `<title>` keeping its old indent when re-indented
+* Fixed spaces kept inside parentheses in CSS selectors and at-rules, like `:not( .a )`
+* Fixed a monorepo's root `.prettierignore` and `pint.json` excludes being skipped inside a package with its own `composer.json`
 * Fixed the language server sending edits some editors apply wrongly when a file's last line changes
 * Fixed the language server formatting before `initialize` and accepting a second `initialize`
 

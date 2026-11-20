@@ -595,7 +595,7 @@ func (b *builder) leadComment(tr parser.Trivia) *document.Doc {
 	b.place(tr.Span.Start.Offset)
 
 	if tr.Kind == parser.TriviaDocComment {
-		if d, ok := docCommentDoc(stripLineCR(tr.Text)); ok {
+		if d, ok := docCommentDoc(stripLineCR(tr.Text), b.cfg.PHP.TypesSpace); ok {
 			return b.tagComment(d, tr.Span.Start.Offset)
 		}
 	}

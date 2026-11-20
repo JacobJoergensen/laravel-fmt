@@ -2,13 +2,9 @@
 
 function f()
 {
-    return Cache::remember(
-        "widgets.summary.report.cache.{$widgetGroupKey}",
-        300,
-        function () use ($widgetGroupKey): array {
-            return [];
-        },
-    );
+    return Cache::remember("widgets.summary.report.cache.{$widgetGroupKey}", 300, function () use ($widgetGroupKey): array {
+        return [];
+    });
 }
 
 function g()
@@ -42,6 +38,22 @@ function g()
         expect(true)->toBeTrue();
     });
 
+    it('describes a behaviour in a sentence that is long enough to overflow the line', function () use ($apply): void {
+        expect($apply)->toBeTrue();
+    });
+
+    Transactions::registerCallbackForRollbackAfterTheOuterTransactionCommitsSuccessfully(
+        function () use ($listener): void {
+            $listener->handle();
+        },
+    );
+
+    $this->transactions->registerCallbackForRollbackAfterTheOuterTransactionCommitsSuccessfully(
+        function () use ($listener) {
+            $listener->handle();
+        },
+    );
+
     $callback = function () use (
         $value, // captured
     ) {
@@ -60,11 +72,8 @@ class Exporter
 {
     public function export($user, $renderer, $scratchFilePath): void
     {
-        $document = $this->withLocale(
-            $user->preferredLocale(),
-            function () use ($renderer, $scratchFilePath): PdfDocument {
-                return $renderer->store($scratchFilePath);
-            },
-        );
+        $document = $this->withLocale($user->preferredLocale(), function () use ($renderer, $scratchFilePath): PdfDocument {
+            return $renderer->store($scratchFilePath);
+        });
     }
 }

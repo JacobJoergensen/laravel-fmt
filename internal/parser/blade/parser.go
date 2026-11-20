@@ -2,6 +2,7 @@ package blade
 
 import (
 	"bytes"
+	"fmt"
 	"slices"
 
 	parserpkg "github.com/JacobJoergensen/laravel-fmt/internal/parser"
@@ -659,8 +660,9 @@ func (p *bladeParser) parseAt() Node {
 	case phpDirective:
 		// The name is consumed, so the block test looks past it; a bare @php
 		// without an @endphp still takes the block path for its error.
-		if p.hasCloseAhead("@endphp") || !p.directiveArgsFollow() {
-			return p.parsePhpBlock(start)
+		inline := p.directiveArgsFollow()
+		if p.hasCloseAhead("@endphp") || !inline {
+			return p.parsePhpBlock(start, inline)
 		}
 	case "verbatim":
 		return p.parseVerbatimBlock(start)
@@ -1070,7 +1072,52 @@ func (p *bladeParser) findDirectiveClose(lpOffset int) (rpStart, rpEnd int) {
 	return rpStart, rpEnd
 }
 
-func (p *bladeParser) parsePhpBlock(at Position) Node {
+// argsEndTheLine tells the inline @php($x = 1) form from block PHP that starts
+// with (.
+func argsEndTheLine(body []byte) bool {
+	i := 0
+	for i < len(body) && (body[i] == ' ' || body[i] == '\t') {
+		i++
+	}
+
+	if i == len(body) || body[i] != '(' {
+		return false
+	}
+
+	depth := 0
+	quote := byte(0)
+
+	for ; i < len(body); i++ {
+		c := body[i]
+
+		switch {
+		case quote != 0 && c == '\\':
+			i++
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+			if depth == 0 {
+				rest, _, _ := bytes.Cut(body[i+1:], []byte("\n"))
+
+				return len(bytes.TrimSpace(rest)) == 0
+			}
+		}
+	}
+
+	return false
+}
+
+// inline is set for `@php(…)`: a later `@endphp` still closes it, as Blade's
+// storePhpBlocks does, so markup in between reads as PHP. Its errors then say
+// that, at the `@php`, rather than point at a line inside the markup.
+func (p *bladeParser) parsePhpBlock(at Position, inline bool) Node {
 	open := Span{Start: at, End: p.Pos}
 	contentOffset := p.Pos.Offset
 
@@ -1080,11 +1127,21 @@ func (p *bladeParser) parsePhpBlock(at Position) Node {
 
 	body := p.Src[contentOffset:p.Pos.Offset]
 	stmts, tokens, errs := php.ParseStatements(body)
-	p.errors = append(p.errors, rehomeErrors(errs, open.End)...)
-
 	closeStart := p.Pos
+	closed := p.StartsWith("@endphp")
 
-	if p.StartsWith("@endphp") {
+	switch {
+	case inline && closed && len(errs) > 0 && argsEndTheLine(body):
+		p.addError(at, fmt.Sprintf(
+			"@php(…) is closed by the @endphp on line %d, so Blade reads everything between as PHP; "+
+				"write @php … @endphp, or keep inline @php(…) out of a file with @php blocks",
+			closeStart.Line,
+		))
+	default:
+		p.errors = append(p.errors, rehomeErrors(errs, open.End)...)
+	}
+
+	if closed {
 		p.AdvanceN(len("@endphp"))
 	} else {
 		p.addError(at, "expected @endphp to close @php block")

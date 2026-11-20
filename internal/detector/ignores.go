@@ -32,18 +32,32 @@ var oxfmtCandidateNames = slices.Concat(oxfmtConfigNames, viteConfigNames)
 var fmtProperty = regexp.MustCompile(`(?m)^\s*fmt\s*:`)
 
 // adoptIgnores adds Prettier's and Pint's ignore lists, so moving from those
-// tools does not start formatting what they left alone. Only configs in anchor
-// are read, since patterns match from there.
+// tools does not start formatting what they left alone.
 func adoptIgnores(cfg *config.File, ctx Context, anchor string) error {
-	prettier, err := prettierIgnores(anchor)
-	if err != nil {
-		return err
+	prettierDirs := []string{anchor}
+
+	if ctx.Prettier != nil {
+		dir, ok, err := toolIgnoreDir(anchor, ctx.Prettier.Path)
+		if err != nil {
+			return err
+		}
+
+		if ok && dir != filepath.Clean(anchor) {
+			prettierDirs = append(prettierDirs, dir)
+		}
 	}
 
-	// Prettier's matcher ignores case on every file system; Symfony Finder,
-	// which applies Pint's excludes, never does.
-	if len(prettier) > 0 {
-		cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, config.IgnoreLayer{Patterns: prettier, IgnoreCase: true})
+	for _, dir := range prettierDirs {
+		prettier, err := prettierIgnores(dir)
+		if err != nil {
+			return err
+		}
+
+		// Prettier's matcher ignores case on every file system; Symfony Finder,
+		// which applies Pint's excludes, never does.
+		if len(prettier) > 0 {
+			cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, config.IgnoreLayer{Patterns: prettier, IgnoreCase: true, Anchor: dir})
+		}
 	}
 
 	owns, err := oxfmtOwnsFrontend(anchor)
@@ -55,9 +69,14 @@ func adoptIgnores(cfg *config.File, ctx Context, anchor string) error {
 		cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, config.IgnoreLayer{Patterns: slices.Clone(oxfmtLanguages), FormattedElsewhere: true})
 	}
 
-	if ctx.Pint != nil && filepath.Clean(filepath.Dir(ctx.Pint.Path)) == filepath.Clean(anchor) {
-		if pint := pintIgnores(ctx.Pint); len(pint) > 0 {
-			cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, config.IgnoreLayer{Patterns: pint})
+	if ctx.Pint != nil {
+		dir, ok, err := toolIgnoreDir(anchor, ctx.Pint.Path)
+		if err != nil {
+			return err
+		}
+
+		if pint := pintIgnores(ctx.Pint); ok && len(pint) > 0 {
+			cfg.AdoptedIgnore = append(cfg.AdoptedIgnore, config.IgnoreLayer{Patterns: pint, Anchor: dir})
 		}
 	}
 
@@ -92,6 +111,38 @@ func oxfmtOwnsFrontend(dir string) (bool, error) {
 	}
 
 	return false, nil
+}
+
+// toolIgnoreDir returns the directory beside a tool's config. ok is false
+// unless it is anchor or lies between anchor and the root of anchor's
+// repository: a config outside the repository, or with none, governs no file
+// in it.
+func toolIgnoreDir(anchor, configPath string) (string, bool, error) {
+	anchor = filepath.Clean(anchor)
+	dir := filepath.Clean(filepath.Dir(configPath))
+
+	if dir == anchor {
+		return dir, true, nil
+	}
+
+	reachedTool := false
+
+	for at := anchor; ; at = filepath.Dir(at) {
+		reachedTool = reachedTool || at == dir
+
+		root, err := walk.HasGitEntry(at)
+		if err != nil {
+			return "", false, fmt.Errorf("find the repository of %s: %w", anchor, err)
+		}
+
+		if root {
+			return dir, reachedTool, nil
+		}
+
+		if filepath.Dir(at) == at {
+			return "", false, nil
+		}
+	}
 }
 
 // .prettierignore is gitignore syntax, so its lines go to the walk unread.

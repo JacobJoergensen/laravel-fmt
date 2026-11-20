@@ -61,12 +61,12 @@ func TestPrintPHPDocTypeIsCanonical(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := string(printPHPDocType(phpdoc.ParseType([]byte(tc.in))))
+			got := string(printPHPDocType(phpdoc.ParseType([]byte(tc.in)), false))
 			if got != tc.want {
 				t.Fatalf("%q printed %q, want %q", tc.in, got, tc.want)
 			}
 
-			again := string(printPHPDocType(phpdoc.ParseType([]byte(tc.want))))
+			again := string(printPHPDocType(phpdoc.ParseType([]byte(tc.want)), false))
 			if again != tc.want {
 				t.Fatalf("not idempotent: %q printed %q", tc.want, again)
 			}
@@ -84,8 +84,8 @@ func TestPrintPHPDocTypeIsStable(t *testing.T) {
 
 	for _, in := range inputs {
 		t.Run(in, func(t *testing.T) {
-			once := printPHPDocType(phpdoc.ParseType([]byte(in)))
-			twice := printPHPDocType(phpdoc.ParseType(once))
+			once := printPHPDocType(phpdoc.ParseType([]byte(in)), false)
+			twice := printPHPDocType(phpdoc.ParseType(once), false)
 
 			if !bytes.Equal(once, twice) {
 				t.Fatalf("print-after-parse not stable for %q: %q then %q", in, once, twice)

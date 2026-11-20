@@ -262,10 +262,12 @@ func FuzzPHPDocTypeKeepsPsalmSplit(f *testing.F) {
 			t.Skip("Psalm rejects the tag")
 		}
 
-		out := normalizeTypeAt(src, 0)
+		for _, spaced := range []bool{false, true} {
+			out := normalizeTypeAt(src, 0, spaced)
 
-		if after, _ := psalmDescription(out); after != before {
-			t.Fatalf("Psalm splits %q before %q, but the rewrite %q before %q", src, before, out, after)
+			if after, _ := psalmDescription(out); after != before {
+				t.Fatalf("Psalm splits %q before %q, but the rewrite %q (spaced %v) before %q", src, before, out, spaced, after)
+			}
 		}
 	})
 }

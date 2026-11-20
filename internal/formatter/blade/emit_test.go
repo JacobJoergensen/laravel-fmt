@@ -8,6 +8,7 @@ import (
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/config"
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/formattertest"
+	htmlfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/html"
 )
 
 func TestFormatMatchesGolden(t *testing.T) {
@@ -1447,8 +1448,7 @@ func TestAttrQuoteStyle(t *testing.T) {
 		input        string
 		wantContains string
 	}{
-		{"plain attr canonicalizes to double", config.QuoteStyleAuto, "<div class='x'></div>", `class="x"`},
-		{"plain attr forced single", config.QuoteStyleSingle, `<div class="x"></div>`, `class='x'`},
+		{"single style leaves attr double", config.QuoteStyleSingle, `<div class='x'></div>`, `class="x"`},
 		{"bound expression keeps source quote", config.QuoteStyleSingle, `<x-card :foo="$bar"></x-card>`, `:foo="$bar"`},
 	}
 
@@ -2019,6 +2019,59 @@ func TestVerbatimBodyCloseTakesTheWritersIndent(t *testing.T) {
 
 	if !bytes.Contains(pre, []byte("b\n</pre>")) {
 		t.Fatalf("indent was added inside <pre>:\n%q", pre)
+	}
+}
+
+func TestPageSectionsIndentAsInHTML(t *testing.T) {
+	src := []byte("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<title>Page</title>\n</head>\n<body class=\"a\">\n<main>x</main>\n</body>\n</html>\n")
+
+	blade := mustFormat(t, src, config.Default())
+
+	html, err := htmlfmt.Format(src, config.Default())
+	if err != nil {
+		t.Fatalf("html.Format: %v", err)
+	}
+
+	if !bytes.Equal(blade, html) {
+		t.Fatalf("a page lays out differently as Blade.\n=== blade ===\n%s\n=== html ===\n%s", blade, html)
+	}
+}
+
+func TestTitleBodyRehomes(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			"echoes on their own lines follow the tag",
+			"<div>\n<div>\n<title>\n    {{ $title }}\n    {{ $brand }}\n</title>\n</div>\n</div>\n",
+			"<div>\n    <div>\n        <title>\n            {{ $title }}\n            {{ $brand }}\n        </title>\n    </div>\n</div>\n",
+		},
+		{
+			"a directive keeps its relative indent",
+			"<div>\n<title>\n  @if ($a)\n      A\n  @endif\n</title>\n</div>\n",
+			"<div>\n    <title>\n        @if ($a)\n            A\n        @endif\n    </title>\n</div>\n",
+		},
+		{
+			"an echo spanning lines stays verbatim",
+			"<div>\n<title>\n    {{ $a ? 'x\n   y' : null }}\n</title>\n</div>\n",
+			"<div>\n    <title>\n    {{ $a ? 'x\n   y' : null }}\n</title>\n</div>\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+
+			if string(got) != tc.want {
+				t.Fatalf("output differs.\n=== got ===\n%s\n=== want ===\n%s", got, tc.want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent.\n=== once ===\n%q\n=== twice ===\n%q", got, twice)
+			}
+		})
 	}
 }
 

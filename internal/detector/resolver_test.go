@@ -157,6 +157,88 @@ func TestResolverGivesEachProjectItsOwnTheme(t *testing.T) {
 	}
 }
 
+func TestNestedPackageUsesTheMonorepoRootsIgnores(t *testing.T) {
+	root := t.TempDir()
+	seedFileAt(t, root, ".git/HEAD", "ref: refs/heads/main\n")
+	seedFileAt(t, root, "composer.json", "{}")
+	seedFileAt(t, root, ".prettierrc", "{}")
+	seedFileAt(t, root, ".prettierignore", "**/dist\npackages/foo/src/Ignored.php\n")
+	seedFileAt(t, root, "pint.json", `{"preset":"laravel","exclude":["packages/foo/src/excluded"]}`)
+	seedFileAt(t, root, "packages/foo/composer.json", `{"name":"acme/foo"}`)
+	seedFileAt(t, root, "packages/foo/.prettierignore", "resources/legacy/\n")
+
+	loaders := map[string]func(string, Context) (config.Loaded, error){
+		"default load": LoadConfig,
+		"--no-config":  func(_ string, ctx Context) (config.Loaded, error) { return LoadDefaults(ctx) },
+	}
+
+	cases := map[string]bool{
+		"packages/foo/dist/x.css":             true,
+		"packages/foo/src/Ignored.php":        true,
+		"packages/foo/src/excluded/E.php":     true,
+		"packages/foo/src/Kept.php":           false,
+		"packages/foo/resources/legacy/a.css": true,
+	}
+
+	for name, load := range loaders {
+		for rel, want := range cases {
+			t.Run(name+" "+rel, func(t *testing.T) {
+				path := filepath.Join(root, filepath.FromSlash(rel))
+
+				project, err := NewResolver(load).For(path)
+				if err != nil {
+					t.Fatalf("For: %v", err)
+				}
+
+				ignored, err := walk.IgnoresFile(project.IgnoreAnchor(), &project.Cfg, path)
+				if err != nil {
+					t.Fatalf("IgnoresFile: %v", err)
+				}
+
+				if ignored != want {
+					t.Fatalf("IgnoresFile(%s) = %v, want %v", rel, ignored, want)
+				}
+			})
+		}
+	}
+}
+
+func TestPrettierIgnoreOutsideTheRepositoryIsNotAdopted(t *testing.T) {
+	cases := map[string]string{
+		"above the repository": "repo/.git/HEAD",
+		"with no repository":   "",
+	}
+
+	for name, gitEntry := range cases {
+		t.Run(name, func(t *testing.T) {
+			outer := t.TempDir()
+			seedFileAt(t, outer, ".prettierrc", "{}")
+			seedFileAt(t, outer, ".prettierignore", "*.md\n")
+			seedFileAt(t, outer, "repo/composer.json", "{}")
+
+			if gitEntry != "" {
+				seedFileAt(t, outer, gitEntry, "ref: refs/heads/main\n")
+			}
+
+			path := filepath.Join(outer, "repo", "README.md")
+
+			project, err := NewResolver(LoadConfig).For(path)
+			if err != nil {
+				t.Fatalf("For: %v", err)
+			}
+
+			ignored, err := walk.IgnoresFile(project.IgnoreAnchor(), &project.Cfg, path)
+			if err != nil {
+				t.Fatalf("IgnoresFile: %v", err)
+			}
+
+			if ignored {
+				t.Fatal("a .prettierignore outside the repository hid a file inside it")
+			}
+		})
+	}
+}
+
 func TestNestedPackageUsesTheApplicationsIgnores(t *testing.T) {
 	app := t.TempDir()
 	seedFileAt(t, app, "composer.json", "{}")

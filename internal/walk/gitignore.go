@@ -174,8 +174,30 @@ func lowerSegments(segments []string) []string {
 // excluded; the built-ins and laravel-fmt.json's list then continue from that
 // verdict, so a "!" there still wins over everything.
 type ignoreRules struct {
-	adopted []ignoreMatcher
+	adopted []adoptedLayer
 	own     ignoreMatcher
+}
+
+// adoptedLayer is one tool's list. prefix leads from the directory the tool's
+// config sits in down to the one the rules match from, when that is lower.
+// excludesAll is set when the list ignores a directory on that prefix: as in
+// git, nothing below an ignored directory can be included again.
+type adoptedLayer struct {
+	matcher     ignoreMatcher
+	prefix      []string
+	excludesAll bool
+}
+
+func (l adoptedLayer) matchSegments(segments []string, isDir bool) bool {
+	if l.excludesAll {
+		return true
+	}
+
+	if len(l.prefix) > 0 {
+		segments = append(slices.Clip(l.prefix), segments...)
+	}
+
+	return l.matcher.matchSegmentsFrom(false, segments, isDir)
 }
 
 // dir is where the patterns are written from; laravel-fmt.json's list follows
@@ -188,10 +210,44 @@ func compileRules(cfg *config.File, dir string) ignoreRules {
 	rules := ignoreRules{own: compileMatcher(cfg.Ignore, caseInsensitive(dir))}
 
 	for _, layer := range cfg.AdoptedIgnore {
-		rules.adopted = append(rules.adopted, compileMatcher(layer.Patterns, layer.IgnoreCase))
+		if compiled, ok := compileLayer(layer, dir); ok {
+			rules.adopted = append(rules.adopted, compiled)
+		}
 	}
 
 	return rules
+}
+
+// A layer anchored outside dir's tree cannot name anything in it.
+func compileLayer(layer config.IgnoreLayer, dir string) (adoptedLayer, bool) {
+	compiled := adoptedLayer{matcher: compileMatcher(layer.Patterns, layer.IgnoreCase)}
+
+	if layer.Anchor == "" || filepath.Clean(layer.Anchor) == filepath.Clean(dir) {
+		return compiled, true
+	}
+
+	rel, err := filepath.Rel(layer.Anchor, dir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return adoptedLayer{}, false
+	}
+
+	// Rel folds case on Windows, so paths that differ only in case are the
+	// same directory.
+	if rel == "." {
+		return compiled, true
+	}
+
+	compiled.prefix = strings.Split(filepath.ToSlash(rel), "/")
+
+	for k := 1; k <= len(compiled.prefix); k++ {
+		if compiled.matcher.matchSegmentsFrom(false, compiled.prefix[:k], true) {
+			compiled.excludesAll = true
+
+			break
+		}
+	}
+
+	return compiled, true
 }
 
 func (r ignoreRules) match(rel string, isDir bool) bool {
@@ -207,7 +263,7 @@ func (r ignoreRules) matchFrom(ignored bool, rel string, isDir bool) bool {
 
 	for _, layer := range r.adopted {
 		if !ignored {
-			ignored = layer.matchSegmentsFrom(false, segments, isDir)
+			ignored = layer.matchSegments(segments, isDir)
 		}
 	}
 

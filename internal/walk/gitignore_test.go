@@ -5,6 +5,7 @@ import (
 	"maps"
 	"path"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -136,6 +137,111 @@ func TestAdoptedIgnoreListsAreLayersOfTheirOwn(t *testing.T) {
 		if skipped := mustSkip(t, skip, rel); skipped == slices.Contains(want, rel) {
 			t.Errorf("IgnoreFilter(%s) = %v, the walk selected it = %v", rel, skipped, !skipped)
 		}
+	}
+}
+
+func TestAdoptedIgnoreLayerMatchesFromItsOwnAnchor(t *testing.T) {
+	root := buildTree(t, map[string]string{
+		"packages/a/dist/x.css": "a{}",
+		"packages/a/src/x.css":  "a{}",
+		"packages/a/b/x.css":    "a{}",
+		"packages/b/x.css":      "a{}",
+	})
+
+	project := filepath.Join(root, "packages", "a")
+
+	cfg := config.Default()
+	cfg.AdoptedIgnore = []config.IgnoreLayer{{
+		Patterns: []string{"**/dist", "packages/b/x.css", "/packages/a/b/"},
+		Anchor:   root,
+	}}
+
+	cases := map[string]bool{
+		"dist/x.css": true,
+		"src/x.css":  false,
+		"b/x.css":    true,
+	}
+
+	for rel, want := range cases {
+		ignored, err := IgnoresFile(project, cfg, filepath.Join(project, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("IgnoresFile(%s): %v", rel, err)
+		}
+
+		if ignored != want {
+			t.Errorf("IgnoresFile(%s) = %v, want %v", rel, ignored, want)
+		}
+	}
+
+	paths, err := Files(project, project, cfg, nil, nil)
+	if err != nil {
+		t.Fatalf("Files: %v", err)
+	}
+
+	got := make([]string, 0, len(paths))
+
+	for _, file := range paths {
+		got = append(got, relSlash(project, file))
+	}
+
+	if want := []string{"src/x.css"}; !slices.Equal(got, want) {
+		t.Fatalf("walk selected %v, want %v", got, want)
+	}
+}
+
+func TestAdoptedIgnoreLayerNamingTheProjectsOwnDirectoryExcludesIt(t *testing.T) {
+	root := buildTree(t, map[string]string{
+		"packages/legacy/src/A.php": "<?php",
+		"packages/kept/src/A.php":   "<?php",
+	})
+
+	cases := []struct {
+		pattern string
+		project string
+		want    bool
+	}{
+		{"packages/legacy", "legacy", true},
+		{"packages/legacy/", "legacy", true},
+		{"packages/*", "legacy", true},
+		{"packages/legacy", "kept", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.pattern+" from "+tc.project, func(t *testing.T) {
+			project := filepath.Join(root, "packages", tc.project)
+
+			cfg := config.Default()
+			cfg.AdoptedIgnore = []config.IgnoreLayer{{Patterns: []string{tc.pattern}, Anchor: root}}
+
+			ignored, err := IgnoresFile(project, cfg, filepath.Join(project, "src", "A.php"))
+			if err != nil {
+				t.Fatalf("IgnoresFile: %v", err)
+			}
+
+			if ignored != tc.want {
+				t.Fatalf("IgnoresFile = %v, want %v", ignored, tc.want)
+			}
+		})
+	}
+}
+
+func TestAdoptedIgnoreLayerAnchoredAtTheSameDirectoryInOtherCaseMatches(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("only Windows paths compare without case")
+	}
+
+	root := buildTree(t, map[string]string{"dist/x.css": "a{}"})
+
+	cfg := config.Default()
+	cfg.AdoptedIgnore = []config.IgnoreLayer{{Patterns: []string{"/dist/"}, Anchor: strings.ToUpper(root)}}
+
+	ignored, err := IgnoresFile(root, cfg, filepath.Join(root, "dist", "x.css"))
+	if err != nil {
+		t.Fatalf("IgnoresFile: %v", err)
+	}
+
+	if !ignored {
+		t.Fatal("a layer anchored at the same directory in other case did not match")
 	}
 }
 

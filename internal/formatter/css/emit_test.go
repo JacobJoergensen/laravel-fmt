@@ -104,6 +104,11 @@ func TestSelectorSpacing(t *testing.T) {
 		{"attribute string spaces preserved", `[title="a  b"]{color:red}`, `[title="a  b"]`},
 		{"nth-child plus untouched", "a:nth-child(2n+1){color:red}", "a:nth-child(2n+1)"},
 		{"form feed is whitespace", "a\f>\fb{color:red}", "a > b"},
+		{"pseudo argument broken over lines hugs its parens", ".a:not(\n    .b\n){color:red}", ".a:not(.b)"},
+		{"attribute spaces at the brackets dropped", `[ title="x" ]{color:red}`, `[title="x"]`},
+		{"descendant inside the parens kept", ".a:not( .b .c ){color:red}", ".a:not(.b .c)"},
+		{"space after an escaped paren kept", `.a\( .b{color:red}`, `.a\( .b`},
+		{"combinator after a hex escape kept", `.a\31  .b{color:red}`, `.a\31  .b`},
 	}
 
 	for _, tc := range cases {
@@ -116,6 +121,76 @@ func TestSelectorSpacing(t *testing.T) {
 
 			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
 				t.Fatalf("selector spacing is not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
+	}
+}
+
+func TestSelectorBreaksPastPrintWidth(t *testing.T) {
+	long := strings.Repeat("a", 50)
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			"fitting selector stays on one line",
+			".x > .y{color:red}",
+			".x > .y {\n    color: red;\n}\n",
+		},
+		{
+			"combinators all break one level in",
+			".one-" + long + " > .two-" + long + " .three{color:red}",
+			".one-" + long + "\n    > .two-" + long + "\n    .three {\n    color: red;\n}\n",
+		},
+		{
+			"a lone ampersand keeps its own line",
+			".p{& .one-" + long + " > .two-" + long + "{color:red}}",
+			".p {\n    &\n        .one-" + long + "\n        > .two-" + long + " {\n        color: red;\n    }\n}\n",
+		},
+		{
+			"pseudo arguments break when the compound does not fit",
+			"&:is(.one-" + long + ", .two-" + long + ")::after{color:red}",
+			"&:is(\n    .one-" + long + ",\n    .two-" + long + "\n)::after {\n    color: red;\n}\n",
+		},
+		{
+			"every pseudo in the compound breaks",
+			".x:not(.one-" + long + "):not(.two-" + long + "){color:red}",
+			".x:not(\n    .one-" + long + "\n):not(\n    .two-" + long + "\n) {\n    color: red;\n}\n",
+		},
+		{
+			"a compound still too long after the combinator break",
+			".head &:is(.one-" + long + ", .two-" + long + "){color:red}",
+			".head\n    &:is(\n        .one-" + long + ",\n        .two-" + long + "\n    ) {\n    color: red;\n}\n",
+		},
+		{
+			"a list item counts its comma",
+			".one-" + long + " .two-" + long + " .xxxxxxxxxx,.y{color:red}",
+			".one-" + long + "\n    .two-" + long + "\n    .xxxxxxxxxx,\n.y {\n    color: red;\n}\n",
+		},
+		{
+			"a selector holding a comment stays on one line",
+			".one-" + long + " /* c */ .two-" + long + "{color:red}",
+			".one-" + long + " /* c */ .two-" + long + " {\n    color: red;\n}\n",
+		},
+		{
+			"an escaped space is not a combinator",
+			".one-" + long + `\ xxxxxxxxxx .two-` + long + "{color:red}",
+			".one-" + long + `\ xxxxxxxxxx` + "\n    .two-" + long + " {\n    color: red;\n}\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.input), config.Default())
+
+			if string(got) != tc.want {
+				t.Fatalf("output differs.\n=== got ===\n%s\n=== want ===\n%s", got, tc.want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
 			}
 		})
 	}
@@ -204,6 +279,7 @@ func TestAtRulePreludeSpacing(t *testing.T) {
 		{"page pseudo not spaced", "@page :first{margin:0}", "@page :first", "@page : first"},
 		{"selector function pseudo preserved", "@supports selector(a:hover){a{x:1}}", "selector(a:hover)", "selector(a: hover)"},
 		{"layer list comma spaced", "@layer a,b;", "@layer a, b", ""},
+		{"media feature spaces at the parens dropped", "@media ( min-width: 100px ){a{x:1}}", "@media (min-width: 100px)", ""},
 		{"form feed is whitespace", "@media screen\fand\f(min-width:100px){a{x:1}}", "screen and (min-width: 100px)", ""},
 		{"import url comma not spaced", "@import url(a,b.css);", "url(a,b.css)", "a, b"},
 		{

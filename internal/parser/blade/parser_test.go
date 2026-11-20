@@ -1013,6 +1013,59 @@ func TestAPhpDirectiveIsABlockExactlyWhenAnEndphpFollows(t *testing.T) {
 	}
 }
 
+func TestAnInlinePhpAnEndphpSwallowsIsReportedAtThePhp(t *testing.T) {
+	tests := []struct {
+		name     string
+		src      string
+		wantLine int
+		wantMsg  string
+		// Lines of the swallowed body: a PHP error there points into markup.
+		bodyFrom, bodyTo int
+	}{
+		{
+			"inline php swallowed by a later endphp",
+			"<div>\n    @php($a = 1)\n    {{-- note --}}\n    <p>x</p>\n</div>\n@php\n    $b = 2;\n@endphp\n",
+			2,
+			"@php(…) is closed by the @endphp on line 8",
+			3, 7,
+		},
+		{
+			"a bare php block keeps its php error",
+			"@php\n    $b = ;\n@endphp\n",
+			2,
+			"expected",
+			0, 0,
+		},
+		{
+			"a php block that opens with a paren keeps its php error",
+			"@php ($a) ? foo( : bar(); @endphp\n",
+			1,
+			"expected",
+			0, 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errs := Parse([]byte(tc.src), nil)
+
+			if len(errs) == 0 {
+				t.Fatalf("Parse(%q) reported no error", tc.src)
+			}
+
+			if errs[0].Pos.Line != tc.wantLine || !strings.Contains(errs[0].Msg, tc.wantMsg) {
+				t.Fatalf("error = %d: %q, want line %d containing %q", errs[0].Pos.Line, errs[0].Msg, tc.wantLine, tc.wantMsg)
+			}
+
+			for _, e := range errs {
+				if e.Pos.Line >= tc.bodyFrom && e.Pos.Line <= tc.bodyTo {
+					t.Fatalf("error inside the swallowed body: %d: %q", e.Pos.Line, e.Msg)
+				}
+			}
+		})
+	}
+}
+
 func TestParseRejectsAByteGluedToATagName(t *testing.T) {
 	const noError = -1
 

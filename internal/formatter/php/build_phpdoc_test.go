@@ -58,12 +58,12 @@ func TestNormalizeDocContent(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := string(normalizeDocContent([]byte(tc.in)))
+			got := string(normalizeDocContent([]byte(tc.in), false))
 			if got != tc.want {
 				t.Fatalf("normalizeDocContent(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 
-			again := string(normalizeDocContent([]byte(got)))
+			again := string(normalizeDocContent([]byte(got), false))
 			if again != got {
 				t.Fatalf("not idempotent: %q -> %q", got, again)
 			}

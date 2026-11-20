@@ -53,8 +53,9 @@ func (b *builder) postfix(e parser.Expr, stmtLevel bool) *document.Doc {
 
 	// A statement's own call is the one place the hug's real line is known; when
 	// it overflows into a call or an arrow function, which hug inside-out, or a
-	// short-list closure, the call goes one argument per line. Any other closure,
-	// array or match keeps its hug, the Laravel shape even past the width.
+	// short-list closure that is its only argument, the call goes one argument
+	// per line. Any other closure, array or match keeps its hug, the Laravel shape
+	// even past the width (Pest's `it('…', function () use ($x) {`).
 	// flattenChain builds the outermost call first.
 	if call, ok := e.(*parser.CallExpr); ok && stmtLevel && hugsInsideOut(call) &&
 		b.staysOnStatementLine(e) && (b.hugLineOverflows(call, true) || b.stmtArrowFitsAlone(call)) && b.unhuggingHelps(call) {
@@ -1107,19 +1108,18 @@ func hugsInsideOut(call *parser.CallExpr) bool {
 
 	last := call.Args[len(call.Args)-1]
 
-	return isCallLikeArg(last) || isArrowFnArg(last) || shortListClosure(last) != nil
+	return isCallLikeArg(last) || isArrowFnArg(last) || len(call.Args) == 1 && shortListClosure(last) != nil
 }
 
-// shortListClosure returns a closure whose signature lists are short: one
-// parameter at most, which never breaks, and two `use` variables at most, a list
-// that broken across lines reads worse than the closure on a line of its own.
+const maxShortListUses = 2
+
 func shortListClosure(arg parser.Expr) *parser.ClosureExpr {
 	if n, ok := arg.(*parser.NamedArgExpr); ok {
 		arg = n.Value
 	}
 
 	c, ok := arg.(*parser.ClosureExpr)
-	if !ok || len(c.Params) > 1 || len(c.Uses) > 2 || len(c.Params)+len(c.Uses) == 0 {
+	if !ok || len(c.Params) > 1 || len(c.Uses) > maxShortListUses || len(c.Params)+len(c.Uses) == 0 {
 		return nil
 	}
 

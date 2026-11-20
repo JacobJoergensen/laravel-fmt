@@ -103,7 +103,7 @@ func (s *ignoreSet) addGitignore(absDir, relDir string) error {
 }
 
 func (s *ignoreSet) enterGitignoreDir(absDir, relDir string) error {
-	nested, err := hasGitEntry(absDir)
+	nested, err := HasGitEntry(absDir)
 	if err != nil {
 		return err
 	}
@@ -119,8 +119,9 @@ func (s *ignoreSet) enterGitignoreDir(absDir, relDir string) error {
 	return s.addGitignore(absDir, relDir)
 }
 
-// .git is a directory in a clone and a file in a worktree or submodule.
-func hasGitEntry(dir string) (bool, error) {
+// HasGitEntry reports whether dir is a git work tree root: .git is a
+// directory in a clone and a file in a worktree or submodule.
+func HasGitEntry(dir string) (bool, error) {
 	entry := filepath.Join(dir, ".git")
 
 	_, err := os.Lstat(entry)
@@ -207,7 +208,7 @@ func gitTop(dir string) (string, error) {
 	var top string
 
 	err := upward.Walk(dir, func(at string) (bool, error) {
-		found, err := hasGitEntry(at)
+		found, err := HasGitEntry(at)
 		if found {
 			top = at
 		}

@@ -62,7 +62,7 @@ func emitNode(w *formatter.Writer, src []byte, node parser.Node, cfg *config.Fil
 // for it to be preserved; significant text, CDATA or `xml:space="preserve"` makes
 // it character data, written byte for byte.
 func emitElement(w *formatter.Writer, src []byte, el *parser.Element, cfg *config.File) {
-	emitOpenTag(w, el, cfg)
+	emitOpenTag(w, el)
 
 	if el.SelfClose {
 		return
@@ -108,36 +108,36 @@ func preservesSpace(el *parser.Element) bool {
 	return false
 }
 
-func emitOpenTag(w *formatter.Writer, el *parser.Element, cfg *config.File) {
+func emitOpenTag(w *formatter.Writer, el *parser.Element) {
 	fit := w.TryFlat(func() {
-		emitOpenTagFlat(w, el, cfg)
+		emitOpenTagFlat(w, el)
 	})
 
 	if !fit {
-		emitOpenTagMultiline(w, el, cfg)
+		emitOpenTagMultiline(w, el)
 	}
 }
 
-func emitOpenTagFlat(w *formatter.Writer, el *parser.Element, cfg *config.File) {
+func emitOpenTagFlat(w *formatter.Writer, el *parser.Element) {
 	w.Write("<")
 	w.WriteBytes(el.Name)
 
 	for _, attr := range el.Attributes {
 		w.Space()
-		emitAttr(w, attr, cfg)
+		emitAttr(w, attr)
 	}
 
 	emitTagClose(w, el)
 }
 
-func emitOpenTagMultiline(w *formatter.Writer, el *parser.Element, cfg *config.File) {
+func emitOpenTagMultiline(w *formatter.Writer, el *parser.Element) {
 	w.Write("<")
 	w.WriteBytes(el.Name)
 	w.Indent()
 
 	for _, attr := range el.Attributes {
 		w.Newline()
-		emitAttr(w, attr, cfg)
+		emitAttr(w, attr)
 	}
 
 	w.Dedent()
@@ -153,11 +153,11 @@ func emitTagClose(w *formatter.Writer, el *parser.Element) {
 	}
 }
 
-func emitAttr(w *formatter.Writer, a *parser.Attr, cfg *config.File) {
+func emitAttr(w *formatter.Writer, a *parser.Attr) {
 	w.WriteBytes(a.Name)
 	w.Write("=")
 
-	quote := formatter.AttrQuote(a.Quote, a.Value, cfg)
+	quote := formatter.AttrQuote(a.Quote, a.Value)
 	w.Write(string(quote))
 	w.WriteBytes(a.Value)
 	w.Write(string(quote))

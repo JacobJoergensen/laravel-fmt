@@ -211,7 +211,7 @@ func emitInterNodeGap(w *formatter.Writer, prev, next parser.Node) {
 }
 
 func emitRule(w *formatter.Writer, src []byte, r *parser.Rule, cfg *config.File) {
-	emitSelector(w, r.Selector)
+	emitSelector(w, r.Selector, cfg.PrintWidth)
 	w.Space()
 	emitBlockBody(w, src, r.Children, cfg)
 }
@@ -235,7 +235,7 @@ func emitAtRule(w *formatter.Writer, src []byte, a *parser.AtRule, cfg *config.F
 			}
 		case !bytes.EqualFold(a.Name, []byte("charset")):
 			// @charset is spec-locked to double quotes, so it is left untouched.
-			prelude = normalizeQuotes(prelude, formatter.MarkupQuoteTarget(cfg))
+			prelude = normalizeQuotes(prelude, formatter.CSSQuoteTarget(cfg))
 			prelude = normalizePrelude(prelude, preludeHasFeatureColons(a.Name))
 		}
 
@@ -289,7 +289,7 @@ func emitBlockBody(w *formatter.Writer, src []byte, children []parser.Node, cfg 
 func emitDeclaration(w *formatter.Writer, d *parser.Declaration, cfg *config.File) {
 	property := string(collapseCSSSpace(d.Property))
 	raw := trimCSSSpace(d.Value)
-	value := normalizeQuotes(raw, formatter.MarkupQuoteTarget(cfg))
+	value := normalizeQuotes(raw, formatter.CSSQuoteTarget(cfg))
 	value = normalizeValue(value)
 	parts := splitCommaList(value)
 
@@ -629,7 +629,7 @@ func emitComment(w *formatter.Writer, src []byte, c *parser.Comment) {
 	formatter.EmitVerbatim(w, src, c.Open.Start.Offset, c.Close.End.Offset)
 }
 
-func emitSelector(w *formatter.Writer, sel []byte) {
+func emitSelector(w *formatter.Writer, sel []byte, width int) {
 	parts := splitCommaList(sel)
 
 	for i, p := range parts {
@@ -638,8 +638,194 @@ func emitSelector(w *formatter.Writer, sel []byte) {
 			w.Newline()
 		}
 
-		w.WriteBytes(normalizeSelectorSpacing(p))
+		tail := len(",")
+		if i == len(parts)-1 {
+			tail = len(" {")
+		}
+
+		emitSelectorPart(w, normalizeSelectorSpacing(p), tail, width)
 	}
+}
+
+// A selector holding a comment stays on one line: a break inside the comment
+// would change it.
+func emitSelectorPart(w *formatter.Writer, sel []byte, tail, width int) {
+	if w.CursorColumn()+len(sel)+tail <= width || bytes.Contains(sel, []byte("/*")) {
+		w.WriteBytes(sel)
+
+		return
+	}
+
+	compounds := splitCompounds(sel)
+	if len(compounds) == 1 {
+		emitCompound(w, sel, tail, width)
+
+		return
+	}
+
+	emitCompound(w, compounds[0], 0, width)
+	w.Indent()
+
+	for i, c := range compounds[1:] {
+		w.Newline()
+
+		compoundTail := 0
+		if i == len(compounds)-2 {
+			compoundTail = tail
+		}
+
+		emitCompound(w, c, compoundTail, width)
+	}
+
+	w.Dedent()
+}
+
+func splitCompounds(sel []byte) [][]byte {
+	var out [][]byte
+
+	start, depth := 0, 0
+	inStr := byte(0)
+
+	i := 0
+	if isCombinatorAt(sel, 0) {
+		i = len("> ")
+	}
+
+	for ; i < len(sel); i++ {
+		c := sel[i]
+
+		if inStr != 0 {
+			switch c {
+			case '\\':
+				i++
+			case inStr:
+				inStr = 0
+			}
+
+			continue
+		}
+
+		switch {
+		case c == '\\':
+			i = escapeEnd(sel, i) - 1
+		case c == '"' || c == '\'':
+			inStr = c
+		case c == '(' || c == '[':
+			depth++
+		case (c == ')' || c == ']') && depth > 0:
+			depth--
+		case c == ' ' && depth == 0:
+			out = append(out, sel[start:i])
+			start = i + 1
+
+			if isCombinatorAt(sel, start) {
+				i = start + 1
+			}
+		}
+	}
+
+	return append(out, sel[start:])
+}
+
+func isCombinatorAt(sel []byte, i int) bool {
+	return i+1 < len(sel) && (sel[i] == '>' || sel[i] == '+' || sel[i] == '~') && sel[i+1] == ' '
+}
+
+// Every functional pseudo breaks, not only the widest, as emitBrokenCall breaks
+// a call.
+func emitCompound(w *formatter.Writer, compound []byte, tail, width int) {
+	if w.CursorColumn()+len(compound)+tail <= width {
+		w.WriteBytes(compound)
+
+		return
+	}
+
+	from, scan := 0, 0
+
+	for open := pseudoArgsOpen(compound, scan); open >= 0; open = pseudoArgsOpen(compound, scan) {
+		end := closeOfParen(compound, open)
+		if end < 0 {
+			break
+		}
+
+		scan = end + 1
+
+		args := splitCommaList(compound[open+1 : end])
+		if len(args) == 1 && len(args[0]) == 0 {
+			continue
+		}
+
+		w.WriteBytes(compound[from : open+1])
+		w.Indent()
+
+		for i, arg := range args {
+			w.Newline()
+			w.WriteBytes(arg)
+
+			if i < len(args)-1 {
+				w.Write(",")
+			}
+		}
+
+		w.Dedent()
+		w.Newline()
+		w.Write(")")
+
+		from = end + 1
+	}
+
+	w.WriteBytes(compound[from:])
+}
+
+func pseudoArgsOpen(compound []byte, from int) int {
+	depth := 0
+	inStr := byte(0)
+
+	for i := from; i < len(compound); i++ {
+		c := compound[i]
+
+		if inStr != 0 {
+			switch c {
+			case '\\':
+				i++
+			case inStr:
+				inStr = 0
+			}
+
+			continue
+		}
+
+		switch c {
+		case '\\':
+			i = escapeEnd(compound, i) - 1
+		case '"', '\'':
+			inStr = c
+		case '[':
+			depth++
+		case ']':
+			if depth > 0 {
+				depth--
+			}
+		case '(':
+			if depth == 0 && isPseudoName(compound[from:i]) {
+				return i
+			}
+
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+
+	return -1
+}
+
+func isPseudoName(before []byte) bool {
+	name := trailingIdent(before)
+
+	return len(name) > 0 && len(name) < len(before) && before[len(before)-len(name)-1] == ':'
 }
 
 func splitCommaList(sel []byte) [][]byte {
@@ -905,6 +1091,7 @@ func normalizePrelude(b []byte, featureColons bool) []byte {
 
 	inStr := byte(0)
 	pendingSpace := false
+	openedAt := -1
 
 	var parenIsFunc []bool
 
@@ -940,7 +1127,7 @@ func normalizePrelude(b []byte, featureColons bool) []byte {
 		}
 
 		if parser.IsSpaceByte(c) {
-			if out.Len() > 0 {
+			if out.Len() > 0 && out.Len() != openedAt {
 				pendingSpace = true
 			}
 
@@ -975,12 +1162,14 @@ func normalizePrelude(b []byte, featureColons bool) []byte {
 			flush()
 			parenIsFunc = append(parenIsFunc, fn)
 			out.WriteByte(c)
+			openedAt = out.Len()
 		case c == '[':
 			flush()
 			parenIsFunc = append(parenIsFunc, true)
 			out.WriteByte(c)
+			openedAt = out.Len()
 		case c == ')' || c == ']':
-			flush()
+			pendingSpace = false
 
 			if len(parenIsFunc) > 0 {
 				parenIsFunc = parenIsFunc[:len(parenIsFunc)-1]
@@ -1009,6 +1198,7 @@ func normalizeSelectorSpacing(sel []byte) []byte {
 	depth := 0
 	inStr := byte(0)
 	pendingSpace := false
+	openedAt := -1
 
 	flush := func() {
 		if pendingSpace {
@@ -1038,7 +1228,9 @@ func normalizeSelectorSpacing(sel []byte) []byte {
 		}
 
 		if parser.IsSpaceByte(c) {
-			if out.Len() > 0 {
+			// Like the space before a `)` or `]`, the one after a `(` or `[`
+			// means nothing; after an escaped `\(` it is a combinator.
+			if out.Len() > 0 && out.Len() != openedAt {
 				pendingSpace = true
 			}
 
@@ -1064,6 +1256,10 @@ func normalizeSelectorSpacing(sel []byte) []byte {
 			continue
 		}
 
+		if c == ')' || c == ']' {
+			pendingSpace = false
+		}
+
 		flush()
 
 		switch c {
@@ -1078,6 +1274,10 @@ func normalizeSelectorSpacing(sel []byte) []byte {
 		}
 
 		out.WriteByte(c)
+
+		if c == '(' || c == '[' {
+			openedAt = out.Len()
+		}
 	}
 
 	return out.Bytes()

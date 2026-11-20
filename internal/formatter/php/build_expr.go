@@ -2284,11 +2284,12 @@ func (b *builder) closure(n *parser.ClosureExpr) *document.Doc {
 			uses[i] = document.Concat(ref, b.tok(u.Var))
 		}
 
-		// The use list breaks one per line when it overflows, like a parameter
-		// list.
+		// A short use list stays on the line, as laravel/framework writes it
+		// even past the width; a longer one breaks one per line when it
+		// overflows, like a parameter list.
 		useSpan := parser.Span{Start: n.UseLParen.Span.Start, End: n.UseRParen.Span.End}
-		if len(uses) == 1 && !b.spanHasComment(useSpan) {
-			parts = append(parts, document.Text(" use ("), uses[0], document.Text(")"))
+		if len(uses) <= maxShortListUses && !b.spanHasComment(useSpan) {
+			parts = append(parts, document.Text(" use ("), document.Join(document.Text(", "), uses), document.Text(")"))
 		} else {
 			useComment, useBreaks := b.trailingParenComment(n.UseRParen)
 			parts = append(parts, delimitedListComment(" use (", uses, withTrailingComma, 0, useComment, useBreaks))
