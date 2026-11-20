@@ -2641,7 +2641,7 @@ func TestFormatGluedElementLayoutIgnoresABlankLineAbove(t *testing.T) {
 func TestFormatBlockDirectiveDeclaredOrBuiltIn(t *testing.T) {
 	declared := config.Default()
 	declared.Blade.BlockDirectives = []config.BladeBlockDirective{
-		{Open: "feature", Branches: []string{"elsefeature", "else"}},
+		{Open: "disk", Branches: []string{"elsedisk", "else"}},
 	}
 
 	cases := []struct {
@@ -2653,20 +2653,20 @@ func TestFormatBlockDirectiveDeclaredOrBuiltIn(t *testing.T) {
 		{
 			"declared block with branches",
 			declared,
-			"@feature('a')\n<p>A</p>\n@elsefeature('b')\n<p>B</p>\n@else\n<p>C</p>\n@endfeature\n",
-			"@feature('a')\n    <p>A</p>\n@elsefeature('b')\n    <p>B</p>\n@else\n    <p>C</p>\n@endfeature\n",
+			"@disk('a')\n<p>A</p>\n@elsedisk('b')\n<p>B</p>\n@else\n<p>C</p>\n@enddisk\n",
+			"@disk('a')\n    <p>A</p>\n@elsedisk('b')\n    <p>B</p>\n@else\n    <p>C</p>\n@enddisk\n",
 		},
 		{
 			"declared block in attribute position",
 			declared,
-			"<div class=\"aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd eeeeeeeeee ffffffffff gggggggggg\" @feature('x')\ndata-a=\"1\" @endfeature></div>\n",
-			"<div\n    class=\"aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd eeeeeeeeee ffffffffff gggggggggg\"\n    @feature('x')\n        data-a=\"1\"\n    @endfeature\n></div>\n",
+			"<div class=\"aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd eeeeeeeeee ffffffffff gggggggggg\" @disk('x')\ndata-a=\"1\" @enddisk></div>\n",
+			"<div\n    class=\"aaaaaaaaaa bbbbbbbbbb cccccccccc dddddddddd eeeeeeeeee ffffffffff gggggggggg\"\n    @disk('x')\n        data-a=\"1\"\n    @enddisk\n></div>\n",
 		},
 		{
 			"undeclared block stays flat",
 			config.Default(),
-			"@feature('a')\n<p>A</p>\n@endfeature\n",
-			"@feature('a')\n<p>A</p>\n@endfeature\n",
+			"@disk('a')\n<p>A</p>\n@enddisk\n",
+			"@disk('a')\n<p>A</p>\n@enddisk\n",
 		},
 		{
 			"a non-mail @component nests as markup",
@@ -2679,6 +2679,12 @@ func TestFormatBlockDirectiveDeclaredOrBuiltIn(t *testing.T) {
 			config.Default(),
 			"@persist('player')\n<audio></audio>\n@endpersist\n@volt('counter')\n<div></div>\n@endvolt\n@pushIf($x, 'scripts')\n<script src=\"/x.js\"></script>\n@endPushIf\n",
 			"@persist('player')\n    <audio></audio>\n@endpersist\n@volt('counter')\n    <div></div>\n@endvolt\n@pushIf($x, 'scripts')\n    <script src=\"/x.js\"></script>\n@endPushIf\n",
+		},
+		{
+			"built-in Pennant blocks",
+			config.Default(),
+			"@feature('a')\n<p>A</p>\n@elsefeature('b')\n<p>B</p>\n@else\n<p>C</p>\n@endfeature\n@unlessfeature('a')\n<p>D</p>\n@endfeature\n@featureany(['a', 'b'])\n<p>E</p>\n@elsefeatureany(['c'])\n<p>F</p>\n@endfeatureany\n",
+			"@feature('a')\n    <p>A</p>\n@elsefeature('b')\n    <p>B</p>\n@else\n    <p>C</p>\n@endfeature\n@unlessfeature('a')\n    <p>D</p>\n@endfeature\n@featureany(['a', 'b'])\n    <p>E</p>\n@elsefeatureany(['c'])\n    <p>F</p>\n@endfeatureany\n",
 		},
 	}
 
@@ -3499,8 +3505,8 @@ func TestFormatDirectiveArgumentLaysOutWhereItLands(t *testing.T) {
 
 func TestFormatKeepsOneBlankLineAboveConfiguredDirectives(t *testing.T) {
 	cfg := config.Default()
-	cfg.Blade.BlockDirectives = []config.BladeBlockDirective{{Open: "feature"}}
-	cfg.Blade.BlankLineBeforeDirectives = []string{"if", "foreach", "empty", "section", "php", "feature"}
+	cfg.Blade.BlockDirectives = []config.BladeBlockDirective{{Open: "disk"}}
+	cfg.Blade.BlankLineBeforeDirectives = []string{"if", "foreach", "empty", "section", "php", "disk"}
 
 	cases := []struct {
 		name string
@@ -3534,8 +3540,8 @@ func TestFormatKeepsOneBlankLineAboveConfiguredDirectives(t *testing.T) {
 		},
 		{
 			"declared block",
-			"<p>A</p>\n@feature('x')\n<p>B</p>\n@endfeature\n",
-			"<p>A</p>\n\n@feature('x')\n    <p>B</p>\n@endfeature\n",
+			"<p>A</p>\n@disk('x')\n<p>B</p>\n@enddisk\n",
+			"<p>A</p>\n\n@disk('x')\n    <p>B</p>\n@enddisk\n",
 		},
 		{
 			"the blank goes above an attached comment",

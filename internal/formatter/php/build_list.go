@@ -62,7 +62,8 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 	}
 
 	soleOverflows := sole != nil && b.soleArgOverflows(sole, linkArgs)
-	hugs := b.huggableArg(args[last]) || soleOverflows || b.lastArrowOverflows(args, linkArgs)
+	hugs := b.huggableArg(args[last]) || soleOverflows || sole != nil && b.keptBrokenArrowBody(args[0]) ||
+		b.lastArrowOverflows(args, linkArgs)
 
 	if hugs && !allNamed && !noHug && !authorBroken {
 		leading := make([]*document.Doc, last)
@@ -578,8 +579,8 @@ func isArrayArg(arg parser.Expr) bool {
 	return ok
 }
 
-// An empty closure whose braces take two lines breaks the way a filled one
-// does, so it hugs as one does.
+// An empty closure whose braces take two lines, or an empty array holding a
+// comment, breaks the way a filled one does, so it hugs as one does.
 func (b *builder) huggableArg(arg parser.Expr) bool {
 	if n, ok := arg.(*parser.NamedArgExpr); ok {
 		arg = n.Value
@@ -587,6 +588,10 @@ func (b *builder) huggableArg(arg parser.Expr) bool {
 
 	if c, ok := arg.(*parser.ClosureExpr); ok && c.Body != nil && len(c.Body.Stmts) == 0 &&
 		!b.cfg.PHP.InlineEmptyClosureBodies && b.danglingComments(c.Body.RBrace) == nil {
+		return true
+	}
+
+	if a, ok := arg.(*parser.ArrayExpr); ok && len(a.Elements) == 0 && b.tokenHasComment(a.Close.Span.Start.Offset) {
 		return true
 	}
 
@@ -768,6 +773,32 @@ func (b *builder) arrowBinaryHeadWidth(arrow *parser.ArrowFnExpr) int {
 
 		return prefix + document.FlatWidth(b.expr(head), b.cfg.IndentWidth)
 	})
+}
+
+// keptBrokenArrowBody reports whether arg is an arrow function whose body is a
+// call or `new` with its arguments put on their own lines by the author: that
+// break is kept wherever the arrow prints, so it hugs as an overflowing one
+// does (`Attribute::get(fn () => strtoupper(`).
+func (b *builder) keptBrokenArrowBody(arg parser.Expr) bool {
+	if n, ok := arg.(*parser.NamedArgExpr); ok {
+		arg = n.Value
+	}
+
+	arrow, ok := arg.(*parser.ArrowFnExpr)
+	if !ok {
+		return false
+	}
+
+	var args []parser.Expr
+
+	switch v := arrow.Body.(type) {
+	case *parser.CallExpr:
+		args = v.Args
+	case *parser.NewExpr:
+		args = v.Args
+	}
+
+	return len(args) > 0 && b.authorBroke(args[0].Span().Start.Offset)
 }
 
 func (b *builder) soleArgOverflows(arg *document.Doc, linkArgs bool) bool {

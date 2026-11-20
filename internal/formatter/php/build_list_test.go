@@ -100,6 +100,37 @@ func TestCommentOnlyClosureHugsAsAnArgument(t *testing.T) {
 	}
 }
 
+func TestCommentOnlyArrayHugsAsAnArgument(t *testing.T) {
+	tests := []string{
+		"<?php\n\nreturn Response::json([\n    // ...\n]);\n",
+		"<?php\n\n$batch = Bus::batch([\n    // ...\n])\n    ->then(function (Batch $batch) {\n        // ...\n    })\n    ->dispatch();\n",
+	}
+
+	for _, src := range tests {
+		got := mustFormat(t, []byte(src), config.Default())
+		if string(got) != src {
+			t.Fatalf("got:\n%s\nwant:\n%s", got, src)
+		}
+	}
+}
+
+// The kept break would make the hug a width-forced one does; un-hugged, the
+// arrow added a level without saving a line.
+func TestArrowWithAuthorBrokenBodyCallHugs(t *testing.T) {
+	tests := []string{
+		"<?php\n\n$users->each(fn ($user) => $user->notify(\n    new InvoicePaid($invoice),\n));\n",
+		"<?php\n\nHead::defaults(fn (HeadBuilder $head) => $head->twitter(\n    card: TwitterCard::SummaryWithLargeImage,\n));\n",
+		"<?php\n\nAttribute::get(fn (): string => new Name(\n    $this->name,\n));\n",
+	}
+
+	for _, src := range tests {
+		got := mustFormat(t, []byte(src), config.Default())
+		if string(got) != src {
+			t.Fatalf("got:\n%s\nwant:\n%s", got, src)
+		}
+	}
+}
+
 func TestCommentsBeforeAListCloserKeepTheItemsIndent(t *testing.T) {
 	tests := []string{
 		"<?php\n\nfoo(\n    $a, // y\n    // z\n);\n",

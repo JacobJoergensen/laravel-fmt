@@ -428,9 +428,21 @@ func (b *Blade) validate() error {
 		names := append([]string{d.Open, d.Closer()}, d.Branches...)
 
 		for _, name := range names {
-			if !isDirectiveName(name) {
+			if !bladeparser.IsDirectiveName(name) {
 				return fmt.Errorf("blockDirectives: %q is not a directive name (letters, digits, underscore)", name)
 			}
+		}
+
+		if opens[d.Open] {
+			return fmt.Errorf("blockDirectives: @%s is declared twice", d.Open)
+		}
+
+		opens[d.Open] = true
+
+		// A config written before a block became built-in (Pennant's @feature)
+		// keeps loading.
+		if bladeparser.IsBuiltinBlock(d.Open, d.Closer(), d.Branches) {
+			continue
 		}
 
 		for _, name := range []string{d.Open, d.Closer()} {
@@ -442,12 +454,6 @@ func (b *Blade) validate() error {
 		if d.Open == d.Closer() {
 			return fmt.Errorf("blockDirectives: @%s cannot close itself", d.Open)
 		}
-
-		if opens[d.Open] {
-			return fmt.Errorf("blockDirectives: @%s is declared twice", d.Open)
-		}
-
-		opens[d.Open] = true
 	}
 
 	builtins := bladeparser.BuiltinOpeners()
@@ -459,13 +465,6 @@ func (b *Blade) validate() error {
 	}
 
 	return nil
-}
-
-// isDirectiveName matches the \w+ Blade's compiler accepts as a directive name.
-func isDirectiveName(name string) bool {
-	return name != "" && !strings.ContainsFunc(name, func(c rune) bool {
-		return c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9')
-	})
 }
 
 func (p *PHP) validate() error {

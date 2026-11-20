@@ -816,6 +816,16 @@ func TestFormatNeverTurnsAnAuthoredSpaceIntoALineBreak(t *testing.T) {
 			"<p>\n    Some <b>bold</b>\n    " + prose + "\n</p>\n",
 			"<p>\n    Some <b>bold</b>\n    " + prose + "\n</p>\n",
 		},
+		{
+			"words and inline elements at the document root",
+			"- <img src=\"/a.png\"><!-- old -->\n+ <img src=\"/b.png\"><!-- new -->\n<b>a</b> <i>b</i>\n",
+			"- <img src=\"/a.png\"><!-- old -->\n+ <img src=\"/b.png\"><!-- new -->\n<b>a</b> <i>b</i>\n",
+		},
+		{
+			"a block element at the root still takes its own line",
+			"<div>block</div> after\n",
+			"<div>block</div>\nafter\n",
+		},
 	}
 
 	for _, tc := range cases {
@@ -848,6 +858,16 @@ func TestFormatInlineRunKeepsAnAuthoredBlankLine(t *testing.T) {
 			"after a glued word",
 			"<p>\n    a <b>x</b>z\n\n    y\n</p>\n",
 			"<p>\n    a <b>x</b>z\n\n    y\n</p>\n",
+		},
+		{
+			"after text at the document root",
+			"// HTML...\n\n<button>Login</button>\n",
+			"// HTML...\n\n<button>Login</button>\n",
+		},
+		{
+			"before text at the document root",
+			"<button>Login</button>\n\n// HTML...\n",
+			"<button>Login</button>\n\n// HTML...\n",
 		},
 	}
 

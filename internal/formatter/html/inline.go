@@ -62,8 +62,8 @@ func RunAuthoredOnOneLine(children []parser.Node) bool {
 }
 
 // KeepsAuthoredBreak reports whether an inline run keeps its authored lines
-// instead of folding onto one: a lone element child on a line of its own, or a
-// blank line between two children.
+// instead of folding onto one: a lone element or comment child on a line of its
+// own, or a blank line between two children.
 func KeepsAuthoredBreak(children []parser.Node) bool {
 	return loneChildOnItsOwnLine(children) || hasBlankLineBetween(children)
 }
@@ -76,7 +76,7 @@ func loneChildOnItsOwnLine(children []parser.Node) bool {
 			continue
 		}
 
-		if _, ok := c.(*parser.Element); !ok || lone >= 0 {
+		if !isElementOrComment(c) || lone >= 0 {
 			return false
 		}
 
@@ -128,6 +128,12 @@ func isElement(n parser.Node) bool {
 	_, ok := n.(*parser.Element)
 
 	return ok
+}
+
+func isElementOrComment(n parser.Node) bool {
+	_, ok := n.(*parser.Comment)
+
+	return ok || isElement(n)
 }
 
 // TextEdgeBlank reports whether node is text whose leading (or trailing)

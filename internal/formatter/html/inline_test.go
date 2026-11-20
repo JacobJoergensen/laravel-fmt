@@ -36,3 +36,24 @@ func TestInlineAtomsMarksABlankLineBeforeAnAtom(t *testing.T) {
 		})
 	}
 }
+
+func TestKeepsAuthoredBreakForALoneCommentOnItsOwnLine(t *testing.T) {
+	cases := []struct {
+		name     string
+		children []parser.Node
+		want     bool
+	}{
+		{"comment on its own line", []parser.Node{&parser.Text{Text: []byte("\n    ")}, &parser.Comment{}, &parser.Text{Text: []byte("\n")}}, true},
+		{"element on its own line", []parser.Node{&parser.Text{Text: []byte("\n    ")}, &parser.Element{}, &parser.Text{Text: []byte("\n")}}, true},
+		{"glued comment", []parser.Node{&parser.Comment{}}, false},
+		{"comment beside text", []parser.Node{&parser.Text{Text: []byte("\n    a ")}, &parser.Comment{}, &parser.Text{Text: []byte("\n")}}, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := KeepsAuthoredBreak(tc.children); got != tc.want {
+				t.Fatalf("KeepsAuthoredBreak = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

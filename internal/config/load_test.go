@@ -137,10 +137,11 @@ func TestLoadFileBladeBlockDirectives(t *testing.T) {
 		json string
 	}{
 		{"not a directive name", `{"blade": {"blockDirectives": [{"open": "my-block"}]}}`},
-		{"redeclares a built-in opener", `{"blade": {"blockDirectives": [{"open": "if"}]}}`},
-		{"closes with a built-in closer", `{"blade": {"blockDirectives": [{"open": "feature", "close": "endif"}]}}`},
-		{"declared twice", `{"blade": {"blockDirectives": [{"open": "feature"}, {"open": "feature"}]}}`},
-		{"closes itself", `{"blade": {"blockDirectives": [{"open": "feature", "close": "feature"}]}}`},
+		{"redeclares a built-in opener", `{"blade": {"blockDirectives": [{"open": "if", "close": "endwhen"}]}}`},
+		{"adds a branch to a built-in block", `{"blade": {"blockDirectives": [{"open": "feature", "branches": ["otherwisefeature"]}]}}`},
+		{"closes with a built-in closer", `{"blade": {"blockDirectives": [{"open": "disk", "close": "endif"}]}}`},
+		{"declared twice", `{"blade": {"blockDirectives": [{"open": "disk"}, {"open": "disk"}]}}`},
+		{"closes itself", `{"blade": {"blockDirectives": [{"open": "disk", "close": "disk"}]}}`},
 	}
 
 	for _, tc := range invalid {
@@ -160,7 +161,7 @@ func TestLoadFileBladeBlockDirectives(t *testing.T) {
 	t.Run("close defaults to end plus the opener", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), FileName)
 
-		if err := os.WriteFile(path, []byte(`{"blade": {"blockDirectives": [{"open": "feature", "branches": ["else"]}]}}`), 0o600); err != nil {
+		if err := os.WriteFile(path, []byte(`{"blade": {"blockDirectives": [{"open": "disk", "branches": ["else"]}]}}`), 0o600); err != nil {
 			t.Fatalf("write fixture: %v", err)
 		}
 
@@ -169,8 +170,20 @@ func TestLoadFileBladeBlockDirectives(t *testing.T) {
 			t.Fatalf("LoadFile: %v", err)
 		}
 
-		if got := loaded.File.Blade.BlockDirectives[0].Closer(); got != "endfeature" {
-			t.Fatalf("Closer() = %q, want endfeature", got)
+		if got := loaded.File.Blade.BlockDirectives[0].Closer(); got != "enddisk" {
+			t.Fatalf("Closer() = %q, want enddisk", got)
+		}
+	})
+
+	t.Run("a declaration matching a built-in block still loads", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), FileName)
+
+		if err := os.WriteFile(path, []byte(`{"blade": {"blockDirectives": [{"open": "feature"}]}}`), 0o600); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+
+		if _, err := LoadFile(Default(), path); err != nil {
+			t.Fatalf("LoadFile: %v", err)
 		}
 	})
 }
@@ -183,8 +196,8 @@ func TestLoadFileAcceptsOnlyBlockOpenersBeforeBlankLines(t *testing.T) {
 	}{
 		{"built-in block", `{"blade": {"blankLineBeforeDirectives": ["if", "foreach", "pushOnce"]}}`, false},
 		{"php block", `{"blade": {"blankLineBeforeDirectives": ["php"]}}`, false},
-		{"declared block", `{"blade": {"blockDirectives": [{"open": "feature"}], "blankLineBeforeDirectives": ["feature"]}}`, false},
-		{"undeclared block", `{"blade": {"blankLineBeforeDirectives": ["feature"]}}`, true},
+		{"declared block", `{"blade": {"blockDirectives": [{"open": "disk"}], "blankLineBeforeDirectives": ["disk"]}}`, false},
+		{"undeclared block", `{"blade": {"blankLineBeforeDirectives": ["disk"]}}`, true},
 		{"standalone directive", `{"blade": {"blankLineBeforeDirectives": ["include"]}}`, true},
 		{"branch", `{"blade": {"blankLineBeforeDirectives": ["else"]}}`, true},
 		{"closer", `{"blade": {"blankLineBeforeDirectives": ["endif"]}}`, true},

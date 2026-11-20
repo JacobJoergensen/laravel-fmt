@@ -6,6 +6,9 @@
 * Improved a closure after other arguments, like Pest's `it('…', function () use ($x) {`, to stay hugged past the print width
 * Improved `<head>` and `<body>` in Blade to indent under `<html>`, as Laravel's docs write them
 * Improved the error for an inline `@php(…)` that a later `@endphp` closes, naming both lines
+* Improved Pennant's `@feature` and `@featureany` blocks to indent without a `blockDirectives` entry
+* Improved Markdown `html` code blocks holding a Blade block like `@foreach` to format as Blade
+* Improved an arrow function to stay hugged when you break its call over lines, like `each(fn ($u) => $u->notify(`
 * Fixed `types_spaces` in `pint.json` being ignored, so `int | string` lost its spaces
 * Fixed `quoteStyle` and Prettier's `singleQuote` switching HTML, Blade and XML attributes to single quotes
 * Fixed a multi-line `<title>` keeping its old indent when re-indented
@@ -13,6 +16,10 @@
 * Fixed a monorepo's root `.prettierignore` and `pint.json` excludes being skipped inside a package with its own `composer.json`
 * Fixed the language server sending edits some editors apply wrongly when a file's last line changes
 * Fixed the language server formatting before `initialize` and accepting a second `initialize`
+* Fixed an array holding only a comment breaking the call around it instead of hugging, like `json([ // ... ])`
+* Fixed a space added before `,` or `)` after a block comment in Alpine values, like `/* ... */ ,`
+* Fixed an HTML comment on its own line inside an element being pulled onto the tag's line
+* Fixed top-level text in HTML files dropping a blank line or breaking before an inline element
 
 ## Version 0.13.0 (2026-11-18)
 * Added formatting of `.webmanifest` files as JSON

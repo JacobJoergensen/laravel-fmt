@@ -20,18 +20,40 @@ func emitFile(w *formatter.Writer, file *parser.File, cfg *config.File) {
 
 	prevEnd := -1
 
+	// Two inline nodes the author kept on one line stay there, as in an
+	// element's body: a newline would render where a space did. A node that
+	// broke may end on a line the Writer did not lay out, so nothing joins it.
+	joinable := false
+	brokeSincePrev := false
+
 	for _, node := range file.Nodes {
+		t, isText := node.(*parser.Text)
+
 		if IsWhitespaceText(node) {
 			if BlankLineInText(node) {
 				w.RequestBlankLine()
 			}
 
+			brokeSincePrev = brokeSincePrev || CountLineBreaks(t.Text) > 0
 			prevEnd = -1
 
 			continue
 		}
 
-		if !first && !gluedTo(prevEnd, node) {
+		if isText {
+			lead := t.Text[:len(t.Text)-len(bytes.TrimLeft(t.Text, CollapsibleSpace))]
+			brokeSincePrev = brokeSincePrev || CountLineBreaks(lead) > 0
+		}
+
+		if !first && TextEdgeBlank(node, true) {
+			w.RequestBlankLine()
+		}
+
+		switch {
+		case first, gluedTo(prevEnd, node):
+		case joinable && !brokeSincePrev && Gluable(node):
+			w.Space()
+		default:
 			w.Newline()
 		}
 
@@ -43,7 +65,19 @@ func emitFile(w *formatter.Writer, file *parser.File, cfg *config.File) {
 			emitNode(w, file.Src, idx, node, cfg)
 		}
 
+		if TextEdgeBlank(node, false) {
+			w.RequestBlankLine()
+		}
+
 		broke := bytes.ContainsAny(w.Bytes()[before:], "\n\r")
+		joinable = Gluable(node) && !broke
+
+		brokeSincePrev = false
+		if isText {
+			trail := t.Text[len(bytes.TrimRight(t.Text, CollapsibleSpace)):]
+			brokeSincePrev = CountLineBreaks(trail) > 0
+		}
+
 		prevEnd = nodeEndForGlue(node, broke)
 		prev = node
 		first = false

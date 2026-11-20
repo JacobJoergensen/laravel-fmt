@@ -11,10 +11,13 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/language"
 	phpfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/php"
 	xmlfmt "github.com/JacobJoergensen/laravel-fmt/internal/formatter/xml"
+	bladeparser "github.com/JacobJoergensen/laravel-fmt/internal/parser/blade"
 	parser "github.com/JacobJoergensen/laravel-fmt/internal/parser/markdown"
 )
 
 var tagExtensions = map[string]string{"blade": "blade.php"}
+
+const bladeCodePath = "code.blade.php"
 
 var phpSnippetShapes = []func(src []byte, cfg *config.File) ([]byte, error){
 	formatPHPStatements,
@@ -40,6 +43,13 @@ var (
 func formatCode(b *parser.FencedCodeBlock, cfg *config.File) ([]byte, bool) {
 	path := codePath(b.Info)
 	lang := formatter.DetectLanguage(path)
+
+	// Laravel's docs tag Blade templates `html`, and the HTML formatter reads
+	// `@foreach` as text, flattening the body under it. Vue's `{{ }}` would
+	// take PHP's style as Blade, so only a whole Blade block counts.
+	if lang == formatter.LangHTML && bladeparser.HasBuiltinBlockLines(b.Content) {
+		path, lang = bladeCodePath, formatter.LangBlade
+	}
 
 	// Markdown is skipped, or a block's own fences would format recursively.
 	if lang == formatter.LangUnknown || lang == formatter.LangMarkdown || len(bytes.TrimSpace(b.Content)) == 0 {

@@ -34,6 +34,8 @@ var corpus = []string{
 	"typeof value === 'string'",
 	"s.replace(/\\s+/g, ' ')",
 	"run(a, /* keep */ b)",
+	"{ a: [1 /* one */ , 2], b: f( /* y */ x /* z */ ); c: 3 /* w */ }",
+	"setup( // wire events\n  a)",
 	"for (let i = 0; i < 10; i++) { step(i) }",
 	"msg = 'it\\'s here'",
 	"name = \"say \\\"hi\\\"\"",
@@ -85,6 +87,12 @@ func TestNormalizeCanonicalSpacing(t *testing.T) {
 		{"ASI guard starting a line stays glued", "a=b\n;[c,d]=e", "a = b\n;[c, d] = e"},
 		{"line breaks and their indentation kept", "{\n    open:false,\n        close(){}\n}", "{\n    open: false,\n        close() {}\n}"},
 		{"value opening and closing with a line break", "\n  a=1\n  b=2\n", "\n  a = 1\n  b = 2\n"},
+		{
+			"block comment hugs the bracket and separator beside it",
+			"{ a: [1 /* one */ , 2], b: f( /* y */ x /* z */ ); c: 3 /* w */ }",
+			"{ a: [1 /* one */, 2], b: f(/* y */ x /* z */); c: 3 /* w */ }",
+		},
+		{"line comment keeps its space after a bracket", "setup( // wire events\n  a)", "setup( // wire events\n  a)"},
 	}
 
 	for _, c := range cases {

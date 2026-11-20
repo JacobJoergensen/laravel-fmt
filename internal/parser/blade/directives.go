@@ -1,9 +1,12 @@
 package blade
 
 import (
+	"bytes"
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/JacobJoergensen/laravel-fmt/internal/parser/html"
 )
 
 // BlockDirective declares a project's own block directive, the way Blade::if or
@@ -41,6 +44,10 @@ func NewDirectives(declared []BlockDirective) *Directives {
 	branches := maps.Clone(blockDirectiveBranches)
 
 	for _, d := range declared {
+		if IsBuiltinBlock(d.Open, d.Close, d.Branches) {
+			continue
+		}
+
 		closers[d.Open] = []string{d.Close}
 
 		if len(d.Branches) > 0 {
@@ -60,6 +67,66 @@ func NewDirectives(declared []BlockDirective) *Directives {
 // Blade's own block directives, which a project cannot declare again.
 func IsBuiltinOpenerOrCloser(name string) bool {
 	return builtinDirectives.IsOpener(name) || builtinDirectives.IsCloser(name)
+}
+
+// IsBuiltinBlock reports whether opener is one of Blade's own block directives,
+// closer one of its closers and every branch one of its branches, so declaring
+// the block adds nothing.
+func IsBuiltinBlock(opener, closer string, branches []string) bool {
+	known := blockDirectiveBranches[opener]
+
+	return slices.Contains(blockDirectiveClosers[opener], closer) &&
+		!slices.ContainsFunc(branches, func(b string) bool { return !slices.Contains(known, b) })
+}
+
+// IsDirectiveName reports whether name is the \w+ Blade's compiler accepts as a
+// directive name.
+func IsDirectiveName(name string) bool {
+	return name != "" && directiveNameLen([]byte(name)) == len(name)
+}
+
+func directiveNameLen(s []byte) int {
+	n := 0
+	for n < len(s) && (html.IsNameStart(s[n]) || html.IsDigit(s[n])) {
+		n++
+	}
+
+	return n
+}
+
+// HasBuiltinBlockLines reports whether a line of src opens one of Blade's own
+// block directives and a later line closes it. Alpine's `@error="…"` and
+// Angular's `@if (x) {` never meet an `@end…`, so neither counts.
+func HasBuiltinBlockLines(src []byte) bool {
+	var open []string
+
+	for line := range bytes.Lines(src) {
+		name, ok := lineDirective(line)
+		if !ok {
+			continue
+		}
+
+		if slices.ContainsFunc(open, func(o string) bool { return IsBuiltinBlock(o, name, nil) }) {
+			return true
+		}
+
+		if builtinDirectives.IsOpener(name) {
+			open = append(open, name)
+		}
+	}
+
+	return false
+}
+
+func lineDirective(line []byte) (string, bool) {
+	line = bytes.TrimLeft(line, " \t")
+	if len(line) == 0 || line[0] != '@' {
+		return "", false
+	}
+
+	end := directiveNameLen(line[1:])
+
+	return string(line[1 : 1+end]), end > 0
 }
 
 // BuiltinOpeners returns the names of Blade's own block directives, sorted.

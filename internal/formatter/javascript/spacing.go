@@ -149,8 +149,14 @@ func operandEnd(src []byte, toks []parser.Token, classes []tokenClass, i int) bo
 // gap reports whether one space separates token b from token a before it.
 // The cases overlap, so their order decides the spacing.
 func (n *normalizer) gap(a, b int) bool {
-	if n.toks[a].Kind == parser.KindComment || n.toks[b].Kind == parser.KindComment {
-		return true
+	// A block comment hugs the bracket or separator beside it; a line comment
+	// keeps its space.
+	if n.toks[b].Kind == parser.KindComment {
+		return !n.isBlockComment(b) || !n.is(a, "(") && !n.is(a, "[")
+	}
+
+	if n.toks[a].Kind == parser.KindComment {
+		return !n.isBlockComment(a) || !n.is(b, ",") && !n.is(b, ";") && !n.is(b, ")") && !n.is(b, "]")
 	}
 
 	switch {
@@ -199,6 +205,10 @@ func (n *normalizer) gap(a, b int) bool {
 	default:
 		return true
 	}
+}
+
+func (n *normalizer) isBlockComment(i int) bool {
+	return bytes.HasPrefix(n.src[n.toks[i].Start:n.toks[i].End], []byte("/*"))
 }
 
 func (n *normalizer) is(i int, s string) bool {

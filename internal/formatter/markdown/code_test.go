@@ -22,6 +22,24 @@ func TestFormatCodeBlocks(t *testing.T) {
 		want string
 	}{
 		{
+			"html fence opening a Blade block formats as Blade",
+			config.Default(),
+			"```html\n<ul>\n@foreach ($ids as $id)\n<li>{{ $id }}</li>\n@endforeach\n</ul>\n```\n",
+			"```html\n<ul>\n    @foreach ($ids as $id)\n        <li>{{ $id }}</li>\n    @endforeach\n</ul>\n```\n",
+		},
+		{
+			"html fence with Vue and Alpine syntax stays HTML",
+			config.Default(),
+			"```html\n<div v-if=\"open\">{{ !visible }}</div>\n<button\n    @click=\"open = true\"\n>Open</button>\n```\n",
+			"```html\n<div v-if=\"open\">{{ !visible }}</div>\n<button @click=\"open = true\">Open</button>\n```\n",
+		},
+		{
+			"html fence with Angular control flow or an @-named attribute stays HTML",
+			config.Default(),
+			"```html\n<ul>\n@for (item of items; track item.id) {\n<li>{{ item.name }}</li>\n}\n</ul>\n<img\n    @error=\"failed = true\"\n>\n<p>{{ !ok }}</p>\n```\n",
+			"```html\n<ul>\n    @for (item of items; track item.id) {\n    <li>{{ item.name }}</li>\n    }\n</ul>\n<img @error=\"failed = true\">\n<p>{{ !ok }}</p>\n```\n",
+		},
+		{
 			"lone close tag stays as written",
 			config.Default(),
 			"```php\n?>\n```\n",
