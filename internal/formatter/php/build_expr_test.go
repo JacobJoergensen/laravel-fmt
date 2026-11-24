@@ -820,6 +820,61 @@ func TestEmptyClosureBodyFollowsTheProjectsLayout(t *testing.T) {
 	}
 }
 
+func TestClosureSignatureTooWideForAnyLineBreaksItsSingleParameter(t *testing.T) {
+	sole := "$q->where(static function (\\Acme\\%s $inner) use ($first, $second): void {\n    $inner->run();\n});"
+	leading := "assert($user, Code::class, function (\\Acme\\%s $item) use ($first, $second): bool {\n    return true;\n});"
+
+	tests := []struct {
+		name   string
+		src    string
+		want   string
+		length int
+	}{
+		{
+			name:   "sole argument un-hugs while the signature fits a line of its own",
+			src:    sole,
+			want:   "$q->where(\n    static function (\\Acme\\%s $inner) use ($first, $second): void {\n        $inner->run();\n    },\n);",
+			length: 55,
+		},
+		{
+			name:   "sole argument breaks its parameter once the signature fits no line",
+			src:    sole,
+			want:   "$q->where(static function (\n    \\Acme\\%s $inner,\n) use ($first, $second): void {\n    $inner->run();\n});",
+			length: 56,
+		},
+		{
+			name:   "after other arguments it stays hugged past the width while the signature fits a line",
+			src:    leading,
+			want:   leading,
+			length: 63,
+		},
+		{
+			name:   "after other arguments it breaks its parameter once the signature fits no line",
+			src:    leading,
+			want:   "assert($user, Code::class, function (\n    \\Acme\\%s $item,\n) use ($first, $second): bool {\n    return true;\n});",
+			length: 64,
+		},
+		{
+			name:   "a long use list breaks instead",
+			src:    "$q->where(static function (\\Acme\\%s $inner) use ($first, $second, $third): void {\n    $inner->run();\n});",
+			want:   "$q->where(static function (\\Acme\\%s $inner) use (\n    $first,\n    $second,\n    $third,\n): void {\n    $inner->run();\n});",
+			length: 60,
+		},
+		{
+			name:   "a long use list too wide to open on the line breaks the parameter",
+			src:    "$q->where(static function (\\Acme\\%s $inner) use ($first, $second, $third): void {\n    $inner->run();\n});",
+			want:   "$q->where(static function (\n    \\Acme\\%s $inner,\n) use ($first, $second, $third): void {\n    $inner->run();\n});",
+			length: 80,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertLayoutAtLength(t, tt.src, tt.want, tt.length)
+		})
+	}
+}
+
 func TestCommentBeforeSemicolonInsideAClosureArgumentSurvives(t *testing.T) {
 	src := "<?php\n\n$o = f(function ($n) {\n    return $n instanceof A\n        || $n instanceof B\n        // keep me\n    ;\n});\n"
 

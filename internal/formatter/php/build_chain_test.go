@@ -552,7 +552,7 @@ func TestNestedCallHugsUntilItsOpeningLineOverflows(t *testing.T) {
 		{
 			"closure too wide for a line of its own keeps its hug",
 			"outer($x->each(function (TypeName $" + strings.Repeat("d", 100) + "): bool { return true; }));\n",
-			"outer($x->each(function (TypeName $" + strings.Repeat("d", 100) + "): bool {\n    return true;\n}));\n",
+			"outer($x->each(function (\n    TypeName $" + strings.Repeat("d", 100) + ",\n): bool {\n    return true;\n}));\n",
 		},
 		{
 			"array after a long receiver hugs at the print width",

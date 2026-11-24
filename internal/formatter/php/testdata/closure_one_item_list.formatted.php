@@ -30,7 +30,9 @@ function g()
             },
         );
 
-    DB::transaction(function (\Acme\Support\Transactions\TransactionContextWithAVeryLongName $context) use ($widget): \Acme\Support\Result {
+    DB::transaction(function (
+        \Acme\Support\Transactions\TransactionContextWithAVeryLongName $context,
+    ) use ($widget): \Acme\Support\Result {
         $widget->save();
     });
 

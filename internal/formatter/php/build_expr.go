@@ -2404,11 +2404,13 @@ func (b *builder) closure(n *parser.ClosureExpr) *document.Doc {
 
 	parts = append(parts, b.returnType(n.ReturnColon, n.ReturnType))
 
-	// A signature too wide for any line the closure can start on, with nothing
-	// else in it that breaks, breaks its single parameter after all.
+	// A signature too wide for a line of its own may break its single
+	// parameter after all; as a group it breaks only where its line overflows.
+	// A list closureParams already built holds the parameter's comments, so
+	// it is not built again.
 	signature := document.Concat(append(slices.Clone(parts), document.Text(" {"))...)
-	if len(n.Params) == 1 && !document.CanBreak(signature) &&
-		b.depth*b.cfg.IndentWidth+document.FlatWidth(signature, b.cfg.IndentWidth) > b.cfg.PrintWidth {
+	if len(n.Params) == 1 && !document.CanBreak(parts[paramsAt]) &&
+		(b.depth+1)*b.cfg.IndentWidth+document.FlatWidth(signature, b.cfg.IndentWidth) > b.cfg.PrintWidth {
 		parts[paramsAt] = b.params(n.Params, n.RParen)
 	}
 
@@ -2428,7 +2430,8 @@ func (b *builder) closureBody(blk *parser.BlockStmt) *document.Doc {
 	return b.block(blk)
 }
 
-// `(\n    $x,\n)` saves no width, so a single parameter stays on the line.
+// `(\n    $x,\n)` saves no width while the signature fits a line, so a single
+// parameter stays on the line; closure() breaks it where it does not.
 func (b *builder) closureParams(n *parser.ClosureExpr) *document.Doc {
 	span := parser.Span{Start: n.LParen.Span.Start, End: n.RParen.Span.End}
 	if len(n.Params) != 1 || b.spanHasComment(span) {

@@ -22,6 +22,7 @@
 * Fixed calls after a multi-line call's `)` or `])` dropping to their own lines inside another call, an array value or an arrow body, like `)->map($a)->all(),`
 * Fixed a chain argument double-indenting or running one column past the print width, like `switchTeam($user->ownedTeams()->create([`
 * Fixed a call ending in an array after `??` or `? … : null` running one column past the print width
+* Fixed a closure with one long parameter, like `function (LongType $x): void {`, running past the print width
 * Fixed a comment after the last of several imports moving behind `?>` into the HTML
 * Fixed output changing on a second run for a block comment before `)`, a line comment in an argument after a multi-line string, and a method chain after `|>`
 * Fixed deeply nested calls, arrays and arrow functions taking seconds to format
