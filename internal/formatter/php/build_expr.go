@@ -22,19 +22,30 @@ func (b *builder) exprList(exprs []parser.Expr) *document.Doc {
 }
 
 func (b *builder) expr(e parser.Expr) *document.Doc {
-	if b.measuring {
-		return b.probeExpr(e)
-	}
-
 	if lead := b.exprLeadComments(e); lead != nil {
 		return document.Concat(lead, b.exprInner(e))
 	}
 
-	return b.exprInner(e)
+	if isLeafExpr(e) {
+		return b.exprInner(e)
+	}
+
+	return b.cachedExpr(e)
+}
+
+// A leaf costs less to build than to look up in the cache.
+func isLeafExpr(e parser.Expr) bool {
+	switch e.(type) {
+	case *parser.IntExpr, *parser.FloatExpr, *parser.StringExpr, *parser.BoolExpr, *parser.NullExpr,
+		*parser.VariableExpr, *parser.IdentExpr, *parser.PlaceholderExpr:
+		return true
+	}
+
+	return false
 }
 
 // buildState is every builder field an expression's layout reads. A layout
-// field missing here lets probeExpr reuse a build made under other state.
+// field missing here lets cachedExpr reuse a build made under other state.
 type buildState struct {
 	depth              int
 	firstLineColumn    int
@@ -52,6 +63,8 @@ type buildState struct {
 	noHugNext          bool
 	linkArgsNext       bool
 	stmtChain          bool
+	arrowBodyChain     bool
+	arrowBodyLead      int
 	arrowBodyNext      bool
 	preserveChainNext  bool
 	structureLinksNext bool
@@ -59,12 +72,12 @@ type buildState struct {
 	inKey              bool
 }
 
-type probeKey struct {
+type buildKey struct {
 	expr  parser.Expr
 	state buildState
 }
 
-type probeBuild struct {
+type cachedBuild struct {
 	doc   *document.Doc
 	after buildState
 }
@@ -87,6 +100,8 @@ func (b *builder) state() buildState {
 		noHugNext:          b.noHugNext,
 		linkArgsNext:       b.linkArgsNext,
 		stmtChain:          b.stmtChain,
+		arrowBodyChain:     b.arrowBodyChain,
+		arrowBodyLead:      b.arrowBodyLead,
 		arrowBodyNext:      b.arrowBodyNext,
 		preserveChainNext:  b.preserveChainNext,
 		structureLinksNext: b.structureLinksNext,
@@ -112,6 +127,8 @@ func (b *builder) restoreState(s buildState) {
 	b.noHugNext = s.noHugNext
 	b.linkArgsNext = s.linkArgsNext
 	b.stmtChain = s.stmtChain
+	b.arrowBodyChain = s.arrowBodyChain
+	b.arrowBodyLead = s.arrowBodyLead
 	b.arrowBodyNext = s.arrowBodyNext
 	b.preserveChainNext = s.preserveChainNext
 	b.structureLinksNext = s.structureLinksNext
@@ -119,18 +136,18 @@ func (b *builder) restoreState(s buildState) {
 	b.inKey = s.inKey
 }
 
-// Each width probe rebuilds its subtree, probes included, so without reusing
-// builds from the same state nested chains and arrow functions cost
-// exponential time. A probe doc is never printed, and a span holding a
-// comment is not reused, since whether a probe sees that comment depends on
-// what is claimed so far.
-func (b *builder) probeExpr(e parser.Expr) *document.Doc {
+// A hug builds its arguments for each layout the printer may pick, and each
+// width probe rebuilds its subtree, so without reusing builds from the same
+// state nested calls cost exponential time. A span holding a comment is not
+// reused, since which build claims that comment depends on what is claimed
+// so far. Without one, a probe and a printed build are the same doc.
+func (b *builder) cachedExpr(e parser.Expr) *document.Doc {
 	if b.spanHasComment(e.Span()) {
 		return b.exprInner(e)
 	}
 
-	key := probeKey{expr: e, state: b.state()}
-	if built, ok := b.probes[key]; ok {
+	key := buildKey{expr: e, state: b.state()}
+	if built, ok := b.builds[key]; ok {
 		b.restoreState(built.after)
 
 		return built.doc
@@ -138,11 +155,11 @@ func (b *builder) probeExpr(e parser.Expr) *document.Doc {
 
 	doc := b.exprInner(e)
 
-	if b.probes == nil {
-		b.probes = make(map[probeKey]probeBuild)
+	if b.builds == nil {
+		b.builds = make(map[buildKey]cachedBuild)
 	}
 
-	b.probes[key] = probeBuild{doc: doc, after: b.state()}
+	b.builds[key] = cachedBuild{doc: doc, after: b.state()}
 
 	return doc
 }
@@ -333,7 +350,12 @@ func (b *builder) exprInner(e parser.Expr) *document.Doc {
 			return document.Concat(document.Text("new "), b.expr(n.Class), b.verbatim(args))
 		}
 
-		return document.Concat(document.Text("new "), b.expr(n.Class), b.argList(n.Args, withTrailingComma))
+		class := b.expr(n.Class)
+		args, _ := b.nestedArgs(n.Args, b.calleeLead(n.Class, len("new ")), func() (*document.Doc, bool) {
+			return b.argListHug(n.Args, withTrailingComma)
+		})
+
+		return document.Concat(document.Text("new "), class, args)
 	case *parser.ArrayExpr:
 		return b.array(n)
 	case *parser.TernaryExpr:
@@ -347,7 +369,7 @@ func (b *builder) exprInner(e parser.Expr) *document.Doc {
 	case *parser.ClosureExpr:
 		return b.closure(n)
 	case *parser.ArrowFnExpr:
-		return b.arrowFn(n)
+		return b.arrowFn(n, stmtLevel)
 	case *parser.MatchExpr:
 		return b.match(n)
 	case *parser.AnonClassExpr:
@@ -363,10 +385,11 @@ func (b *builder) exprInner(e parser.Expr) *document.Doc {
 
 		return document.Concat(b.expr(n.Operand), b.tok(n.Op))
 	case *parser.ThrowExpr:
+		b.wrapStmt(stmtLevel, len("throw "), 0)
 		return document.Concat(document.Text("throw "), b.expr(n.Expr))
 	case *parser.CloneExpr:
 		if n.Expr == nil {
-			return document.Concat(document.Text("clone"), b.argList(n.Args, withTrailingComma))
+			return document.Concat(document.Text("clone"), b.argList(n.Args))
 		}
 
 		return document.Concat(document.Text("clone "), b.expr(n.Expr))
@@ -651,7 +674,17 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 		id := b.nextGroupID()
 		headDoc = document.GroupID(id, headDoc)
 		plain = sep
-		sep = document.IfBreakOf(id, document.Text(glue), sep)
+
+		// `=== true` alone on a line says nothing: while the head can break, it does.
+		// A parenthesised head already reads as one operand, and breaking inside it
+		// would stack closers (`)) !== false`).
+		trailingCall := headIsCall && b.qualifiesTrailingBreak(last, stmtLevel)
+		_, parenHead := last.(*parser.ParenExpr)
+		if len(tails) == 1 && comparesWithLiteral(tails[0]) && !trailingCall && !parenHead {
+			plain = document.Text(glue)
+		}
+
+		sep = document.IfBreakOf(id, document.Text(glue), plain)
 		seps[0] = sep
 		glueID, glueText = id, glue
 	}
@@ -757,11 +790,19 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 			// as the author-break path groups it, so its block indents from the
 			// line it opens on in both.
 			id := b.nextGroupID()
-			inner = append(inner,
+			block := document.Concat(
 				indented(document.GroupID(id, sep)),
 				document.IfBreakOf(id, indented(document.Group(step)), step),
-				document.BreakParent(),
 			)
+
+			// Glued to a broken head's closer the operand takes no indent, as the glue
+			// case below prints it before its break reads back as forced.
+			if glueID != 0 {
+				glued := document.Concat(document.Text(glueText), step)
+				block = document.IfBreakOf(glueID, glued, block)
+			}
+
+			inner = append(inner, block, document.BreakParent())
 		case glueID != 0:
 			// Glued to a broken head's closer, the operand continues that line,
 			// so it takes no indent: the block path above prints it the same way
@@ -806,7 +847,7 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 				glued := document.Concat(headDoc, document.Text(op), document.Opener(width, operand))
 				variants := []*document.Doc{document.Opener(lead+width, glued)}
 
-				if unhugged, opener := b.unhuggedOperand(onlyTail[0].operand, width, saved+1, innerMark); unhugged != nil {
+				if unhugged, opener := b.unhuggedOperand(onlyTail[0].operand, width, saved+1, len(op)-len(" "), innerMark); unhugged != nil {
 					gluedUnhugged := document.Concat(headDoc, document.Text(op), unhugged)
 					variants = append(variants, document.Opener(lead+opener, gluedUnhugged))
 				}
@@ -857,11 +898,11 @@ func (b *builder) gluedClosureRun(headDoc *document.Doc, tails []binaryTail, ops
 
 // unhuggedOperand builds a call operand with its list broken after `(`, and
 // that opener's width, for when it hugs its last array on the head's line but
-// not on its own line at depth. The next pass reads that break as authored and
-// glues it, so the first pass offers that form too. nil when it hugs at depth
-// as well. mark is where the other variants' builds began: this build carries
-// the operand's comments too.
-func (b *builder) unhuggedOperand(operand parser.Expr, hugged, depth int, mark commentMark) (*document.Doc, int) {
+// not on its own line at depth, after prefix. The next pass reads that break
+// as authored and glues it, so the first pass offers that form too. nil when
+// it hugs at depth as well. mark is where the other variants' builds began:
+// this build carries the operand's comments too.
+func (b *builder) unhuggedOperand(operand parser.Expr, hugged, depth, prefix int, mark commentMark) (*document.Doc, int) {
 	call, ok := operand.(*parser.CallExpr)
 	if !ok {
 		return nil, 0
@@ -878,14 +919,23 @@ func (b *builder) unhuggedOperand(operand parser.Expr, hugged, depth int, mark c
 	moved, opens := b.blockOpenerWidth(operand)
 	b.depth = saved
 
-	if !opens || moved >= hugged {
+	// An array always hugs in the list, so an opener too wide for its own
+	// line is the printer's to un-hug there. Broken, a chain's list opens no
+	// block, so the next pass would not glue it.
+	overflows := depth*b.cfg.IndentWidth+prefix+moved > b.cfg.PrintWidth && len(collectChainSpine(call)) == 0
+	if !opens || moved >= hugged && !overflows {
 		return nil, 0
 	}
 
 	b.releaseComments(mark)
 	b.noHugNext = true
+	unhugged := b.expr(operand)
 
-	return b.expr(operand), moved
+	if moved >= hugged {
+		moved, _ = document.BrokenPrefixWidth(unhugged, b.cfg.IndentWidth)
+	}
+
+	return unhugged, moved
 }
 
 func (b *builder) spanHasLParen(span parser.Span) bool {
@@ -972,7 +1022,7 @@ func (b *builder) blockOpenerWidth(operand parser.Expr) (int, bool) {
 // of its own: a chain that fits only without the tail ladders instead of
 // leaving `+ 1;` alone on a line. depth is the ladder's level.
 func (b *builder) chainTail(chainStmt bool, last parser.Expr, tails []binaryTail, depth int) *document.Doc {
-	if !chainStmt || len(tails) != 1 {
+	if !chainStmt || len(tails) != 1 || isLogical(tails[0].op) {
 		return nil
 	}
 
@@ -998,7 +1048,7 @@ func (b *builder) chainTail(chainStmt bool, last parser.Expr, tails []binaryTail
 	defer func() { b.noHugNext = savedNoHug }()
 
 	link := b.measureWidth(func() int {
-		doc := document.Concat(b.tok(mem.Arrow), b.expr(mem.Property), b.argList(call.Args, withTrailingComma))
+		doc := document.Concat(b.tok(mem.Arrow), b.expr(mem.Property), b.argList(call.Args))
 		if document.HasForcedBreak(doc) {
 			// Broken arguments: the tail rides their closing line instead,
 			// as it does once a fitting link breaks there on the first pass.
@@ -1567,7 +1617,8 @@ func (b *builder) preservedPipe(n *parser.BinaryExpr) *document.Doc {
 
 	steps := make([]*document.Doc, len(tails))
 	for i, t := range tails {
-		steps[i] = document.Concat(document.Text(string(t.op.Text)+" "), b.expr(t.operand))
+		op := string(t.op.Text) + " "
+		steps[i] = document.Concat(document.Text(op), b.binaryOperand(t.operand, op, i == len(tails)-1, true))
 	}
 
 	b.depth--
@@ -1860,9 +1911,52 @@ func (b *builder) parenHeadWidens(last parser.Expr, operands []parser.Expr) bool
 	})
 }
 
+const maxLiteralTailWidth = 20
+
+func comparesWithLiteral(t binaryTail) bool {
+	switch t.op.Kind {
+	case parser.KindEqEqEq, parser.KindBangEqEq, parser.KindEqEq, parser.KindBangEq,
+		parser.KindLt, parser.KindGt, parser.KindLtEq, parser.KindGtEq, parser.KindNullCoalesce:
+	default:
+		return false
+	}
+
+	return isLiteral(t.operand)
+}
+
+func isLiteral(e parser.Expr) bool {
+	switch v := e.(type) {
+	case *parser.BoolExpr, *parser.NullExpr, *parser.IntExpr, *parser.FloatExpr:
+		return true
+	case *parser.UnaryExpr:
+		_, number := v.Expr.(*parser.IntExpr)
+		_, float := v.Expr.(*parser.FloatExpr)
+
+		return v.Op.Kind == parser.KindMinus && (number || float)
+	case *parser.ArrayExpr:
+		return len(v.Elements) == 0
+	case *parser.StringExpr:
+		return len(v.Token.Text) <= maxLiteralTailWidth && !bytes.ContainsAny(v.Token.Text, "\r\n")
+	}
+
+	return false
+}
+
 func endsOnBreakableCloser(e parser.Expr) bool {
-	for s, ok := e.(*parser.SubscriptExpr); ok; s, ok = e.(*parser.SubscriptExpr) {
-		e = s.Array
+	for {
+		if s, ok := e.(*parser.SubscriptExpr); ok {
+			e = s.Array
+
+			continue
+		}
+
+		if m, ok := e.(*parser.MemberExpr); ok {
+			e = m.Object
+
+			continue
+		}
+
+		break
 	}
 
 	switch n := e.(type) {
@@ -2183,6 +2277,7 @@ func (b *builder) ternary(n *parser.TernaryExpr, lineKnown bool) *document.Doc {
 		return broken
 	}
 
+	mark := b.markComments()
 	then, other := b.expr(n.Then), b.expr(n.Else)
 	broken := document.Group(document.Concat(cond, document.Indent(document.Concat(
 		document.Line(), document.Text("? "), then,
@@ -2196,9 +2291,19 @@ func (b *builder) ternary(n *parser.TernaryExpr, lineKnown bool) *document.Doc {
 	if isDefaultValue(n.Else) {
 		if width, ok := b.branchOpenerWidth(n.Then, then, 0); ok {
 			glued := document.Concat(cond, document.Text(" ? "), document.Opener(width, then), document.Text(" : "), other)
-			width += document.FlatWidth(cond, b.cfg.IndentWidth) + len(" ? ")
+			lead := document.FlatWidth(cond, b.cfg.IndentWidth) + len(" ? ")
+			variants := []*document.Doc{document.Opener(lead+width, glued)}
 
-			return document.ConditionalGroup(document.Opener(width, glued), broken)
+			// As a binary operand does, a branch whose hug breaks on its own
+			// line too is offered glued with its list broken, which the next
+			// pass reads back as authored.
+			if unhugged, opener := b.unhuggedOperand(n.Then, width, b.depth+1, len("? "), mark); unhugged != nil {
+				rest := b.expr(n.Else)
+				gluedUnhugged := document.Concat(cond, document.Text(" ? "), document.Opener(opener, unhugged), document.Text(" : "), rest)
+				variants = append(variants, document.Opener(lead+opener, gluedUnhugged))
+			}
+
+			return document.ConditionalGroup(append(variants, broken)...)
 		}
 	}
 
@@ -2327,7 +2432,7 @@ func (b *builder) closureParams(n *parser.ClosureExpr) *document.Doc {
 	return document.Concat(document.Text("("), b.flatDoc(param), document.Text(")"))
 }
 
-func (b *builder) arrowFn(n *parser.ArrowFnExpr) *document.Doc {
+func (b *builder) arrowFn(n *parser.ArrowFnExpr, stmtLevel bool) *document.Doc {
 	parts := make([]*document.Doc, 0, 6+len(n.Attributes))
 	parts = append(parts, b.inlineAttributes(n.Attributes)...)
 
@@ -2352,21 +2457,37 @@ func (b *builder) arrowFn(n *parser.ArrowFnExpr) *document.Doc {
 
 	// The arrow starts no further left than its own indent, so a hug that
 	// overflows from there overflows wherever the arrow prints: the call goes
-	// one argument per line instead, as a statement's call does (postfix).
-	if call, ok := n.Body.(*parser.CallExpr); ok && hugsInsideOut(call) {
-		saved := b.chainStmtLead
-		b.chainStmtLead = document.FlatWidth(document.Concat(append(slices.Clone(parts), params, returnType, arrow)...), b.cfg.IndentWidth)
+	// one argument per line instead, as a statement's call does (postfix). A
+	// last arrow that fits a line of its own moves there too; a statement's own
+	// arrow has its body's chain judge that at the real column.
+	call, callBody := n.Body.(*parser.CallExpr)
+	bodyLead := 0
 
-		if b.staysOnStatementLine(call) && b.hugLineOverflows(call, true) && b.unhuggingHelps(call) {
+	if callBody {
+		signature := document.Concat(append(slices.Clone(parts), params, returnType, arrow)...)
+		bodyLead = document.FlatWidth(signature, b.cfg.IndentWidth)
+	}
+
+	if stmtLevel {
+		bodyLead += b.chainStmtLead
+	}
+
+	if callBody && hugsInsideOut(call.Args) {
+		saved := b.chainStmtLead
+		b.chainStmtLead = bodyLead
+
+		if b.staysOnArrowLine(call) && b.hugLineOverflowsFromCloser(call) && b.unhuggingHelps(call) ||
+			!stmtLevel && b.bodyArrowFitsAlone(call) {
 			b.noHugNext = true
 		}
 
 		b.chainStmtLead = saved
 	}
 
-	_, b.arrowBodyNext = n.Body.(*parser.CallExpr)
+	savedBodyLead := b.arrowBodyLead
+	b.arrowBodyNext, b.arrowBodyLead = callBody, bodyLead
 	body := b.expr(n.Body)
-	b.arrowBodyNext = false
+	b.arrowBodyNext, b.arrowBodyLead = false, savedBodyLead
 
 	flat := document.Concat(append(slices.Clone(parts), params, returnType, arrow, body)...)
 	if broken == nil {
@@ -2705,4 +2826,19 @@ func flatWidth(d *document.Doc, tabWidth int) int {
 	out := document.Print(d, document.Options{PrintWidth: inlineWidth, TabWidth: tabWidth})
 
 	return utf8.RuneCount(out)
+}
+
+func (b *builder) staysOnArrowLine(call *parser.CallExpr) bool {
+	calls := memberCalls(call)
+
+	return calls == 0 || calls == 1 && !b.qualifiesTrailingBreak(call, false)
+}
+
+func isLogical(op parser.Token) bool {
+	switch op.Kind {
+	case parser.KindAmpAmp, parser.KindPipePipe, parser.KindAnd, parser.KindOr, parser.KindXor:
+		return true
+	}
+
+	return false
 }

@@ -155,3 +155,33 @@ func TestCopiedStatementKeepsTheSemicolonACloseTagStoodIn(t *testing.T) {
 		})
 	}
 }
+
+func TestBlockCommentMovedBehindTheLastItemIsStableOnTheNextPass(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"parameter list", "<?php\n\nfunction f($a,\n/* one\n */) {}\n"},
+		{"argument list", "<?php\n\nfoo($a,\n/* one\n * two\n */);\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
+	}
+}
+
+func TestCommentAfterADocblockBeforeACloserKeepsItsOwnAlignment(t *testing.T) {
+	want := "<?php\n\nfoo(\n    $a, /** @var array{a: int} */\n    /* one\n     * two\n     */\n);\n"
+
+	for _, src := range []string{"<?php\n\nfoo($a,\n/** @var array{a: int} */\n/* one\n * two\n */);\n", want} {
+		if got := string(mustFormat(t, []byte(src), config.Default())); got != want {
+			t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+		}
+	}
+}

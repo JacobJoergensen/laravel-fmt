@@ -96,3 +96,30 @@ func TestClosingLineWidthOfVerbatimIsItsLastLine(t *testing.T) {
 		t.Fatalf("ClosingLineWidth = %d, %v; want 7, true", w, broke)
 	}
 }
+
+func TestFirstBreakClosingWidthClosesOnTheFirstGroupThatCanBreak(t *testing.T) {
+	array := Group(Concat(Text("["), Indent(Concat(SoftLine(), Text("1"))), SoftLine(), Text("]")))
+	list := Group(Concat(Text("("), Indent(Concat(SoftLine(), Text("$a"))), IfBreak(Text(","), Text("")), SoftLine(), Text(")")))
+
+	cases := []struct {
+		name  string
+		doc   *Doc
+		width int
+		known bool
+	}{
+		{"list closes on its paren", Concat(Text("f"), list), len(")"), true},
+		{"hugged array carries what follows it", Concat(Text("f("), array, Text(", $b)")), len("], $b)"), true},
+		{"later group stays flat", Concat(Text("f("), array, Text(", "), array, Text(")")), len("], [1])"), true},
+		{"nothing can break", Concat(Text("f("), Text("$a"), Text(")")), 0, false},
+		{"printer's choice first", Concat(Text("f"), ConditionalGroup(list, list)), 0, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			width, known := FirstBreakClosingWidth(tc.doc, 4)
+			if width != tc.width || known != tc.known {
+				t.Fatalf("FirstBreakClosingWidth = (%d, %v), want (%d, %v)", width, known, tc.width, tc.known)
+			}
+		})
+	}
+}

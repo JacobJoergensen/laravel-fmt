@@ -72,3 +72,28 @@ use Zed\One;
 		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
 	}
 }
+
+func TestImportCommentOnACloseTagLineStaysBeforeTheTag(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"line comment follows its import up the run", "<?php use B; use A // note ?>\n<p>x</p>\n", "<?php use A; // note\nuse B; ?>\n<p>x</p>\n"},
+		{"comment on the import sorted last ends its line before the tag", "<?php use A; use B // note ?>\n<p>x</p>\n", "<?php use A; use B; // note\n?>\n<p>x</p>\n"},
+		{"comment on its own line moves with its import", "<?php\nuse B; // b\nuse A; // a\n?>\n<p>x</p>\n", "<?php\nuse A; // a\nuse B; // b\n?>\n<p>x</p>\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.src), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
+	}
+}

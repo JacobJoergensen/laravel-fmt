@@ -234,9 +234,21 @@ func (b *builder) ifStmt(n *parser.IfStmt) *document.Doc {
 	parts := []*document.Doc{b.header("if", b.condition(n.Cond), n.Cond, n.RParen), b.controlBody(n.Then)}
 	prev := n.Then
 
-	for _, ei := range n.ElseIfs {
-		parts = append(parts, b.leadAfter(prev), b.header("elseif", b.condition(ei.Cond), ei.Cond, ei.RParen), b.controlBody(ei.Body))
-		prev = ei.Body
+	for {
+		for _, ei := range n.ElseIfs {
+			parts = append(parts, b.leadAfter(prev), b.header("elseif", b.condition(ei.Cond), ei.Cond, ei.RParen), b.controlBody(ei.Body))
+			prev = ei.Body
+		}
+
+		// `else if` is one `elseif` (PSR-12 5.1): the nested if holds the rest
+		// of the chain. A comment before its `if` keeps the braced form.
+		inner, ok := elseIf(n)
+		if !ok || commentTrivia(b.leadingAt(inner.Keyword.Span.Start.Offset)) > 0 {
+			break
+		}
+
+		parts = append(parts, b.leadAfter(prev), b.header("elseif", b.condition(inner.Cond), inner.Cond, inner.RParen), b.controlBody(inner.Then))
+		prev, n = inner.Then, inner
 	}
 
 	if n.Else != nil {
@@ -448,4 +460,14 @@ func (b *builder) staticVarStmt(n *parser.StaticVarStmt) *document.Doc {
 	}
 
 	return document.Concat(document.Text("static "), document.Join(document.Text(", "), docs), document.Text(";"))
+}
+
+func elseIf(n *parser.IfStmt) (*parser.IfStmt, bool) {
+	if n.Else == nil {
+		return nil, false
+	}
+
+	inner, ok := n.Else.Body.(*parser.IfStmt)
+
+	return inner, ok && !has(inner.Colon)
 }

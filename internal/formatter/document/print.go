@@ -142,7 +142,7 @@ func (p *printer) step(c cmd) {
 	case kindGroup:
 		p.stepGroup(c)
 
-	case kindOpener:
+	case kindOpener, kindContinued:
 		p.push(c.indent, c.mode, c.prefix, c.doc.parts[0])
 
 	case kindCondGroup:
@@ -378,6 +378,7 @@ func (p *printer) fitsWith(next cmd, fm fitMode) bool {
 
 	p.fitStack = append(p.fitStack[:0], next)
 	restIdx := len(p.stack)
+	inRest := false
 
 	for remaining >= 0 {
 		if len(p.fitStack) == 0 {
@@ -386,6 +387,7 @@ func (p *printer) fitsWith(next cmd, fm fitMode) bool {
 			}
 
 			restIdx--
+			inRest = true
 			p.fitStack = append(p.fitStack, p.stack[restIdx])
 
 			continue
@@ -432,7 +434,29 @@ func (p *printer) fitsWith(next cmd, fm fitMode) bool {
 
 			return remaining >= 0
 
+		case kindContinued:
+			opening, broke := BrokenPrefixWidth(c.doc.parts[0], p.opts.TabWidth)
+
+			switch {
+			case !broke:
+				p.fitStack = append(p.fitStack, cmd{c.indent, c.mode, c.doc.parts[0], c.prefix})
+			case opening > remaining:
+				return false
+			default:
+				closing, _ := ClosingLineWidth(c.doc.parts[0], p.opts.TabWidth)
+				remaining = p.opts.PrintWidth - max(c.indent, p.lineIndent) - closing
+			}
+
 		case kindCondGroup:
+			// A group ahead of this one can count on the fallback: where the
+			// first variant is measured by its opener, the last opens a line
+			// no wider than its own first break.
+			if fm == fitAsIs && inRest && (c.doc.parts[0].kind == kindOpener || HasForcedBreak(c.doc.parts[0]) || HidesForcedBreak(c.doc.parts[0])) {
+				if w, hard := BrokenPrefixWidth(c.doc.parts[len(c.doc.parts)-1], p.opts.TabWidth); hard {
+					return remaining-w >= 0
+				}
+			}
+
 			w, hard := FlatPrefixWidth(c.doc.parts[0], p.opts.TabWidth)
 			remaining -= w
 
@@ -559,7 +583,7 @@ func propagateBreaks(d *Doc) bool {
 
 		return d.mustWrap
 
-	case kindIndent, kindLinePrefix, kindOpener, kindFromStructure:
+	case kindIndent, kindLinePrefix, kindOpener, kindContinued, kindFromStructure:
 		return propagateBreaks(d.parts[0])
 
 	case kindCondGroup:

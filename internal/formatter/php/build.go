@@ -80,7 +80,10 @@ type builder struct {
 	noHugNext          bool          // the next argList skips its last-argument hug; read and cleared on entry
 	linkArgsNext       bool          // the next argList belongs to a chain link, a level in from its head; read and cleared on entry
 	hugLeadNext        int           // the column the next argList's `(` follows, 0 when unknown; read and cleared on entry
+	commentTrailsNext  bool          // the next verbatim comment prints after content on its line, whatever its source line; read and cleared on entry
 	stmtChain          bool          // flattenChain walks a statement's own chain, whose lead is known
+	arrowBodyChain     bool          // flattenChain walks an arrow function's body, whose hugs the arrow around it measures
+	arrowBodyLead      int           // columns an arrow function puts before its body, with the statement's lead when the arrow is its value
 	arrowBodyNext      bool          // the next postfix is an arrow function's body, its links laddering a level in; read and cleared on entry
 	preserveChainNext  bool          // the next postfix is an operand of a statement's binary, which keeps an author ladder as the statement's own chain does; read and cleared on entry
 	structureLinksNext bool          // the next postfix is glued to a head's closing line and indents its links from its own depth (Pint's method_chaining_indentation); read and cleared on entry
@@ -88,7 +91,7 @@ type builder struct {
 	preserveAt         int           // source offset of a nested chain that keeps its author ladder (a Pest `->and(` argument), 0 for none
 	lineKnownNext      bool          // the next value starts a line whose column the depth gives (an array entry's value); read and cleared in exprInner
 	inKey              bool          // inside a subscript key, which lays out flat unless the author broke it
-	probes             map[probeKey]probeBuild
+	builds             map[buildKey]cachedBuild
 }
 
 func (b *builder) nextGroupID() int32 {
@@ -816,7 +819,7 @@ func (b *builder) layoutStmt(s parser.Stmt) *document.Doc {
 	case *parser.GlobalStmt:
 		return document.Concat(document.Text("global "), b.tokenList(n.Vars), document.Text(";"))
 	case *parser.UnsetStmt:
-		return document.Concat(document.Text("unset"), b.argList(n.Exprs, withTrailingComma), document.Text(";"))
+		return document.Concat(document.Text("unset"), b.argList(n.Exprs), document.Text(";"))
 	case *parser.StaticVarStmt:
 		return b.staticVarStmt(n)
 	case *parser.EmptyStmt:

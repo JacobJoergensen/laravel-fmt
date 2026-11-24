@@ -596,6 +596,8 @@ func (b *builder) leadComment(tr parser.Trivia) *document.Doc {
 
 	if tr.Kind == parser.TriviaDocComment {
 		if d, ok := docCommentDoc(stripLineCR(tr.Text), b.cfg.PHP.TypesSpace); ok {
+			b.commentTrailsNext = false
+
 			return b.tagComment(d, tr.Span.Start.Offset)
 		}
 	}
@@ -627,7 +629,10 @@ func (b *builder) commentVerbatim(tr parser.Trivia) *document.Doc {
 	// line and a shared one, so the two measurements would disagree from one pass to
 	// the next. Strip every shared column instead and let the continuation lines land
 	// at the indent they are printed at.
-	if b.mixed || sourceColumn(b.src, offset) > base {
+	trails := b.commentTrailsNext
+	b.commentTrailsNext = false
+
+	if b.mixed || trails || sourceColumn(b.src, offset) > base {
 		base = math.MaxInt
 	}
 
@@ -707,7 +712,13 @@ func (b *builder) trailingParenComment(rparen parser.Token) (*document.Doc, bool
 	breaks := b.hasBreakingComment(offset)
 	gap := b.closerCommentGap(offset)
 
+	// The first comment joins the last item's line, where the next pass reads
+	// it as trailing, so its continuation lines are laid out as a trailing
+	// comment's now.
+	b.commentTrailsNext = true
 	inner := b.allComments(offset)
+	b.commentTrailsNext = false
+
 	if len(inner) == 0 {
 		return nil, false
 	}

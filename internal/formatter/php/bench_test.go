@@ -120,3 +120,12 @@ func BenchmarkFormatNested(b *testing.B) {
 		}
 	}
 }
+
+func nestedArrowChains(depth int) []byte {
+	inner := "$q->a()->x(function () { x(); })"
+	for range depth {
+		inner = "$q->a()->m(fn () => " + inner + ")"
+	}
+
+	return []byte("<?php\n\n$v = " + inner + ";\n")
+}

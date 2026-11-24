@@ -422,7 +422,7 @@ func (b *builder) attributeGroup(g *parser.AttributeGroup) *document.Doc {
 	for i, a := range g.Attributes {
 		attr := b.name(a.Name)
 		if has(a.RParen) {
-			attr = document.Concat(attr, b.argList(a.Args, withTrailingComma))
+			attr = document.Concat(attr, b.argList(a.Args))
 		}
 
 		attrs[i] = attr
@@ -479,13 +479,13 @@ func (b *builder) anonClass(n *parser.AnonClassExpr) *document.Doc {
 // unless a comment or a body forces a break.
 func (b *builder) anonClassArgs(args []parser.Expr) *document.Doc {
 	if !b.cfg.PHP.InlineAnonClassArgs {
-		return b.argList(args, withTrailingComma)
+		return b.argList(args)
 	}
 
 	mark := b.markComments()
 	saved := b.noAuthorBreaks
 	b.noAuthorBreaks = true
-	joined := b.argList(args, withTrailingComma)
+	joined := b.argList(args)
 	b.noAuthorBreaks = saved
 
 	// A chain's ConditionalGroup hides a closure body's break from
@@ -496,7 +496,7 @@ func (b *builder) anonClassArgs(args []parser.Expr) *document.Doc {
 
 	b.releaseComments(mark)
 
-	return b.argList(args, withTrailingComma)
+	return b.argList(args)
 }
 
 func (b *builder) interfaceStmt(n *parser.InterfaceStmt) *document.Doc {

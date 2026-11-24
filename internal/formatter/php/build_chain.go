@@ -5,6 +5,7 @@ package php
 // per line when it overflows, unless the author already broke it and it fits.
 
 import (
+	"bytes"
 	"slices"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter/document"
@@ -23,6 +24,7 @@ type chainLink struct {
 	args        *document.Doc // that call's argument list, else nil
 	argsHugged  bool          // that list hugs its last argument, so it breaks inside it, not on its own `)` line
 	hugCloses   bool          // that hug is an arrow returning a plain call, so its broken closer line is `))`
+	unhugged    *document.Doc // the link with that list un-hugged, for the head line its arrow fits alone on
 }
 
 func (b *builder) postfix(e parser.Expr, stmtLevel bool) *document.Doc {
@@ -57,15 +59,15 @@ func (b *builder) postfix(e parser.Expr, stmtLevel bool) *document.Doc {
 	// per line. Any other closure, array or match keeps its hug, the Laravel shape
 	// even past the width (Pest's `it('…', function () use ($x) {`).
 	// flattenChain builds the outermost call first.
-	if call, ok := e.(*parser.CallExpr); ok && stmtLevel && hugsInsideOut(call) &&
-		b.staysOnStatementLine(e) && (b.hugLineOverflows(call, true) || b.stmtArrowFitsAlone(call)) && b.unhuggingHelps(call) {
+	if call, ok := e.(*parser.CallExpr); ok && stmtLevel && hugsInsideOut(call.Args) &&
+		b.staysOnStatementLine(e) && (b.hugLineOverflowsFromCloser(call) || b.stmtArrowFitsAlone(call)) && b.unhuggingHelps(call) {
 		b.noHugNext = true
 	}
 
-	savedChain := b.stmtChain
-	b.stmtChain = stmtLevel
+	savedChain, savedArrowBody := b.stmtChain, b.arrowBodyChain
+	b.stmtChain, b.arrowBodyChain = stmtLevel, arrowBody
 	head, links := b.flattenChain(e)
-	b.stmtChain = savedChain
+	b.stmtChain, b.arrowBodyChain = savedChain, savedArrowBody
 
 	// A ConditionalGroup in a link (a nested chain hugging a closure) hides its
 	// forced break from the groups around it, which would then print flat while
@@ -137,134 +139,133 @@ func (b *builder) postfix(e parser.Expr, stmtLevel bool) *document.Doc {
 		return chainConcat(headDoc, links)
 	}
 
-	// A tail ending in a block hug rides the closer below, breaking inside its
-	// block: laddered, its arguments break and read back as authored.
-	if headEnd >= 0 && !stmtLevel && !chainEndsInBlockHug(e) {
-		if doc, ok := b.closerTailGroup(headDoc, links, headEnd, structure); ok {
-			return doc
-		}
-	}
-
-	attached := headEnd
-	if hugged {
-		attached = headEnd - 1
-	}
-
-	// A step the layout gives no break of its own (the call after a property, a
-	// bare `(...)` invocation) renders on the line before it, so it belongs to
-	// the head and has to share the head's indent.
-	//
-	// When hugged the run belongs to the hug instead, which absorbs it below.
-	if !hugged {
-		attached = runEnd(links, attached)
-	}
-
-	headParts := make([]*document.Doc, 0, attached+2)
-	headParts = append(headParts, headDoc)
-	for i := 0; i <= attached; i++ {
-		headParts = append(headParts, links[i].doc)
-	}
-
-	steps := make([]*document.Doc, 0, len(links))
-	hugEnd := attached
-
-	if hugged {
-		// The hug takes its own trailing run for the same reason the head does:
-		// those steps render on the hug's line, so they have to share its indent.
-		hugEnd = runEnd(links, headEnd)
-
-		hugParts := make([]*document.Doc, 0, hugEnd-headEnd+2)
-		hugParts = append(hugParts, document.SoftLine())
-
-		for i := headEnd; i <= hugEnd; i++ {
-			hugParts = append(hugParts, links[i].doc)
+	general := func() *document.Doc {
+		attached := headEnd
+		if hugged {
+			attached = headEnd - 1
 		}
 
-		steps = append(steps, document.Group(document.Concat(hugParts...)))
-	}
-
-	for i := max(hugEnd, attached) + 1; i < len(links); i++ {
-		if stepTakesBreak(links, i) {
-			steps = append(steps, document.SoftLine())
+		// A step the layout gives no break of its own (the call after a property, a
+		// bare `(...)` invocation) renders on the line before it, so it belongs to
+		// the head and has to share the head's indent.
+		//
+		// When hugged the run belongs to the hug instead, which absorbs it below.
+		if !hugged {
+			attached = runEnd(links, attached)
 		}
 
-		steps = append(steps, links[i].doc)
-	}
+		headParts := make([]*document.Doc, 0, attached+2)
+		headParts = append(headParts, headDoc)
+		for i := 0; i <= attached; i++ {
+			headParts = append(headParts, links[i].doc)
+		}
 
-	broken := document.Concat(document.Concat(headParts...), document.Indent(document.Concat(steps...)))
+		steps := make([]*document.Doc, 0, len(links))
+		hugEnd := attached
 
-	// A statement's chain hugging a bracketed block keeps every step on the
-	// line that opens it when that line fits (`X::factory()->for($a)->create([`,
-	// `$this->post(route(…, [` … `])->assertOk()`). The printer cannot judge it:
-	// it measures the array flat, contents and all.
-	if stmtLevel && !b.loneArrayLinkFitsAlone(e) && b.compactBlockChainFits(e, links) {
-		return chainConcat(headDoc, links)
-	}
+		if hugged {
+			hugEnd = runEnd(links, headEnd)
 
-	// Elsewhere the column is the printer's, so it chooses: the chain stays on
-	// the line that opens the array while that opening line fits. An arrow body
-	// ladders a level in from the arrow's line, so, as at statement level, its
-	// array link moves down when it fits flat there.
-	if !stmtLevel && (!arrowBody || !b.arrowBodyLinkFitsAlone(e)) {
-		if opener, ok := b.arrayHugOpener(e, headDoc, links); ok {
+			hugParts := make([]*document.Doc, 0, hugEnd-headEnd+2)
+			hugParts = append(hugParts, document.SoftLine())
+
+			for i := headEnd; i <= hugEnd; i++ {
+				hugParts = append(hugParts, links[i].doc)
+			}
+
+			steps = append(steps, document.Group(document.Concat(hugParts...)))
+		}
+
+		for i := max(hugEnd, attached) + 1; i < len(links); i++ {
+			if stepTakesBreak(links, i) {
+				steps = append(steps, document.SoftLine())
+			}
+
+			steps = append(steps, links[i].doc)
+		}
+
+		broken := document.Concat(document.Concat(headParts...), document.Indent(document.Concat(steps...)))
+
+		// A statement's chain hugging a bracketed block keeps every step on the
+		// line that opens it when that line fits (`X::factory()->for($a)->create([`,
+		// `$this->post(route(…, [` … `])->assertOk()`). The printer cannot judge it:
+		// it measures the array flat, contents and all.
+		if stmtLevel && !b.loneArrayLinkFitsAlone(e) && b.compactBlockChainFits(e, links) {
+			return chainConcat(headDoc, links)
+		}
+
+		// Elsewhere the column is the printer's, so it chooses: the chain stays on
+		// the line that opens the array while that opening line fits. An arrow body
+		// ladders a level in from the arrow's line, so, as at statement level, its
+		// array link moves down when it fits flat there.
+		if !stmtLevel && (!arrowBody || !b.arrowBodyLinkFitsAlone(e)) {
+			if opener, ok := b.arrayHugOpener(e, headDoc, links); ok {
+				glued := chainConcat(headDoc, links)
+
+				return document.ConditionalGroup(document.Opener(opener, glued), linkGroup(broken))
+			}
+		}
+
+		call := trailingMemberCall(e)
+
+		if methodCalls >= 2 && call != nil && !slices.ContainsFunc(links, brokenBefore) && b.argsPrintBroken(call) {
 			glued := chainConcat(headDoc, links)
+			if !stmtLevel {
+				return glued
+			}
 
-			return document.ConditionalGroup(document.Opener(opener, glued), linkGroup(broken))
+			glued = chainConcat(headDoc, headLineLinks(links))
+
+			document.HasForcedBreak(glued)
+
+			if width, _ := document.OpeningLineWidth(glued, b.cfg.IndentWidth); b.depth*b.cfg.IndentWidth+b.chainStmtLead+width <= b.cfg.PrintWidth {
+				return glued
+			}
+
+			// Laddered, the last call's opener overflows all the same; the first
+			// pass, whose arguments were not yet broken, kept it on the head.
+			if b.lastCallBreaksAnyway(e, headDoc, links) {
+				return b.onlyLastCallBreaks(headDoc, headLineLinks(links))
+			}
+
+			return linkGroup(broken)
 		}
-	}
 
-	call := trailingMemberCall(e)
-
-	if methodCalls >= 2 && call != nil && !slices.ContainsFunc(links, brokenBefore) && b.argsPrintBroken(call) {
-		glued := chainConcat(headDoc, links)
-		if !stmtLevel {
-			return glued
+		if stmtLevel && methodCalls >= 2 && !slices.ContainsFunc(links, brokenBefore) && b.middleCallBreaks(headDoc, links) {
+			return chainConcat(headDoc, links)
 		}
 
-		document.HasForcedBreak(glued)
-
-		if width, _ := document.OpeningLineWidth(glued, b.cfg.IndentWidth); b.depth*b.cfg.IndentWidth+b.chainStmtLead+width <= b.cfg.PrintWidth {
-			return glued
+		if stmtLevel && methodCalls >= 2 && !slices.ContainsFunc(links, brokenBefore) && b.lastCallBreaksAnyway(e, headDoc, links) {
+			return b.onlyLastCallBreaks(headDoc, headLineLinks(links))
 		}
 
-		// Laddered, the last call's opener overflows all the same; the first
-		// pass, whose arguments were not yet broken, kept it on the head.
-		if b.lastCallBreaksAnyway(e, headDoc, links) {
-			return b.onlyLastCallBreaks(headDoc, links)
+		// A chain ending in a hugged closure (`Route::prefix(...)->group(fn ...)`)
+		// keeps every step on the opening line when that line fits, breaking only
+		// the closure body; the broken layout is the fallback. A plain Group cannot
+		// do this: the closure's forced break would always collapse it to broken. A
+		// single call on a head that hugs a block argument gets the same choice, for
+		// the same reason; beyond one call the hug belongs to an inner step rather
+		// than to the head, and collapsing the whole chain onto it reads wrong.
+		headHug := methodCalls == 1 && headHugsBlockArg(e) && !b.arrowHeadBreaksOnlyWhereWrapped(e)
+		if chainEndsInBlockHug(e) || headHug {
+			chosen := document.ConditionalGroup(chainConcat(headDoc, links), broken)
+			if call != nil && b.argsPrintBroken(call) {
+				return document.Concat(chosen, document.BreakParent())
+			}
+
+			return chosen
 		}
 
 		return linkGroup(broken)
 	}
 
-	if stmtLevel && methodCalls >= 2 && !slices.ContainsFunc(links, brokenBefore) && b.middleCallBreaks(headDoc, links) {
-		return chainConcat(headDoc, links)
-	}
-
-	// Only the last call may break. The head and the links before it were
-	// measured to fit, but left as groups the printer would break the first of
-	// them against the flat width of everything after it.
-	if stmtLevel && methodCalls >= 2 && !slices.ContainsFunc(links, brokenBefore) && b.lastCallBreaksAnyway(e, headDoc, links) {
-		return b.onlyLastCallBreaks(headDoc, links)
-	}
-
-	// A chain ending in a hugged closure (`Route::prefix(...)->group(fn ...)`)
-	// keeps every step on the opening line when that line fits, breaking only
-	// the closure body; the broken layout is the fallback. A plain Group cannot
-	// do this: the closure's forced break would always collapse it to broken. A
-	// single call on a head that hugs a block argument gets the same choice, for
-	// the same reason; beyond one call the hug belongs to an inner step rather
-	// than to the head, and collapsing the whole chain onto it reads wrong.
-	headHug := methodCalls == 1 && headHugsBlockArg(e) && !b.arrowHeadBreaksOnlyWhereWrapped(e)
-	if chainEndsInBlockHug(e) || headHug {
-		chosen := document.ConditionalGroup(chainConcat(headDoc, links), broken)
-		if call != nil && b.argsPrintBroken(call) {
-			return document.Concat(chosen, document.BreakParent())
+	if (headEnd >= 0 || isNewExpr(head)) && !stmtLevel && !chainEndsInBlockHug(e) {
+		if doc, ok := b.closerTail(head, headDoc, links, headEnd, structure, general); ok {
+			return doc
 		}
-
-		return chosen
 	}
 
-	return linkGroup(broken)
+	return general()
 }
 
 func (b *builder) headCallArgsBreak(headDoc *document.Doc, links []chainLink, i int, stmtLevel bool) bool {
@@ -339,14 +340,17 @@ func (b *builder) tailRidesCloser(headDoc *document.Doc, links []chainLink, head
 	return width <= b.cfg.PrintWidth
 }
 
-// closerTailGroup lets the printer decide, at the column only it knows,
-// whether the links after a head that breaks by force ride its closer or
-// ladder below it. A tail that rides fits flat, so nothing in it breaks. As
-// at statement level, only a break before the tail's first link is the
-// author's choice to ladder.
-func (b *builder) closerTailGroup(headDoc *document.Doc, links []chainLink, headEnd int, structure bool) (*document.Doc, bool) {
+// closerTail lets the printer decide, at the column only it knows, whether
+// the links after a head that breaks by force ride its closer. As at
+// statement level, only a break before the tail's first link is the author's
+// choice to ladder.
+//
+// After a hugged block the tail ladders below the closer when it cannot ride.
+// After any other closer the ladder moves the head's own call down too, so
+// the fallback is general, the layout the next pass builds from that ladder.
+func (b *builder) closerTail(head parser.Expr, headDoc *document.Doc, links []chainLink, headEnd int, structure bool, general func() *document.Doc) (*document.Doc, bool) {
 	last := runEnd(links, headEnd)
-	if last >= len(links)-1 || !links[last].blockHug || slices.ContainsFunc(links[:last+2], brokenBefore) {
+	if last >= len(links)-1 || slices.ContainsFunc(links[:last+2], brokenBefore) {
 		return nil, false
 	}
 
@@ -356,8 +360,42 @@ func (b *builder) closerTailGroup(headDoc *document.Doc, links []chainLink, head
 		}
 	}
 
-	if _, broke := b.closerLineWidth(headDoc, links[:last+1]); !broke {
+	_, broke := b.closerLineWidth(headDoc, links[:last+1])
+	if !broke {
 		return nil, false
+	}
+
+	// A multi-line string spans lines without forcing a break, so its head
+	// lays out as any other chain.
+	run := chainConcat(headDoc, links[:last+1])
+	if !document.HasForcedBreak(run) && !document.HidesForcedBreak(run) {
+		return nil, false
+	}
+
+	// A sole call rides while the line it opens fits and breaks inside its
+	// arguments, as it does once that break reads back as authored.
+	only := links[len(links)-1]
+	sole := last == len(links)-2 && only.call
+
+	blockClosed := newEndsInBlockHug(head)
+	if last >= 0 {
+		blockClosed = links[last].blockHug
+	}
+
+	if !blockClosed {
+		closed := document.Continued(run)
+		riding := chainConcat(closed, links[last+1:])
+
+		if sole {
+			opener, _ := document.BrokenPrefixWidth(only.doc, b.cfg.IndentWidth)
+			riding = document.Concat(closed, document.Opener(opener, only.doc))
+		}
+
+		choice := document.ConditionalGroup(riding, general())
+
+		// The head breaks in either variant, which the choice hides from the
+		// groups around it.
+		return document.Concat(choice, document.BreakParent()), true
 	}
 
 	parts := make([]*document.Doc, 0, last+3)
@@ -380,6 +418,14 @@ func (b *builder) closerTailGroup(headDoc *document.Doc, links []chainLink, head
 	group := document.Group(document.Indent(document.Concat(tail...)))
 	if structure {
 		group = document.FromStructure(group)
+	}
+
+	if sole {
+		opener, _ := document.BrokenPrefixWidth(only.doc, b.cfg.IndentWidth)
+		riding := document.Opener(opener, only.doc)
+		parts = append(parts, document.ConditionalGroup(riding, group))
+
+		return document.Concat(parts...), true
 	}
 
 	return document.Concat(append(parts, group)...), true
@@ -690,7 +736,7 @@ func (b *builder) qualifiesTrailingBreak(e parser.Expr, stmtLevel bool) bool {
 	}
 
 	huggable := len(call.Args) > 0 && b.huggableArg(call.Args[len(call.Args)-1])
-	if huggable && !b.hugLineOverflows(call, stmtLevel) && !b.arrayLinkFitsAlone(call, stmtLevel) {
+	if huggable && !b.hugLineOverflows(call, stmtLevel) && !b.arrayLinkFitsAlone(call, stmtLevel) && !b.arrowLinkFitsAlone(call, stmtLevel) {
 		return false
 	}
 
@@ -735,7 +781,7 @@ func (b *builder) qualifiesTrailingBreak(e parser.Expr, stmtLevel bool) bool {
 			tail += b.chainStmtTail
 		}
 
-		if (b.depth+1)*b.cfg.IndentWidth+b.linkOpenerWidth(mem, call)+tail > b.cfg.PrintWidth {
+		if (b.depth+1)*b.cfg.IndentWidth+b.linkOpenerWidth(mem, call)+linkLineTail(call, tail) > b.cfg.PrintWidth {
 			return false
 		}
 
@@ -846,6 +892,20 @@ func (b *builder) movedLinkHugsOrFits(mem *parser.MemberExpr, call *parser.CallE
 	return hugged || (b.depth+1)*b.cfg.IndentWidth+width+tail <= b.cfg.PrintWidth
 }
 
+// headLineLinks un-hugs the arrow of a statement's last call kept on the
+// head's line, which flattenChain measured to fit alone there.
+func headLineLinks(links []chainLink) []chainLink {
+	last := links[len(links)-1]
+	if last.unhugged == nil {
+		return links
+	}
+
+	unhugged := slices.Clone(links)
+	unhugged[len(links)-1].doc = last.unhugged
+
+	return unhugged
+}
+
 // onlyLastCallBreaks keeps the head and every link before the last one flat, so
 // the printer cannot break them against the width of what follows.
 func (b *builder) onlyLastCallBreaks(headDoc *document.Doc, links []chainLink) *document.Doc {
@@ -870,7 +930,7 @@ func (b *builder) lastCallBreaksAnyway(e parser.Expr, headDoc *document.Doc, lin
 		return false
 	}
 
-	if (b.depth+1)*b.cfg.IndentWidth+b.linkOpenerWidth(mem, call)+b.chainStmtTail <= b.cfg.PrintWidth {
+	if (b.depth+1)*b.cfg.IndentWidth+b.linkOpenerWidth(mem, call)+linkLineTail(call, b.chainStmtTail) <= b.cfg.PrintWidth {
 		return false
 	}
 
@@ -937,11 +997,21 @@ func (b *builder) linkOpenerWidth(mem *parser.MemberExpr, call *parser.CallExpr)
 
 		defer func() { b.noConcatBreaks = savedConcat }()
 
-		link := document.Concat(b.tok(mem.Arrow), b.expr(mem.Property), b.argList(call.Args, withTrailingComma))
+		link := document.Concat(b.tok(mem.Arrow), b.expr(mem.Property), b.argList(call.Args))
 		width, _ := document.FlatPrefixWidth(link, b.cfg.IndentWidth)
 
 		return width
 	})
+}
+
+// linkLineTail is what follows a moved-down link on its opening line: tail,
+// unless the link breaks inside its arguments first (a closure body).
+func linkLineTail(call *parser.CallExpr, tail int) int {
+	if len(call.Args) > 0 && argsEndInBlockHug(call.Args) && !isArrayArg(call.Args[len(call.Args)-1]) {
+		return 0
+	}
+
+	return tail
 }
 
 func (b *builder) keepsCallOnHead(call *parser.CallExpr, stmtLevel bool) bool {
@@ -1057,6 +1127,19 @@ func (b *builder) arrayLinkFitsAlone(call *parser.CallExpr, stmtLevel bool) bool
 		return false
 	}
 
+	return b.linkFitsAlone(mem, call)
+}
+
+func (b *builder) arrowLinkFitsAlone(call *parser.CallExpr, stmtLevel bool) bool {
+	mem, isMember := call.Callee.(*parser.MemberExpr)
+	if !stmtLevel || !isMember || !isArrowFnArg(call.Args[len(call.Args)-1]) {
+		return false
+	}
+
+	return b.linkFitsAlone(mem, call)
+}
+
+func (b *builder) linkFitsAlone(mem *parser.MemberExpr, call *parser.CallExpr) bool {
 	// argList consumes a pending noHugNext meant for the real build.
 	savedNoHug := b.noHugNext
 	b.noHugNext = false
@@ -1064,7 +1147,7 @@ func (b *builder) arrayLinkFitsAlone(call *parser.CallExpr, stmtLevel bool) bool
 	defer func() { b.noHugNext = savedNoHug }()
 
 	link := b.measureWidth(func() int {
-		doc := document.Concat(b.tok(mem.Arrow), b.expr(mem.Property), b.argList(call.Args, withTrailingComma))
+		doc := document.Concat(b.tok(mem.Arrow), b.expr(mem.Property), b.argList(call.Args))
 		if document.HasForcedBreak(doc) {
 			return b.cfg.PrintWidth
 		}
@@ -1081,9 +1164,7 @@ func (b *builder) arrayLinkFitsAlone(call *parser.CallExpr, stmtLevel bool) bool
 func (b *builder) unhuggingHelps(call *parser.CallExpr) bool {
 	last := call.Args[len(call.Args)-1]
 	if shortListClosure(last) != nil {
-		width := b.measureWidth(func() int { return b.hugOpenerWidth(last) })
-
-		return (b.depth+1)*b.cfg.IndentWidth+width <= b.cfg.PrintWidth
+		return b.closureFitsAlone(last)
 	}
 
 	if len(call.Args) > 1 {
@@ -1098,17 +1179,47 @@ func (b *builder) unhuggingHelps(call *parser.CallExpr) bool {
 		}
 	}
 
-	return (b.depth+1)*b.cfg.IndentWidth+width+len(",") <= b.cfg.PrintWidth
-}
+	if (b.depth+1)*b.cfg.IndentWidth+width+len(",") <= b.cfg.PrintWidth {
+		return true
+	}
 
-func hugsInsideOut(call *parser.CallExpr) bool {
-	if len(call.Args) == 0 {
+	// A call that breaks moved down too helps only where even its narrowest
+	// line overflows hugged: a level in, that line is narrower.
+	if !isCallLikeArg(call.Args[0]) {
 		return false
 	}
 
-	last := call.Args[len(call.Args)-1]
+	hugged, _ := b.hugLineWidth(call, true)
+	opener := b.measureWidth(func() int { return b.hugOpenerWidth(call.Args[0]) })
 
-	return isCallLikeArg(last) || isArrowFnArg(last) || len(call.Args) == 1 && shortListClosure(last) != nil
+	return hugged-opener+b.callOpenWidth(call.Args[0]) > b.cfg.PrintWidth
+}
+
+func (b *builder) callOpenWidth(arg parser.Expr) int {
+	switch v := arg.(type) {
+	case *parser.NamedArgExpr:
+		return len(v.Name.Text) + len(": ") + b.callOpenWidth(v.Value)
+	case *parser.CallExpr:
+		if width, broke := b.brokenCalleeOpener(v); broke {
+			return width
+		}
+
+		return b.measureWidth(func() int { return document.FlatWidth(b.expr(v.Callee), b.cfg.IndentWidth) }) + len("(")
+	case *parser.NewExpr:
+		return len("new ") + b.measureWidth(func() int { return document.FlatWidth(b.expr(v.Class), b.cfg.IndentWidth) }) + len("(")
+	}
+
+	return 0
+}
+
+func hugsInsideOut(args []parser.Expr) bool {
+	if len(args) == 0 {
+		return false
+	}
+
+	last := args[len(args)-1]
+
+	return isCallLikeArg(last) || isArrowFnArg(last) || len(args) == 1 && shortListClosure(last) != nil
 }
 
 const maxShortListUses = 2
@@ -1247,7 +1358,7 @@ func (b *builder) compactBlockChainFits(e parser.Expr, chain []chainLink) bool {
 			w := 0
 
 			for cur, i := outer, 0; i < len(links); i++ {
-				w += document.FlatWidth(document.Concat(b.tok(links[i].Arrow), b.expr(links[i].Property), b.argList(cur.Args, withTrailingComma)), b.cfg.IndentWidth)
+				w += document.FlatWidth(document.Concat(b.tok(links[i].Arrow), b.expr(links[i].Property), b.argList(cur.Args)), b.cfg.IndentWidth)
 				cur, _ = links[i].Object.(*parser.CallExpr)
 			}
 
@@ -1259,7 +1370,7 @@ func (b *builder) compactBlockChainFits(e parser.Expr, chain []chainLink) bool {
 		}
 	}
 
-	width, hugs := b.hugLineWidth(call)
+	width, hugs := b.hugLineWidth(call, false)
 	if !hugs || width > b.cfg.PrintWidth {
 		return false
 	}
@@ -1408,7 +1519,13 @@ func (b *builder) hugLineOverflows(call *parser.CallExpr, stmtLevel bool) bool {
 		return false
 	}
 
-	width, hugs := b.hugLineWidth(call)
+	width, hugs := b.hugLineWidth(call, false)
+
+	return hugs && width > b.cfg.PrintWidth
+}
+
+func (b *builder) hugLineOverflowsFromCloser(call *parser.CallExpr) bool {
+	width, hugs := b.hugLineWidth(call, true)
 
 	return hugs && width > b.cfg.PrintWidth
 }
@@ -1420,14 +1537,42 @@ func (b *builder) hugLineOverflows(call *parser.CallExpr, stmtLevel bool) bool {
 // opener, so without this the hug splits a body the un-hugged arrow would keep
 // on one line.
 func (b *builder) arrowFitsAlone(args []parser.Expr, lead, indent, tail int) bool {
+	leading, width, ok := b.lastArrowWidths(args)
+	if !ok {
+		return false
+	}
+
+	line := lead + len("(") + leading + width + len(")") + tail
+
+	return line > b.cfg.PrintWidth && indent+width+len(",") <= b.cfg.PrintWidth
+}
+
+// lastArrowFitsAlone is arrowFitsAlone where the column is unknown, as in an
+// arrow function's body: broken a level in, the arrow fits flat. The hugged
+// line's width does not matter, since a list that fits whole prints flat
+// hugged or not.
+func (b *builder) lastArrowFitsAlone(args []parser.Expr) bool {
+	_, width, ok := b.lastArrowWidths(args)
+
+	return ok && (b.depth+1)*b.cfg.IndentWidth+width+len(",") <= b.cfg.PrintWidth
+}
+
+func (b *builder) bodyArrowFitsAlone(call *parser.CallExpr) bool {
+	return b.staysOnStatementLine(call) && b.lastArrowFitsAlone(call.Args) && b.unhuggingHelps(call)
+}
+
+// lastArrowWidths measures a last arrow argument flat, and the leading
+// arguments with their separators. ok is false when the arrow is not one that
+// could move to a line of its own.
+func (b *builder) lastArrowWidths(args []parser.Expr) (int, int, bool) {
 	last := len(args) - 1
 	if last < 0 {
-		return false
+		return 0, 0, false
 	}
 
 	arrow, ok := args[last].(*parser.ArrowFnExpr)
 	if !ok {
-		return false
+		return 0, 0, false
 	}
 
 	// A body that is a block hugs it. A call opening one (`->create([`) hugs
@@ -1435,21 +1580,26 @@ func (b *builder) arrowFitsAlone(args []parser.Expr, lead, indent, tail int) boo
 	// sees; flat, the arrow fits alone like any other.
 	switch arrow.Body.(type) {
 	case *parser.ArrayExpr, *parser.MatchExpr:
-		return false
+		return 0, 0, false
 	}
 
-	fits := false
+	leading, width := 0, 0
+	ok = false
+
+	// The arguments' own lists would consume flags pending for the call's.
+	savedNoHug, savedLinkArgs, savedLead := b.noHugNext, b.linkArgsNext, b.hugLeadNext
+	b.noHugNext, b.linkArgsNext, b.hugLeadNext = false, false, 0
+
+	defer func() { b.noHugNext, b.linkArgsNext, b.hugLeadNext = savedNoHug, savedLinkArgs, savedLead }()
 
 	b.measureWidth(func() int {
-		line := lead + len("(")
-
 		for _, a := range args[:last] {
 			d := b.expr(a)
 			if document.CanBreak(d) {
 				return 0
 			}
 
-			line += document.FlatWidth(d, b.cfg.IndentWidth) + len(", ")
+			leading += document.FlatWidth(d, b.cfg.IndentWidth) + len(", ")
 		}
 
 		// An arrow holding a break of its own (an author-broken list, a block
@@ -1459,13 +1609,65 @@ func (b *builder) arrowFitsAlone(args []parser.Expr, lead, indent, tail int) boo
 			return 0
 		}
 
-		width := document.FlatWidth(doc, b.cfg.IndentWidth)
-		fits = line+width+len(")")+tail > b.cfg.PrintWidth && indent+width+len(",") <= b.cfg.PrintWidth
+		width = document.FlatWidth(doc, b.cfg.IndentWidth)
+		ok = true
 
 		return 0
 	})
 
-	return fits
+	return leading, width, ok
+}
+
+// headLinkArrowFitsAlone reports whether a statement's first call, which
+// stays on its head's line when neither that line nor the ladder holds it
+// flat (headCallArgsBreak), un-hugs a last arrow that fits alone there. Its
+// arguments are otherwise built for the ladder's column.
+func (b *builder) headLinkArrowFitsAlone(link *parser.MemberExpr, arrow, property *document.Doc, args []parser.Expr) bool {
+	if !reachesNoCall(link.Object) {
+		return false
+	}
+
+	leading, width, ok := b.lastArrowWidths(args)
+	if !ok {
+		return false
+	}
+
+	tab := b.cfg.IndentWidth
+	list := len("(") + leading + width + len(")")
+	indent := (b.depth + 1) * tab
+
+	onHead := b.headLineLead(link, arrow, property) + list
+	movedDown := indent + document.FlatWidth(arrow, tab) + document.FlatWidth(property, tab) + list
+
+	return onHead > b.cfg.PrintWidth && movedDown > b.cfg.PrintWidth && indent+width+len(",") <= b.cfg.PrintWidth
+}
+
+func (b *builder) headLineLead(link *parser.MemberExpr, arrow, property *document.Doc) int {
+	tab := b.cfg.IndentWidth
+
+	savedNoHug, savedLinkArgs, savedLead := b.noHugNext, b.linkArgsNext, b.hugLeadNext
+	b.noHugNext, b.linkArgsNext, b.hugLeadNext = false, false, 0
+
+	head := b.measureWidth(func() int { return document.FlatWidth(b.expr(link.Object), tab) })
+
+	b.noHugNext, b.linkArgsNext, b.hugLeadNext = savedNoHug, savedLinkArgs, savedLead
+
+	return b.depth*tab + b.chainStmtLead + head + document.FlatWidth(arrow, tab) + document.FlatWidth(property, tab)
+}
+
+func reachesNoCall(e parser.Expr) bool {
+	for {
+		switch n := e.(type) {
+		case *parser.MemberExpr:
+			e = n.Object
+		case *parser.SubscriptExpr:
+			e = n.Array
+		case *parser.VariableExpr:
+			return true
+		default:
+			return false
+		}
+	}
 }
 
 func (b *builder) stmtArrowFitsAlone(call *parser.CallExpr) bool {
@@ -1483,22 +1685,33 @@ func (b *builder) stmtArrowFitsAlone(call *parser.CallExpr) bool {
 // the statement's lead through the argument's opener, and whether the list
 // hugs at all: a huggable last argument behind leading ones that cannot break,
 // on a callee that stays on one line.
-func (b *builder) hugLineWidth(call *parser.CallExpr) (int, bool) {
+//
+// fromCloser measures a callee kept broken (`collect(` … `)->map(`) from its
+// closing line. Only the un-hug decision may ask for it: its output reads
+// back as authored, so it holds, where a moved link would flip next pass.
+func (b *builder) hugLineWidth(call *parser.CallExpr, fromCloser bool) (int, bool) {
 	if len(call.Args) == 0 || !b.huggableArg(call.Args[len(call.Args)-1]) && !isArrowFnArg(call.Args[len(call.Args)-1]) {
 		return 0, false
 	}
 
 	last := len(call.Args) - 1
 	hugs := true
+	lead := b.chainStmtLead
 
 	// argList hugs only past leading arguments that cannot break, so a list
 	// with a breakable one never opens that line.
 	width := b.measureWidth(func() int {
 		// A callee that renders multi-line (`it(…, function () {…})->with`) puts
 		// the hug after its own closer, at a column no flat width tells.
-		w := document.FlatWidth(b.expr(call.Callee), b.cfg.IndentWidth)
+		callee := b.expr(call.Callee)
+
+		w := document.FlatWidth(callee, b.cfg.IndentWidth)
 		if w >= document.ForcedBreakWidth {
 			hugs = false
+		} else if fromCloser && document.HasForcedBreak(callee) {
+			if closing, broke := document.ClosingLineWidth(callee, b.cfg.IndentWidth); broke {
+				w, lead = closing, 0
+			}
 		}
 
 		w += len("(")
@@ -1519,7 +1732,7 @@ func (b *builder) hugLineWidth(call *parser.CallExpr) (int, bool) {
 		return w + b.hugOpenerWidth(call.Args[last])
 	})
 
-	return b.depth*b.cfg.IndentWidth + b.chainStmtLead + width, hugs
+	return b.depth*b.cfg.IndentWidth + lead + width, hugs
 }
 
 func (b *builder) hugOpenerWidth(arg parser.Expr) int {
@@ -1539,13 +1752,19 @@ func (b *builder) hugOpenerWidth(arg parser.Expr) int {
 
 		// argList keeps an author-broken list broken and never hugs into it. Only
 		// the body's own list counts: a nested one the printer broke on width
-		// would read back as authored on the next pass.
-		if call, ok := v.Body.(*parser.CallExpr); ok && len(call.Args) > 0 && b.authorBroke(call.Args[0].Span().Start.Offset) {
+		// would read back as authored on the next pass. A last arrow that fits
+		// alone a level in un-hugs too, as arrowFn builds it.
+		if call, ok := v.Body.(*parser.CallExpr); ok && len(call.Args) > 0 &&
+			(b.authorBroke(call.Args[0].Span().Start.Offset) || b.bodyArrowFitsAlone(call)) {
 			return prefix + document.FlatWidth(b.expr(call.Callee), tab) + len("(")
 		}
 
 		return prefix + b.hugOpenerWidth(v.Body)
 	case *parser.CallExpr:
+		if width, broke := b.brokenCalleeOpener(v); broke {
+			return width
+		}
+
 		if len(v.Args) > 0 {
 			return b.callOpenerWidth(document.FlatWidth(b.expr(v.Callee), tab), v.Args)
 		}
@@ -1558,6 +1777,29 @@ func (b *builder) hugOpenerWidth(arg parser.Expr) int {
 	width, _ := document.FlatPrefixWidth(b.expr(arg), tab)
 
 	return width
+}
+
+// brokenCalleeOpener is the width of the line a call's callee opens when an
+// author break inside it (`Foo::make([` … `])->m(`) ends that line first.
+func (b *builder) brokenCalleeOpener(call *parser.CallExpr) (int, bool) {
+	if memberCalls(call) > 1 {
+		return 0, false
+	}
+
+	span := call.Callee.Span()
+	if !bytes.ContainsAny(b.src[span.Start.Offset:span.End.Offset], "\r\n") {
+		return 0, false
+	}
+
+	broke := false
+	width := b.measureWidth(func() int {
+		w, ok := document.OpeningLineWidth(b.expr(call.Callee), b.cfg.IndentWidth)
+		broke = ok
+
+		return w
+	})
+
+	return width, broke
 }
 
 // callOpenerWidth follows argList's choice for a call's arguments: the line
@@ -1605,6 +1847,69 @@ func (b *builder) callOpenerWidth(callee int, args []parser.Expr) int {
 	}
 
 	return open
+}
+
+// headCloserWidth is the width of the closing line (`)`, `])`) a broken head
+// call ends on, and whether a sole link rides it; more links ladder.
+//
+// Both passes have to measure alike. A head too wide for its line is predicted
+// at the widest line it can close on, never narrower than the next pass reads
+// back. A head that fits was broken by choice and measured as a ladder before,
+// so its closer counts only up to one indent, and only in a statement's own
+// chain, where the printer settles the hug.
+func (b *builder) headCloserWidth(link *parser.MemberExpr) (int, bool) {
+	head, ok := link.Object.(*parser.CallExpr)
+	if !ok || memberCalls(head) != 0 || len(head.Args) == 0 {
+		return 0, false
+	}
+
+	lead := b.depth * b.cfg.IndentWidth
+	if b.stmtChain {
+		lead += b.chainStmtLead
+	}
+
+	// Counted from the source, so it reads the same however the head is broken.
+	span := head.Span()
+	flat := b.flatSourceWidth(span.Start.Offset, span.End.Offset) + len(head.Args) - 1
+	overflows := lead+flat > b.cfg.PrintWidth
+
+	if !overflows && !bytes.ContainsAny(b.src[span.Start.Offset:span.End.Offset], "\r\n") {
+		return 0, false
+	}
+
+	savedNoHug, savedLinkArgs, savedLead := b.noHugNext, b.linkArgsNext, b.hugLeadNext
+	b.noHugNext, b.linkArgsNext, b.hugLeadNext = false, false, 0
+
+	width, rides := 0, false
+
+	b.measureWidth(func() int {
+		doc := b.expr(head)
+
+		if document.HasForcedBreak(doc) {
+			closing, broke := document.ClosingLineWidth(doc, b.cfg.IndentWidth)
+			width, rides = closing, broke && (overflows || b.stmtChain && closing <= b.cfg.IndentWidth)
+
+			return 0
+		}
+
+		if !overflows {
+			return 0
+		}
+
+		// A break the printer picks among variants cannot be predicted, so the
+		// link measures as wide as it can: un-hugged, it reads back the same.
+		width, rides = b.cfg.PrintWidth, true
+
+		if closing, known := document.FirstBreakClosingWidth(doc, b.cfg.IndentWidth); known {
+			width = closing
+		}
+
+		return 0
+	})
+
+	b.noHugNext, b.linkArgsNext, b.hugLeadNext = savedNoHug, savedLinkArgs, savedLead
+
+	return width, rides
 }
 
 func chainHeadCall(e parser.Expr) *parser.CallExpr {
@@ -1782,6 +2087,159 @@ func (b *builder) linkArgList(method string, args []parser.Expr) (*document.Doc,
 	return b.argListHug(args, withTrailingComma)
 }
 
+// A callee that prints broken (`(new X([` … `]))->through`) puts the `(`
+// after its closing line, not after its flat width.
+func (b *builder) calleeLead(callee parser.Expr, prefix int) int {
+	span := callee.Span()
+	lead := b.depth*b.cfg.IndentWidth + prefix + b.flatSourceWidth(span.Start.Offset, span.End.Offset)
+
+	if !bytes.ContainsAny(b.src[span.Start.Offset:span.End.Offset], "\r\n") {
+		return lead
+	}
+
+	savedNoHug, savedLinkArgs, savedLead := b.noHugNext, b.linkArgsNext, b.hugLeadNext
+	b.noHugNext, b.linkArgsNext, b.hugLeadNext = false, false, 0
+
+	b.measureWidth(func() int {
+		doc := b.expr(callee)
+		if !document.HasForcedBreak(doc) {
+			return 0
+		}
+
+		if closing, broke := document.ClosingLineWidth(doc, b.cfg.IndentWidth); broke {
+			lead = b.depth*b.cfg.IndentWidth + closing
+		}
+
+		return 0
+	})
+
+	b.noHugNext, b.linkArgsNext, b.hugLeadNext = savedNoHug, savedLinkArgs, savedLead
+
+	return lead
+}
+
+// nestedLineSlack is how much of its line a nested call is assumed to share
+// with what opens it (`if (`, `'key' => `, `$result = outer(`). A hug that
+// fits with that much to spare is built once; a closer one is the printer's.
+const nestedLineSlack = 40
+
+// headLineArgs builds the arguments of a call that stays on its head's line.
+// A statement's own call knows that line's lead. A nested one knows only its
+// callee, so it hugs as if the line began there and leaves the hug to the
+// printer where the line could still overflow: the fallback list reads back
+// as authored, so the choice holds.
+func (b *builder) headLineArgs(call *parser.CallExpr, build func() (*document.Doc, bool)) (*document.Doc, bool) {
+	if b.stmtChain {
+		b.hugLeadNext = b.calleeLead(call.Callee, b.chainStmtLead)
+
+		return build()
+	}
+
+	// An arrow function's body is measured by the hug around the arrow, which
+	// has to see it as one build, so it gets the lead and no second variant.
+	if b.arrowBodyChain {
+		b.hugLeadNext = b.calleeLead(call.Callee, b.arrowBodyLead)
+
+		return build()
+	}
+
+	return b.nestedArgs(call.Args, b.calleeLead(call.Callee, 0), build)
+}
+
+func (b *builder) nestedArgs(args []parser.Expr, lead int, build func() (*document.Doc, bool)) (*document.Doc, bool) {
+	b.hugLeadNext = lead
+	mark := b.markComments()
+
+	hugged, ok := build()
+	if !ok || !hugsInsideOut(args) && !isArrayArg(args[len(args)-1]) {
+		return hugged, ok
+	}
+
+	last := args[len(args)-1]
+
+	opener, _ := document.BrokenPrefixWidth(hugged, b.cfg.IndentWidth)
+	if lead+nestedLineSlack+opener <= b.cfg.PrintWidth {
+		return hugged, ok
+	}
+
+	// A closure too wide for a line of its own gains nothing un-hugged.
+	if shortListClosure(last) != nil && !b.closureFitsAlone(last) {
+		return hugged, ok
+	}
+
+	b.releaseComments(mark)
+	b.noHugNext = true
+	unhugged, _ := build()
+
+	return document.ConditionalGroup(document.Opener(opener, hugged), unhugged), ok
+}
+
+func (b *builder) closureFitsAlone(closure parser.Expr) bool {
+	width := b.measureWidth(func() int { return b.hugOpenerWidth(closure) })
+
+	return (b.depth+1)*b.cfg.IndentWidth+width <= b.cfg.PrintWidth
+}
+
+// hugWhileItsLineFits leaves a sole link's hug on a head call to the printer:
+// the link lands on the head's line, its closer or a level down, which only
+// the printer knows. The fallback list reads back as authored, so the choice
+// holds. A closure, array or match keeps its hug past the width, and a link
+// that fits wherever the head ends needs no second build.
+func (b *builder) hugWhileItsLineFits(call *parser.CallExpr, method string, hugged *document.Doc, mark commentMark, linkArgs bool) *document.Doc {
+	link, ok := call.Callee.(*parser.MemberExpr)
+	if !ok || !hugsInsideOut(call.Args) {
+		return hugged
+	}
+
+	head, ok := link.Object.(*parser.CallExpr)
+	if !ok || memberCalls(head) != 0 {
+		return hugged
+	}
+
+	opener, _ := document.BrokenPrefixWidth(hugged, b.cfg.IndentWidth)
+	callee := call.Callee.Span()
+	byOffset := func(t parser.Token, offset int) int { return t.Span.Start.Offset - offset }
+	first, _ := slices.BinarySearchFunc(b.tokens, callee.Start.Offset, byOffset)
+	end, _ := slices.BinarySearchFunc(b.tokens, callee.End.Offset, byOffset)
+
+	// An upper bound whatever spaces the source has: each token prints with at
+	// most one space after it.
+	widest := b.depth*b.cfg.IndentWidth + b.flatSourceWidth(callee.Start.Offset, callee.End.Offset) + end - first
+	if b.stmtChain {
+		widest += b.chainStmtLead
+	}
+
+	if widest+opener <= b.cfg.PrintWidth {
+		return hugged
+	}
+
+	choice, _ := b.hugWhileItFits(call, method, hugged, mark, linkArgs)
+
+	return choice
+}
+
+// hugWhileItFits offers a link's hug while its opener fits where the printer
+// puts it, and its list broken after `(` otherwise. The next pass reads that
+// break as authored, so the choice holds.
+func (b *builder) hugWhileItFits(call *parser.CallExpr, method string, hugged *document.Doc, mark commentMark, linkArgs bool) (*document.Doc, *document.Doc) {
+	opener, _ := document.BrokenPrefixWidth(hugged, b.cfg.IndentWidth)
+
+	b.releaseComments(mark)
+
+	b.noHugNext, b.linkArgsNext = true, linkArgs
+	unhugged, _ := b.linkArgList(method, call.Args)
+
+	return document.ConditionalGroup(document.Opener(opener, hugged), unhugged), unhugged
+}
+
+func linkWith(arrow, property, args *document.Doc) *document.Doc {
+	if args == nil {
+		return nil
+	}
+
+	return document.Concat(arrow, property, args)
+}
+
 // flattenChain peels postfix operations off e, returning the head expression and
 // the links in head-to-outermost order.
 func (b *builder) flattenChain(e parser.Expr) (parser.Expr, []chainLink) {
@@ -1789,6 +2247,7 @@ func (b *builder) flattenChain(e parser.Expr) (parser.Expr, []chainLink) {
 
 	// A link's arguments sit a level in from its head only on a ladder.
 	ladders := !callStaysOnHead(e)
+	soleLink := memberCalls(e) == 1
 
 	for {
 		switch n := e.(type) {
@@ -1802,18 +2261,72 @@ func (b *builder) flattenChain(e parser.Expr) (parser.Expr, []chainLink) {
 
 				arrow := b.tok(c.Arrow)
 				property := b.expr(c.Property)
-				// A laddered link sits one level in at the least, so a hug that
-				// overflows there overflows wherever the link prints.
-				if ladders && b.arrowFitsAlone(n.Args, (b.depth+1)*b.cfg.IndentWidth+len("->")+len(method), (b.depth+2)*b.cfg.IndentWidth, 0) {
+				level := b.depth + 1
+				lead := level * b.cfg.IndentWidth
+
+				rides := false
+
+				if soleLink {
+					var closer int
+
+					if closer, rides = b.headCloserWidth(c); rides {
+						level = b.depth
+						lead = level*b.cfg.IndentWidth + closer
+					}
+				}
+
+				tail := 0
+				if b.stmtChain && len(links) == 0 {
+					tail = b.chainStmtTail
+				}
+
+				if ladders && b.arrowFitsAlone(n.Args, lead+len("->")+len(method), (level+1)*b.cfg.IndentWidth, tail) {
 					b.noHugNext = true
 				}
 
-				if ladders {
-					b.hugLeadNext = (b.depth+1)*b.cfg.IndentWidth + len("->") + document.FlatWidth(property, b.cfg.IndentWidth)
+				if ladders && b.stmtChain && len(links) > 0 && b.headLinkArrowFitsAlone(c, arrow, property, n.Args) {
+					b.noHugNext = true
 				}
 
-				b.linkArgsNext = ladders
-				args, argsHugged := b.linkArgList(method, n.Args)
+				linkArgs := ladders && !rides
+
+				var (
+					args       *document.Doc
+					argsHugged bool
+					unhugged   *document.Doc
+				)
+
+				if ladders {
+					b.hugLeadNext = lead + len("->") + document.FlatWidth(property, b.cfg.IndentWidth)
+					b.linkArgsNext = linkArgs
+					mark := b.markComments()
+					args, argsHugged = b.linkArgList(method, n.Args)
+
+					switch {
+					case soleLink && argsHugged:
+						args = b.hugWhileItsLineFits(n, method, args, mark, linkArgs)
+					case b.stmtChain && len(links) == 0 && argsHugged && (isArrowFnArg(n.Args[len(n.Args)-1]) || len(n.Args) == 1 && shortListClosure(n.Args[0]) != nil):
+						// A statement's last call may stay on the head's line
+						// (onlyLastCallBreaks), a level further out than the
+						// ladder. There its arrow un-hugs where it fits alone,
+						// and a hug whose line overflows gives way.
+						lead := b.headLineLead(c, arrow, property)
+						opener, _ := document.BrokenPrefixWidth(args, b.cfg.IndentWidth)
+						fitsAlone := isArrowFnArg(n.Args[len(n.Args)-1]) && b.arrowFitsAlone(n.Args, lead, (b.depth+1)*b.cfg.IndentWidth, b.chainStmtTail)
+
+						if fitsAlone || lead+opener > b.cfg.PrintWidth {
+							args, unhugged = b.hugWhileItFits(n, method, args, mark, linkArgs)
+						}
+
+						if !fitsAlone {
+							unhugged = nil
+						}
+					}
+				} else {
+					args, argsHugged = b.headLineArgs(n, func() (*document.Doc, bool) {
+						return b.linkArgList(method, n.Args)
+					})
+				}
 
 				links = append(links, chainLink{
 					doc:         document.Concat(arrow, property, args),
@@ -1826,12 +2339,28 @@ func (b *builder) flattenChain(e parser.Expr) (parser.Expr, []chainLink) {
 					args:        args,
 					argsHugged:  argsHugged,
 					hugCloses:   argsHugged && arrowReturnsPlainCall(n.Args),
+					unhugged:    linkWith(arrow, property, unhugged),
 				})
 				e = c.Object
 			case *parser.StaticMemberExpr:
+				scopeRes := b.tok(c.ScopeRes)
+				name := b.expr(c.Name)
+
+				// Built after the name: a call inside a dynamic name would take the lead.
+				var args *document.Doc
+
+				if _, named := c.Class.(*parser.IdentExpr); named {
+					args, _ = b.headLineArgs(n, func() (*document.Doc, bool) {
+						return b.argListHug(n.Args, withTrailingComma)
+					})
+				} else {
+					args = b.argList(n.Args)
+				}
+
 				links = append(links, chainLink{
-					doc:         document.Concat(b.tok(c.ScopeRes), b.expr(c.Name), b.argList(n.Args, withTrailingComma)),
+					doc:         document.Concat(scopeRes, name, args),
 					call:        true,
+					blockHug:    argsEndInBlockHug(n.Args),
 					access:      true,
 					brokeBefore: b.newlineBefore(c.ScopeRes.Span.Start.Offset),
 				})
@@ -1842,11 +2371,14 @@ func (b *builder) flattenChain(e parser.Expr) (parser.Expr, []chainLink) {
 					trailing = withoutTrailingComma
 				}
 
-				if b.stmtChain {
-					b.hugLeadNext = b.depth*b.cfg.IndentWidth + b.chainStmtLead + b.flatSourceWidth(n.Callee.Span().Start.Offset, n.Callee.Span().End.Offset)
-				}
+				args, _ := b.headLineArgs(n, func() (*document.Doc, bool) { return b.argListHug(n.Args, trailing) })
 
-				links = append(links, chainLink{doc: b.argList(n.Args, trailing), call: true, noArgs: len(n.Args) == 0})
+				links = append(links, chainLink{
+					doc:      args,
+					call:     true,
+					blockHug: argsEndInBlockHug(n.Args),
+					noArgs:   len(n.Args) == 0,
+				})
 				e = n.Callee
 			}
 		case *parser.MemberExpr:
@@ -2112,4 +2644,10 @@ func (b *builder) middleCallBreaks(headDoc *document.Doc, links []chainLink) boo
 
 func isCallLink(l chainLink) bool {
 	return l.call
+}
+
+func newEndsInBlockHug(head parser.Expr) bool {
+	n, ok := head.(*parser.NewExpr)
+
+	return ok && argsEndInBlockHug(n.Args)
 }

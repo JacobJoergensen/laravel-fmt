@@ -1030,6 +1030,25 @@ func mustFormat(t *testing.T, src []byte, cfg *config.File) []byte {
 	return out
 }
 
+// assertLayoutAtLength formats src against want, with %s in both replaced by
+// a method name of the given length, and checks a second pass changes nothing.
+func assertLayoutAtLength(t *testing.T, src, want string, length int) {
+	t.Helper()
+
+	method := "m" + strings.Repeat("a", length-1)
+	in := "<?php\n\n" + fmt.Sprintf(src, method) + "\n"
+	want = "<?php\n\n" + fmt.Sprintf(want, method) + "\n"
+
+	got := mustFormat(t, []byte(in), config.Default())
+	if string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
 func TestMixedInlineHTMLNormalizesLineEndings(t *testing.T) {
 	src := []byte("<div>\r\n    <?php echo htmlspecialchars($content) ?>\r\n</div>\r\n")
 

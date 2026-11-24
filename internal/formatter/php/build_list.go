@@ -12,8 +12,8 @@ import (
 // hugs: the leading args stay on the open-paren line and the last carries the
 // break. Otherwise the list is flat, or one argument per indented line with a
 // trailing comma.
-func (b *builder) argList(args []parser.Expr, trailing trailingComma) *document.Doc {
-	doc, _ := b.argListHug(args, trailing)
+func (b *builder) argList(args []parser.Expr) *document.Doc {
+	doc, _ := b.argListHug(args, withTrailingComma)
 
 	return doc
 }
@@ -30,8 +30,8 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 		return document.Text("()"), false
 	}
 
-	// A comment before the `)` needs the broken list's slot after the last
-	// argument; a hug ends on that argument's own closer and has none.
+	// A comment before the `)` needs a slot after the last argument, which the
+	// first- and last-argument hugs lack.
 	rparen := b.argsCloser(args)
 	if commentTrivia(b.leadingAt(rparen.Span.Start.Offset)) > 0 && rparen.Kind == parser.KindRParen {
 		noHug = true
@@ -116,6 +116,18 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 		lastOpenerWidth := 0
 		if call, ok := args[last].(*parser.CallExpr); ok {
 			lastOpenerWidth = b.flatSourceWidth(call.Callee.Span().Start.Offset, call.LParen.Span.End.Offset)
+
+			if width, broke := b.brokenCalleeOpener(call); broke {
+				lastOpenerWidth = width
+			}
+		}
+
+		if n, ok := args[last].(*parser.NewExpr); ok && has(n.LParen) {
+			lastOpenerWidth = len("new ") + b.flatSourceWidth(n.Class.Span().Start.Offset, n.LParen.Span.End.Offset)
+		}
+
+		if isArrayArg(args[last]) {
+			lastOpenerWidth = b.hugOpenerWidth(args[last])
 		}
 
 		if endsInBodiedClosure(args[last]) {
@@ -278,9 +290,43 @@ func (b *builder) argListHug(args []parser.Expr, trailing trailingComma) (*docum
 		b.depth--
 	}
 
-	comment, breaks := b.trailingParenComment(rparen)
+	// A ConditionalGroup that breaks in every variant hides the break from the
+	// list's group, which prints flat yet still indents the broken lines. One
+	// such argument hugs as a first or last argument does
+	// (`switchTeam($user->ownedTeams()->create([`). Two would stack
+	// (`]), $b->y([`), and a middle one hugs nowhere else, so the list breaks,
+	// as an all-named list always does.
+	hiding := hidingForcedBreaks(docs)
+	middle := len(hiding) == 1 && hiding[0] != 0 && hiding[0] != last
+	stacks := len(hiding) > 1 || middle || allNamed && len(hiding) == 1
 
-	return delimitedListComment("(", docs, trailing, 0, comment, authorBroken || breaks), false
+	comment, breaks := b.trailingParenComment(rparen)
+	list := delimitedListComment("(", docs, trailing, 0, comment, authorBroken || breaks || stacks)
+
+	if len(hiding) == 1 && !document.HasForcedBreak(list) {
+		joined := document.Join(document.Text(", "), docs)
+		if comment != nil {
+			joined = document.Concat(joined, comment)
+		}
+
+		hugged := document.Concat(document.Text("("), joined, document.Text(")"))
+
+		return document.ConditionalGroup(hugged, list), false
+	}
+
+	return list, false
+}
+
+func hidingForcedBreaks(docs []*document.Doc) []int {
+	var hiding []int
+
+	for i, d := range docs {
+		if document.HidesForcedBreak(d) {
+			hiding = append(hiding, i)
+		}
+	}
+
+	return hiding
 }
 
 func (b *builder) holdsBlock(e parser.Expr) bool {
@@ -500,7 +546,9 @@ func (b *builder) trailingArgsHug(lead parser.Expr, trailing []parser.Expr) bool
 	width := b.depth*b.cfg.IndentWidth + hugCloserWidth(lead) + len(");")
 
 	for _, a := range trailing {
-		if b.huggableArg(a) {
+		// A trailing argument prints as one line of text, which a line comment
+		// inside it rules out without forcing a break the width could see.
+		if b.huggableArg(a) || b.spanHasLineComment(a.Span()) {
 			return false
 		}
 
@@ -1301,7 +1349,7 @@ func (b *builder) breaksAfterArrow(e parser.Expr, key, value *document.Doc) bool
 		return false
 	}
 
-	if binary && indent+b.cfg.IndentWidth+width <= b.cfg.PrintWidth {
+	if binary && !document.HasForcedBreak(value) && indent+b.cfg.IndentWidth+width <= b.cfg.PrintWidth {
 		return true
 	}
 

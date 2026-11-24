@@ -27,6 +27,7 @@ const (
 	kindAlignGap
 	kindCondGroup
 	kindOpener
+	kindContinued
 	kindFromStructure
 )
 
@@ -210,6 +211,10 @@ func Opener(width int, doc *Doc) *Doc {
 	return &Doc{kind: kindOpener, parts: []*Doc{doc}, groupID: int32(width)}
 }
 
+// Continued prints doc unchanged; a fit test measures its opening line, then
+// goes on from its closing line, so what follows doc on that line counts.
+func Continued(doc *Doc) *Doc { return &Doc{kind: kindContinued, parts: []*Doc{doc}} }
+
 // FromStructure prints doc unchanged, except that its first group opening on
 // the current line indents from its depth, as Pint's method_chaining_indentation
 // indents a chain riding a `->` line.
@@ -263,7 +268,7 @@ func HidesForcedBreak(d *Doc) bool {
 		}
 
 		return true
-	case kindConcat, kindGroup, kindIndent, kindLinePrefix, kindOpener, kindFromStructure:
+	case kindConcat, kindGroup, kindIndent, kindLinePrefix, kindOpener, kindContinued, kindFromStructure:
 		return slices.ContainsFunc(d.parts, HidesForcedBreak)
 	case kindText, kindLine, kindSoftLine, kindHardLine, kindLineSuffix, kindBreakParent,
 		kindIfBreak, kindHeredoc, kindVerbatim, kindAlignGap:
@@ -282,7 +287,7 @@ func CanBreak(d *Doc) bool {
 		return false
 	case kindConcat, kindGroup, kindIndent, kindLineSuffix, kindIfBreak, kindLinePrefix, kindFromStructure:
 		return slices.ContainsFunc(d.parts, CanBreak)
-	case kindCondGroup, kindOpener:
+	case kindCondGroup, kindOpener, kindContinued:
 		return CanBreak(d.parts[0])
 	}
 
@@ -311,7 +316,7 @@ func FlatWidth(d *Doc, tabWidth int) int {
 		return 0
 	case kindHardLine, kindHeredoc, kindVerbatim:
 		return ForcedBreakWidth
-	case kindGroup, kindIndent, kindLinePrefix, kindCondGroup, kindOpener, kindFromStructure:
+	case kindGroup, kindIndent, kindLinePrefix, kindCondGroup, kindOpener, kindContinued, kindFromStructure:
 		return FlatWidth(d.parts[0], tabWidth)
 	case kindIfBreak:
 		return FlatWidth(d.parts[1], tabWidth)
@@ -355,7 +360,7 @@ func BrokenPrefixWidth(d *Doc, tabWidth int) (int, bool) {
 		return 0, false
 	case kindLine, kindSoftLine, kindHardLine, kindHeredoc, kindVerbatim:
 		return 0, true
-	case kindGroup, kindIndent, kindLinePrefix, kindOpener, kindIfBreak, kindFromStructure:
+	case kindGroup, kindIndent, kindLinePrefix, kindOpener, kindContinued, kindIfBreak, kindFromStructure:
 		return BrokenPrefixWidth(d.parts[0], tabWidth)
 	case kindCondGroup:
 		narrowest, broken := BrokenPrefixWidth(d.parts[0], tabWidth)
@@ -389,6 +394,45 @@ func BrokenPrefixWidth(d *Doc, tabWidth int) (int, bool) {
 // HasForcedBreak first.
 func ClosingLineWidth(d *Doc, tabWidth int) (int, bool) {
 	return suffixWidth(d, tabWidth, false)
+}
+
+// FirstBreakClosingWidth is d's last line when only its first breakable group
+// breaks; false when that group is a ConditionalGroup or nothing in d can break.
+func FirstBreakClosingWidth(d *Doc, tabWidth int) (int, bool) {
+	switch d.kind {
+	case kindGroup:
+		if w, hard := suffixWidth(d.parts[0], tabWidth, true); hard {
+			return w, true
+		}
+
+		return FirstBreakClosingWidth(d.parts[0], tabWidth)
+	case kindIndent, kindLinePrefix, kindOpener, kindContinued, kindFromStructure:
+		return FirstBreakClosingWidth(d.parts[0], tabWidth)
+	case kindConcat:
+		for i, c := range d.parts {
+			if !CanBreak(c) {
+				continue
+			}
+
+			w, ok := FirstBreakClosingWidth(c, tabWidth)
+			if !ok {
+				return 0, false
+			}
+
+			for _, rest := range d.parts[i+1:] {
+				w += FlatWidth(rest, tabWidth)
+				if w >= ForcedBreakWidth {
+					return 0, false
+				}
+			}
+
+			return w, true
+		}
+
+		return 0, false
+	default:
+		return 0, false
+	}
 }
 
 func suffixWidth(d *Doc, tabWidth int, broken bool) (int, bool) {
@@ -428,7 +472,7 @@ func suffixWidth(d *Doc, tabWidth int, broken bool) (int, bool) {
 		return 0, true
 	case kindGroup:
 		return suffixWidth(d.parts[0], tabWidth, d.mustWrap)
-	case kindOpener:
+	case kindOpener, kindContinued:
 		return suffixWidth(d.parts[0], tabWidth, broken)
 	case kindCondGroup:
 		return suffixWidth(d.parts[0], tabWidth, false)
@@ -479,7 +523,7 @@ func prefixWidth(d *Doc, tabWidth int, broken, wrap bool) (int, bool) {
 		return 0, true
 	case kindGroup:
 		return prefixWidth(d.parts[0], tabWidth, wrap && d.mustWrap, wrap)
-	case kindOpener:
+	case kindOpener, kindContinued:
 		return prefixWidth(d.parts[0], tabWidth, broken, wrap)
 	case kindCondGroup:
 		return prefixWidth(d.parts[0], tabWidth, false, wrap)

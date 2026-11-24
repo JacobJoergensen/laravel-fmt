@@ -26,7 +26,7 @@ func TestAnonymousClassArgumentsStayOnOneLineWhenPintJoinsThem(t *testing.T) {
 			"a closure inside a chain argument keeps its indent",
 			true,
 			"<?php\n\nfunction g()\n{\n    return new class($q->where(1)->each(function ($i) { return $i; })) {};\n}\n",
-			"<?php\n\nfunction g()\n{\n    return new class($q->where(1)->each(function ($i) {\n            return $i;\n        }))\n    {\n    };\n}\n",
+			"<?php\n\nfunction g()\n{\n    return new class($q->where(1)->each(function ($i) {\n        return $i;\n    }))\n    {\n    };\n}\n",
 		},
 	}
 

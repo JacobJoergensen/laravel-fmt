@@ -32,3 +32,32 @@ func TestBuildKeepsAnEmptyStatementBodyOnTheHeader(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildWritesElseIfAsOneElseif(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			"chain",
+			"<?php if ($a) { a(); } else if ($b) { b(); } else if ($c) { c(); } else { d(); }",
+			"if ($a) {\n    a();\n} elseif ($b) {\n    b();\n} elseif ($c) {\n    c();\n} else {\n    d();\n}\n",
+		},
+		{"braceless", "<?php if ($a) a(); else if ($b) b();", "if ($a) {\n    a();\n} elseif ($b) {\n    b();\n}\n"},
+		{"if inside an else block", "<?php if ($a) {} else { if ($b) {} }", "if ($a) {\n} else {\n    if ($b) {\n    }\n}\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildPHP(t, tc.src)
+			if want := "<?php\n\n" + tc.want; got != want {
+				t.Fatalf("got %q, want %q", got, want)
+			}
+
+			if again := buildPHP(t, got); again != got {
+				t.Fatalf("not idempotent: %q then %q", got, again)
+			}
+		})
+	}
+}

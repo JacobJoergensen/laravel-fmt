@@ -1090,8 +1090,9 @@ func (e *emitter) gluedTagWrap(el *htmlparser.Element, selfClose bool) (inlineRu
 //
 // The close tag stays joined, as Pint joins Prettier's dangling `>`.
 func (e *emitter) emitGluedTagWrapped(el *htmlparser.Element, run inlineRun) {
-	// Fit first: a run that fits whole stays on one line.
-	if e.w.TryFlat(func() {
+	authored := !edgesRender(el) && e.allInlineChildren(el.Children) && inlineChildrenAuthoredMultiline(el.Children)
+
+	if !authored && e.w.TryFlat(func() {
 		e.emitOpenTag(el, false, false, nil)
 		e.emitInlineRun(el, run)
 		e.emitCloseTag(el)

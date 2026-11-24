@@ -2,24 +2,40 @@
 
 ## Unreleased
 * Added `formattedElsewhere` to the `laravel-fmt/format` reply for files another tool formats
-* Improved long CSS selectors to break at combinators, then inside `:is()` or `:not()`
 * Improved a closure after other arguments, like Pest's `it('…', function () use ($x) {`, to stay hugged past the print width
+* Improved an arrow function to stay hugged when you break its call over lines, like `each(fn ($u) => $u->notify(`
+* Improved a chain whose head you broke over lines, like `Foo::make([` … `])->each(`, to stay hugged as the last argument while its lines fit
+* Improved `new Foo(...)` as a call's argument to hug and un-hug the way a call does
+* Improved a chain after `throw` to lay out like one after `return`
+* Improved `else if` to be written as `elseif`
 * Improved `<head>` and `<body>` in Blade to indent under `<html>`, as Laravel's docs write them
 * Improved the error for an inline `@php(…)` that a later `@endphp` closes, naming both lines
 * Improved Pennant's `@feature` and `@featureany` blocks to indent without a `blockDirectives` entry
 * Improved Markdown `html` code blocks holding a Blade block like `@foreach` to format as Blade
-* Improved an arrow function to stay hugged when you break its call over lines, like `each(fn ($u) => $u->notify(`
+* Improved long CSS selectors to break at combinators, then inside `:is()` or `:not()`
+* Fixed an array holding only a comment breaking the call around it instead of hugging, like `json([ // ... ])`
+* Fixed a hugged arrow function or closure running past the print width, or breaking its body where the arrow fits on a line of its own, like `])->each(fn ($i) =>` and `$this->query()->map(fn ($x) =>`
+* Fixed a call breaking its own arguments to keep the arrow function or closure after it hugged, like `wrap($a, $b)->each(fn ($i) =>`
+* Fixed nested arrow functions hugging both calls or breaking the inner one first, like `outer(fn () => $x->each(fn ($y) =>`
+* Fixed a last call like `->map(fn ($x) => $x->go($a, $b))` breaking its arguments where moving the call to its own line keeps it whole
+* Fixed an operator dropping to its own line after a call, like `)->key === $role` or `) === -1`
+* Fixed calls after a multi-line call's `)` or `])` dropping to their own lines inside another call, an array value or an arrow body, like `)->map($a)->all(),`
+* Fixed a chain argument double-indenting or running one column past the print width, like `switchTeam($user->ownedTeams()->create([`
+* Fixed a call ending in an array after `??` or `? … : null` running one column past the print width
+* Fixed a comment after the last of several imports moving behind `?>` into the HTML
+* Fixed output changing on a second run for a block comment before `)`, a line comment in an argument after a multi-line string, and a method chain after `|>`
+* Fixed deeply nested calls, arrays and arrow functions taking seconds to format
+* Fixed a multi-line Blade element folding onto one line when text touches an echo, like `{{ $a }}: {{ $b }}`
+* Fixed a multi-line `<title>` keeping its old indent when re-indented
+* Fixed an HTML comment on its own line inside an element being pulled onto the tag's line
+* Fixed top-level text in HTML files dropping a blank line or breaking before an inline element
+* Fixed a space added before `,` or `)` after a block comment in Alpine values, like `/* ... */ ,`
+* Fixed spaces kept inside parentheses in CSS selectors and at-rules, like `:not( .a )`
 * Fixed `types_spaces` in `pint.json` being ignored, so `int | string` lost its spaces
 * Fixed `quoteStyle` and Prettier's `singleQuote` switching HTML, Blade and XML attributes to single quotes
-* Fixed a multi-line `<title>` keeping its old indent when re-indented
-* Fixed spaces kept inside parentheses in CSS selectors and at-rules, like `:not( .a )`
 * Fixed a monorepo's root `.prettierignore` and `pint.json` excludes being skipped inside a package with its own `composer.json`
 * Fixed the language server sending edits some editors apply wrongly when a file's last line changes
 * Fixed the language server formatting before `initialize` and accepting a second `initialize`
-* Fixed an array holding only a comment breaking the call around it instead of hugging, like `json([ // ... ])`
-* Fixed a space added before `,` or `)` after a block comment in Alpine values, like `/* ... */ ,`
-* Fixed an HTML comment on its own line inside an element being pulled onto the tag's line
-* Fixed top-level text in HTML files dropping a blank line or breaking before an inline element
 
 ## Version 0.13.0 (2026-11-18)
 * Added formatting of `.webmanifest` files as JSON

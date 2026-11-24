@@ -16,15 +16,19 @@ function g()
 
     $value = $condition
         ? null
-        : $this->entries->first(function (\Acme\Models\Entry $entry) use ($thresholdValueWithAMuchLongerNameHereToo): bool {
-            return true;
-        });
+        : $this->entries->first(
+            function (\Acme\Models\Entry $entry) use ($thresholdValueWithAMuchLongerNameHereToo): bool {
+                return true;
+            },
+        );
 
     $value = $condition
         ? null
-        : $this->entries->first(function (\Acme\Models\SomeVeryLongModelNameForTestingPurposes $entryInstanceValue): bool {
-            return true;
-        });
+        : $this->entries->first(
+            function (\Acme\Models\SomeVeryLongModelNameForTestingPurposes $entryInstanceValue): bool {
+                return true;
+            },
+        );
 
     DB::transaction(function (\Acme\Support\Transactions\TransactionContextWithAVeryLongName $context) use ($widget): \Acme\Support\Result {
         $widget->save();

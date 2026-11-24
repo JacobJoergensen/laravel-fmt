@@ -400,6 +400,7 @@ func TestBinaryOperandChainKeepsItsAuthorLadder(t *testing.T) {
 func TestOperatorRidesTheCloserOfABrokenBlock(t *testing.T) {
 	long := "$" + strings.Repeat("a", 110)
 	match := "match ($x) {\n    1 => 'one',\n    default => null,\n}"
+	window := "$item->window?->between(now()->addSeconds(4), now()->addSeconds(6)"
 
 	cases := []struct {
 		name string
@@ -411,6 +412,37 @@ func TestOperatorRidesTheCloserOfABrokenBlock(t *testing.T) {
 		{"elvis after a flat condition that fits", "return $a ?: null;", "return $a ?: null;"},
 		{"elvis after a long flat condition", "return " + long + " ?: null;", "return " + long + "\n    ?: null;"},
 		{"full ternary after a match", "return " + match + " ? 'yes' : 'no';", "return " + match + "\n    ? 'yes'\n    : 'no';"},
+		{"comparison after a property of a broken call", "return foo(\n    $alpha,\n)->key === $role;", "return foo(\n    $alpha,\n)->key === $role;"},
+		{
+			"comparison with a negative literal breaks the call before it",
+			"$f = fn (Item $item): bool => " + window + ", $marginOfError) === -1;",
+			"$f = fn (Item $item): bool => $item->window?->between(\n    now()->addSeconds(4),\n    now()->addSeconds(6),\n    $marginOfError,\n) === -1;",
+		},
+		{
+			"comparison with an operand of its own leads its line",
+			"$f = fn (Item $item): bool => " + window + ", $margin) === $expectedValue;",
+			"$f = fn (Item $item): bool => " + window + ", $margin)\n    === $expectedValue;",
+		},
+		{
+			"comparison with a short string breaks the call before it",
+			"$f = fn (Item $item): bool => " + window + ", $margin) === '" + strings.Repeat("x", 18) + "';",
+			"$f = fn (Item $item): bool => $item->window?->between(\n    now()->addSeconds(4),\n    now()->addSeconds(6),\n    $margin,\n) === '" + strings.Repeat("x", 18) + "';",
+		},
+		{
+			"comparison with a string one byte longer leads its line",
+			"$f = fn (Item $item): bool => " + window + ", $margin) === '" + strings.Repeat("x", 19) + "';",
+			"$f = fn (Item $item): bool => " + window + ", $margin)\n    === '" + strings.Repeat("x", 19) + "';",
+		},
+		{
+			"comparison with a literal after a parenthesised assignment leads its line",
+			"while (($line = fgets($this->" + strings.Repeat("h", 50) + ", $this->maximumLineLengthInBytes)) !== false) {\n    foo();\n}",
+			"while (\n    ($line = fgets($this->" + strings.Repeat("h", 50) + ", $this->maximumLineLengthInBytes))\n    !== false\n) {\n    foo();\n}",
+		},
+		{
+			"arithmetic with a literal leads its line",
+			"$f = fn (Item $item): bool => " + window + ", $margin) + 1000000000000;",
+			"$f = fn (Item $item): bool => " + window + ", $margin)\n    + 1000000000000;",
+		},
 	}
 
 	for _, tc := range cases {
@@ -817,19 +849,60 @@ func TestPartialApplicationPlaceholdersFormatAsArguments(t *testing.T) {
 	}
 }
 
-func TestNestedArrowFunctionsInChainsFormatWithoutExponentialCost(t *testing.T) {
-	const depth = 10
+func TestDeeplyNestedHugsFormatWithoutExponentialCost(t *testing.T) {
+	const depth = 18
 	const budget = 2 * time.Second
 
-	start := time.Now()
-	got := mustFormat(t, nestedArrowChains(depth), config.Default())
-
-	if took := time.Since(start); took > budget {
-		t.Fatalf("formatting %d nested levels took %v, want under %v", depth, took, budget)
+	tests := []struct {
+		name  string
+		level func(inner string) string
+	}{
+		{
+			name: "arrow functions and calls",
+			level: func(inner string) string {
+				return "$x->each(fn ($i) => outer($x->map(fn ($j) => " + inner + ", ['k' => 1])))"
+			},
+		},
+		{
+			name: "closures",
+			level: func(inner string) string {
+				return "$x->each(function ($i) { return outer($x->map(function ($j) { return " + inner + "; }, ['k' => 1])); })"
+			},
+		},
+		{
+			name:  "calls",
+			level: func(inner string) string { return "outer($x->map(" + inner + ", ['k' => 1]))" },
+		},
+		{
+			name:  "new",
+			level: func(inner string) string { return "new Outer(new Inner(" + inner + ", ['k' => 1]))" },
+		},
+		{
+			name:  "arrays",
+			level: func(inner string) string { return "foo(['k' => bar(" + inner + ", [$a])])" },
+		},
 	}
 
-	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
-		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inner := "$x->" + strings.Repeat("c", 60) + "($i)"
+			for range depth {
+				inner = tt.level(inner)
+			}
+
+			src := []byte("<?php\n\nif (" + inner + ") {\n    foo();\n}\n")
+
+			start := time.Now()
+			got := mustFormat(t, src, config.Default())
+
+			if took := time.Since(start); took > budget {
+				t.Fatalf("formatting %d nested levels took %v, want under %v", depth, took, budget)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
 	}
 }
 
@@ -868,11 +941,150 @@ func TestCommentInsideAWidthProbeKeepsTheLayout(t *testing.T) {
 	}
 }
 
-func nestedArrowChains(depth int) []byte {
-	inner := "$q->a()->x(function () { x(); })"
-	for range depth {
-		inner = "$q->a()->m(fn () => " + inner + ")"
+func TestThrownChainKeepsItsCallOnAKeptBrokenArray(t *testing.T) {
+	src := "<?php\n\nthrow Failure::withItems([\n    'key' => trans('A message long enough to need its own line.'),\n])->inBag('primary');\n"
+
+	got := string(mustFormat(t, []byte(src), config.Default()))
+	if got != src {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, src)
+	}
+}
+
+func TestConcatOperandGluedToABrokenCloserKeepsItsIndentOnTheNextPass(t *testing.T) {
+	left := "wrap(fn ($a, $b): Shape => (object) ['' => (int) $a000, '0000' => $a0000[A0000000] ?? '0', '00000' => $a00 > a0000()])"
+	element := "'00' % (int) A0000000 % '0000' % A00000[A0000000] ?? '0' % '00000' % a000000000000()"
+	src := "<?php\n\n$v > " + left + ".wrap(fn ($a, $b): A00 => [" + element + "]()[]);\n"
+
+	got := mustFormat(t, []byte(src), config.Default())
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
+func TestAuthorBrokenPipeKeepsTheLadderOfItsLastOperand(t *testing.T) {
+	want := "<?php\n\n$a\n    |> b()\n    |> c()\n        ->d()\n        ->e();\n"
+
+	for _, src := range []string{"<?php\n$a |> b() |> c()\n->d()\n->e();\n", want} {
+		if got := string(mustFormat(t, []byte(src), config.Default())); got != want {
+			t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+		}
+	}
+}
+
+func TestNestedArrowBodyMovesAnArrowThatFitsAloneToItsOwnLine(t *testing.T) {
+	src := "outer(fn () => $x->each(fn ($y) => $y->%s($y, $z)));"
+	want := "outer(fn () => $x->each(\n    fn ($y) => $y->%s($y, $z),\n));"
+
+	tests := []struct {
+		name   string
+		length int
+	}{
+		{"once the outer arrow no longer fits a line of its own", 74},
+		{"several columns past that", 83},
 	}
 
-	return []byte("<?php\n\n$v = " + inner + ";\n")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertLayoutAtLength(t, src, want, tt.length)
+		})
+	}
+}
+
+func TestOperandWhoseHugFitsNowhereIsGluedWithItsListBroken(t *testing.T) {
+	class := "class A\n{\n    public function a()\n    {\n        $r = %s;\n    }\n}"
+	tests := []struct {
+		name   string
+		value  string
+		want   string
+		length int
+	}{
+		{
+			name:   "ternary",
+			value:  "$c ? %s($a, [$b, $c]) : null",
+			want:   "$c ? %s(\n            $a,\n            [$b, $c],\n        ) : null",
+			length: 101,
+		},
+		{
+			name:   "coalesce",
+			value:  "$a ?? %s($a, [$b, $c])",
+			want:   "$a ?? %s(\n            $a,\n            [$b, $c],\n        )",
+			length: 100,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := strings.Replace(class, "%s", tt.value, 1)
+			want := strings.Replace(class, "%s", tt.want, 1)
+
+			assertLayoutAtLength(t, src, want, tt.length)
+		})
+	}
+}
+
+func TestArrowBodyCallUnhugsItsClosureBeforeBreakingItsHead(t *testing.T) {
+	src := "$f = fn () => foo($a)->%s(function ($x) { return $x; });"
+	want := "$f = fn () => foo($a)->%s(\n    function ($x) {\n        return $x;\n    },\n);"
+
+	assertLayoutAtLength(t, src, want, 82)
+}
+
+func TestNewArgumentUnhugsLikeACall(t *testing.T) {
+	src := "$result = outer(new %s($a, [$b]));"
+	tests := []struct {
+		name   string
+		want   string
+		length int
+	}{
+		{
+			name:   "un-hugs flat",
+			want:   "$result = outer(\n    new %s($a, [$b]),\n);",
+			length: 94,
+		},
+		{
+			name:   "un-hugs with its array broken",
+			want:   "$result = outer(\n    new %s($a, [\n        $b,\n    ]),\n);",
+			length: 102,
+		},
+		{
+			name:   "un-hugs with its own list broken",
+			want:   "$result = outer(\n    new %s(\n        $a,\n        [$b],\n    ),\n);",
+			length: 110,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertLayoutAtLength(t, src, tt.want, tt.length)
+		})
+	}
+}
+
+func TestOperandAfterACallBreaksBeforeTheOperator(t *testing.T) {
+	tests := []struct {
+		name   string
+		src    string
+		want   string
+		length int
+	}{
+		{
+			name:   "logical operand",
+			src:    "return (bool) config()->%s('alpha.beta.gamma.delta.enabled') && $this->collection->count() > 1;",
+			want:   "return (bool) config()->%s('alpha.beta.gamma.delta.enabled')\n    && $this->collection->count() > 1;",
+			length: 40,
+		},
+		{
+			name:   "literal comparison",
+			src:    "return config()->%s('section.key') == 'with_the_rate';",
+			want:   "return config()->%s('section.key')\n    == 'with_the_rate';",
+			length: 86,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertLayoutAtLength(t, tt.src, tt.want, tt.length)
+		})
+	}
 }

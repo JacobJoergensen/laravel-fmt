@@ -352,6 +352,29 @@ func TestOpenerJudgesItsVariantByTheMeasuredWidth(t *testing.T) {
 	}
 }
 
+func TestContinuedVariantCountsWhatFollowsOnItsClosingLine(t *testing.T) {
+	head := Concat(Text("foo("), Indent(Concat(HardLine(), Text("$a,"))), HardLine(), Text(")"))
+	tail := "->aaaa()->bbbb()"
+	riding := Concat(Continued(head), Text(tail))
+	laddered := Concat(head, Indent(Concat(HardLine(), Text(tail))))
+
+	for _, tc := range []struct {
+		name string
+		rest string
+		want string
+	}{
+		{"closing line fits", ");", "foo(\n    $a,\n)" + tail + ");"},
+		{"what follows overflows it", ")]);", "foo(\n    $a,\n)\n    " + tail + ")]);"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := Concat(ConditionalGroup(riding, laddered), Text(tc.rest))
+			if got := string(Print(doc, Options{PrintWidth: 20, TabWidth: 4, EOL: "\n"})); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGroupOpeningWithItsBreakIndentsAtItsDepth(t *testing.T) {
 	links := Indent(Concat(Group(Concat(SoftLine(), Text("->a()"))), SoftLine(), Text("->b()")))
 	doc := Group(Concat(Text("head"), Indent(Indent(Concat(HardLine(), Text(".tail")))), links))
@@ -361,5 +384,33 @@ func TestGroupOpeningWithItsBreakIndentsAtItsDepth(t *testing.T) {
 
 	if got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestGroupAheadOfAConditionalGroupCountsOnItsFallback(t *testing.T) {
+	list := func(item string) *Doc {
+		return Group(Concat(Text("("), Indent(Concat(SoftLine(), Text(item))), IfBreak(Text(","), Text("")), SoftLine(), Text(")")))
+	}
+
+	wide := strings.Repeat("x", 30)
+	hugged := Concat(Text("("+wide+"("), Indent(Concat(HardLine(), Text("$b"))), HardLine(), Text("))"))
+	want := "head($a)->each(\n    " + wide + "($b),\n)"
+
+	cases := []struct {
+		name  string
+		first *Doc
+	}{
+		{"first variant measured by its opener", Opener(len("("+wide+"("), hugged)},
+		{"first variant broken by force", hugged},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := Concat(Text("head"), list("$a"), Text("->each"), ConditionalGroup(tc.first, list(wide+"($b)")))
+
+			if got := string(Print(doc, Options{PrintWidth: 40, EOL: "\n"})); got != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+		})
 	}
 }

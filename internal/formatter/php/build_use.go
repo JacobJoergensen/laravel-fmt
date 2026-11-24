@@ -78,11 +78,16 @@ func (b *builder) preprocessUseRuns(stmts []parser.Stmt) []parser.Stmt {
 		}
 
 		if b.cfg.PHP.SortUses && len(run) > 1 {
-			b.claimUseTrails(run)
+			onTagLine := b.claimUseTrails(run)
 
 			opener := run[0].Span().Start.Offset
 			closer := run[len(run)-1]
 			sortUseStmts(run, b.cfg.PHP.ImportOrder)
+
+			if last := run[len(run)-1]; last == onTagLine {
+				b.releaseUseTrail(last)
+			}
+
 			b.keepRunHead(opener, run[0].Span().Start.Offset)
 			b.keepRunTail(closer, run[len(run)-1])
 
@@ -162,7 +167,13 @@ func (b *builder) runHeadTrivia(offset int) (before int, moved bool) {
 // comments written after it on its own line, which trivia stores on the token
 // that follows. An expanded group's pieces share one span; only the last owns
 // the comment.
-func (b *builder) claimUseTrails(run []*parser.UseStmt) {
+//
+// It returns the import whose comment shares the line of a `?>`. Sorted last,
+// that import gives the comment back to the tag: as a line suffix it would
+// print after the HTML that follows.
+func (b *builder) claimUseTrails(run []*parser.UseStmt) *parser.UseStmt {
+	var onTagLine *parser.UseStmt
+
 	for k, u := range run {
 		end := u.Span().End.Offset
 		if k+1 < len(run) && run[k+1].Span().End.Offset == end {
@@ -173,6 +184,8 @@ func (b *builder) claimUseTrails(run []*parser.UseStmt) {
 		if i == len(b.tokens) {
 			continue
 		}
+
+		tagLine := b.tokens[i].Kind == parser.KindCloseTag && !slices.ContainsFunc(b.tokens[i].Leading, breaksLine)
 
 		var trail []parser.Trivia
 
@@ -206,7 +219,21 @@ func (b *builder) claimUseTrails(run []*parser.UseStmt) {
 		for _, tr := range trail {
 			b.movedTrail[tr.Span.Start.Offset] = true
 		}
+
+		if tagLine {
+			onTagLine = u
+		}
 	}
+
+	return onTagLine
+}
+
+func (b *builder) releaseUseTrail(u *parser.UseStmt) {
+	for _, tr := range b.useTrail[u] {
+		delete(b.movedTrail, tr.Span.Start.Offset)
+	}
+
+	delete(b.useTrail, u)
 }
 
 // expandUseStmt expands a multi-item or grouped use statement into one
@@ -407,4 +434,8 @@ func (b *builder) useItem(it *parser.UseItem) *document.Doc {
 	}
 
 	return item
+}
+
+func breaksLine(tr parser.Trivia) bool {
+	return tr.Kind == parser.TriviaWhitespace && triviaLineBreaks(tr.Text) > 0
 }

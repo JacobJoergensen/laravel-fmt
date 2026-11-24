@@ -3649,3 +3649,11 @@ func TestFormatSpacesAlpineNotOperatorOnlyWithNotOperatorSpace(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatGluedBlockBodyKeepsItsAuthoredLines(t *testing.T) {
+	src := "<p class=\"x\">\n    {{ $a }}: {{ $b }}\n</p>\n"
+
+	if got := mustFormat(t, []byte(src), config.Default()); string(got) != src {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, src)
+	}
+}
