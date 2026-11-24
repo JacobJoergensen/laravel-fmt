@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.14.0 (2026-11-25)
 * Added `formattedElsewhere` to the `laravel-fmt/format` reply for files another tool formats
 * Improved a closure after other arguments, like Pest's `it('…', function () use ($x) {`, to stay hugged past the print width
 * Improved an arrow function to stay hugged when you break its call over lines, like `each(fn ($u) => $u->notify(`
