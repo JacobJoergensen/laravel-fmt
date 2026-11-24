@@ -991,6 +991,56 @@ func TestNestedArrowBodyMovesAnArrowThatFitsAloneToItsOwnLine(t *testing.T) {
 	}
 }
 
+func TestArrowWithBrokenParametersMeasuresItsBodyFromTheClosingLine(t *testing.T) {
+	brokenParams := func(name string) string {
+		return "fn (\n    string $" + name + "1,\n    string $" + name + "2,\n    string $" + name + "3,\n) => "
+	}
+
+	short, long := strings.Repeat("p", 14), strings.Repeat("p", 30)
+	shortParams := brokenParams(short)
+	wideParams := brokenParams(long)
+	flatParams := "fn (string $" + long + "1, string $" + long + "2, string $" + long + "3) => "
+	compactParams := "fn (string $" + short + "1, string $" + short + "2, string $" + short + "3) => "
+
+	tests := []struct {
+		name   string
+		src    string
+		want   string
+		length int
+	}{
+		{
+			name:   "hug fits on the closing line",
+			src:    "$f = " + shortParams + "$this->engine->%s($this->target, [\n    'a' => $alpha,\n]);",
+			want:   "$f = " + shortParams + "$this->engine->%s($this->target, [\n    'a' => $alpha,\n]);",
+			length: 83,
+		},
+		{
+			name:   "hug one column past the closing line un-hugs",
+			src:    "$f = " + shortParams + "$this->engine->%s($this->target, [\n    'a' => $alpha,\n]);",
+			want:   "$f = " + shortParams + "$this->engine->%s(\n    $this->target,\n    [\n        'a' => $alpha,\n    ],\n);",
+			length: 84,
+		},
+		{
+			name:   "signature too wide to stay flat",
+			src:    "$f = " + flatParams + "$this->engine->%s($this->target, [\n    'a' => $alpha,\n]);",
+			want:   "$f = " + wideParams + "$this->engine->%s($this->target, [\n    'a' => $alpha,\n]);",
+			length: 10,
+		},
+		{
+			name:   "compact signature the printer breaks for its body",
+			src:    "$f = " + compactParams + "$this->engine->%s($this->target, [\n    'a' => $alpha,\n]);",
+			want:   "$f = " + shortParams + "$this->engine->%s($this->target, [\n    'a' => $alpha,\n]);",
+			length: 50,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertLayoutAtLength(t, tt.src, tt.want, tt.length)
+		})
+	}
+}
+
 func TestOperandWhoseHugFitsNowhereIsGluedWithItsListBroken(t *testing.T) {
 	class := "class A\n{\n    public function a()\n    {\n        $r = %s;\n    }\n}"
 	tests := []struct {

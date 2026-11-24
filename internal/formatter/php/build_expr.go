@@ -2376,6 +2376,7 @@ func (b *builder) closure(n *parser.ClosureExpr) *document.Doc {
 		parts = append(parts, document.Text("&"))
 	}
 
+	paramsAt := len(parts)
 	parts = append(parts, b.closureParams(n))
 
 	if len(n.Uses) > 0 {
@@ -2401,7 +2402,17 @@ func (b *builder) closure(n *parser.ClosureExpr) *document.Doc {
 		}
 	}
 
-	parts = append(parts, b.returnType(n.ReturnColon, n.ReturnType), document.Text(" "), b.closureBody(n.Body))
+	parts = append(parts, b.returnType(n.ReturnColon, n.ReturnType))
+
+	// A signature too wide for any line the closure can start on, with nothing
+	// else in it that breaks, breaks its single parameter after all.
+	signature := document.Concat(append(slices.Clone(parts), document.Text(" {"))...)
+	if len(n.Params) == 1 && !document.CanBreak(signature) &&
+		b.depth*b.cfg.IndentWidth+document.FlatWidth(signature, b.cfg.IndentWidth) > b.cfg.PrintWidth {
+		parts[paramsAt] = b.params(n.Params, n.RParen)
+	}
+
+	parts = append(parts, document.Text(" "), b.closureBody(n.Body))
 
 	// Grouped, its body indents from the line it opens on wherever a hug or a
 	// glued operand puts it.
@@ -2455,12 +2466,7 @@ func (b *builder) arrowFn(n *parser.ArrowFnExpr, stmtLevel bool) *document.Doc {
 	returnType := b.returnType(n.ReturnColon, n.ReturnType)
 	arrow := document.Text(" => ")
 
-	// The arrow starts no further left than its own indent, so a hug that
-	// overflows from there overflows wherever the arrow prints: the call goes
-	// one argument per line instead, as a statement's call does (postfix). A
-	// last arrow that fits a line of its own moves there too; a statement's own
-	// arrow has its body's chain judge that at the real column.
-	call, callBody := n.Body.(*parser.CallExpr)
+	_, callBody := n.Body.(*parser.CallExpr)
 	bodyLead := 0
 
 	if callBody {
@@ -2472,22 +2478,16 @@ func (b *builder) arrowFn(n *parser.ArrowFnExpr, stmtLevel bool) *document.Doc {
 		bodyLead += b.chainStmtLead
 	}
 
-	if callBody && hugsInsideOut(call.Args) {
-		saved := b.chainStmtLead
-		b.chainStmtLead = bodyLead
-
-		if b.staysOnArrowLine(call) && b.hugLineOverflowsFromCloser(call) && b.unhuggingHelps(call) ||
-			!stmtLevel && b.bodyArrowFitsAlone(call) {
-			b.noHugNext = true
-		}
-
-		b.chainStmtLead = saved
+	// Parameters that break end on a line of their own, so the body follows
+	// `) => ` there, however wide the signature measures flat.
+	closingLead := len(")") + document.FlatWidth(returnType, b.cfg.IndentWidth) + document.FlatWidth(arrow, b.cfg.IndentWidth)
+	if callBody && broken == nil && document.CanBreak(params) &&
+		(document.HasForcedBreak(params) || b.depth*b.cfg.IndentWidth+bodyLead > b.cfg.PrintWidth) {
+		bodyLead = closingLead
 	}
 
-	savedBodyLead := b.arrowBodyLead
-	b.arrowBodyNext, b.arrowBodyLead = callBody, bodyLead
-	body := b.expr(n.Body)
-	b.arrowBodyNext, b.arrowBodyLead = false, savedBodyLead
+	mark := b.markComments()
+	body := b.arrowBody(n.Body, stmtLevel, bodyLead)
 
 	flat := document.Concat(append(slices.Clone(parts), params, returnType, arrow, body)...)
 	if broken == nil {
@@ -2500,9 +2500,45 @@ func (b *builder) arrowFn(n *parser.ArrowFnExpr, stmtLevel bool) *document.Doc {
 	first, _ := document.BrokenPrefixWidth(body, b.cfg.IndentWidth)
 	opener := document.FlatWidth(signature, b.cfg.IndentWidth) + first
 
-	wide := document.Concat(append(parts, broken, returnType, arrow, body)...)
+	// The broken signature's body follows `) => `, so it is built for that
+	// line. Only one variant prints, so each carries the body's comments.
+	wideBody := body
+	if callBody && closingLead != bodyLead {
+		b.releaseComments(mark)
+		wideBody = b.arrowBody(n.Body, stmtLevel, closingLead)
+	}
+
+	wide := document.Concat(append(parts, broken, returnType, arrow, wideBody)...)
 
 	return document.ConditionalGroup(document.Opener(opener, flat), wide)
+}
+
+func (b *builder) arrowBody(e parser.Expr, stmtLevel bool, lead int) *document.Doc {
+	call, callBody := e.(*parser.CallExpr)
+
+	// The arrow starts no further left than its own indent, so a hug that
+	// overflows from there overflows wherever the arrow prints: the call goes
+	// one argument per line instead, as a statement's call does (postfix). A
+	// last arrow that fits a line of its own moves there too; a statement's own
+	// arrow has its body's chain judge that at the real column.
+	if callBody && hugsInsideOut(call.Args) {
+		saved := b.chainStmtLead
+		b.chainStmtLead = lead
+
+		if b.staysOnArrowLine(call) && b.hugLineOverflowsFromCloser(call) && b.unhuggingHelps(call) ||
+			!stmtLevel && b.bodyArrowFitsAlone(call) {
+			b.noHugNext = true
+		}
+
+		b.chainStmtLead = saved
+	}
+
+	savedBodyLead := b.arrowBodyLead
+	b.arrowBodyNext, b.arrowBodyLead = callBody, lead
+	body := b.expr(e)
+	b.arrowBodyNext, b.arrowBodyLead = false, savedBodyLead
+
+	return body
 }
 
 // arrowParams renders an arrow function's parameter list. An arrow's body has
