@@ -45,6 +45,21 @@ func TestExpressionPrecedence(t *testing.T) {
 			src:  "$a ?? $b |> $c ? $d : $e",
 			want: "(? (|> (?? $a $b) $c) $d $e)",
 		},
+		{
+			name: "assignment binds to the variable after a binary operator",
+			src:  "$a % $b = 1",
+			want: "(% $a (= $b 1))",
+		},
+		{
+			name: "assignment binds inside a logical not",
+			src:  "!$a = 1",
+			want: "(! (= $a 1))",
+		},
+		{
+			name: "assignment binds after a coalesce",
+			src:  "$a && $b ?? $c = 1",
+			want: "(?? (&& $a $b) (= $c 1))",
+		},
 	}
 
 	for _, tc := range cases {
@@ -202,6 +217,7 @@ func TestAssignToNonLvalueIsRejected(t *testing.T) {
 		"<?php ! CONST_NAME = 1;",
 		"<?php ++$a = 1;",
 		"<?php $a++ = 1;",
+		"<?php $a % 0 = 1;",
 	}
 
 	for _, src := range rejected {
@@ -226,12 +242,49 @@ func TestAssignToNonLvalueIsRejected(t *testing.T) {
 		"<?php !$a = 1;",
 		"<?php @$a = 1;",
 		"<?php -$a = 1;",
+		"<?php $a % $b = 1;",
 	}
 
 	for _, src := range accepted {
 		t.Run("accept "+src, func(t *testing.T) {
 			if _, errs := Parse([]byte(src)); len(errs) != 0 {
 				t.Fatalf("unexpected errors for %q: %v", src, errs)
+			}
+		})
+	}
+}
+
+// Each case matches php -l.
+func TestDereferencingWhatPHPCannotIsRejected(t *testing.T) {
+	cases := []struct {
+		src    string
+		reject bool
+	}{
+		{"<?php 0(1);", true},
+		{"<?php 1.5(1);", true},
+		{"<?php $x = 1[0];", true},
+		{"<?php $x = 0->m();", true},
+		{"<?php $x = 1?->m();", true},
+		{"<?php $x = 0::m();", true},
+		{"<?php $x = `ls`();", true},
+		{"<?php $x = <<<X\nf\nX();", true},
+		{"<?php $x = function () {}();", true},
+		{"<?php $x = match (1) { default => 'f' }();", true},
+		{"<?php $x = $a++();", true},
+		{"<?php 'strlen'('x');", false},
+		{"<?php $x = 'abc'[0];", false},
+		{"<?php (0)(1);", false},
+		{"<?php [$o, 'm']();", false},
+		{"<?php true(1);", false},
+		{"<?php FOO[0];", false},
+		{"<?php (function () {})();", false},
+		{"<?php new Foo()();", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.src, func(t *testing.T) {
+			if _, errs := Parse([]byte(tc.src)); (len(errs) != 0) != tc.reject {
+				t.Fatalf("errors for %q: %v, want rejected %v", tc.src, errs, tc.reject)
 			}
 		})
 	}
@@ -932,6 +985,8 @@ func sexpr(e Expr) string {
 		return "(? " + sexpr(v.Cond) + " " + then + " " + sexpr(v.Else) + ")"
 	case *ParenExpr:
 		return sexpr(v.Expr)
+	case *AssignExpr:
+		return "(" + string(v.Op.Text) + " " + sexpr(v.Left) + " " + sexpr(v.Right) + ")"
 	}
 
 	return fmt.Sprintf("<%T>", e)

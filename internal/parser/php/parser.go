@@ -1,6 +1,7 @@
 package php
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 )
@@ -613,8 +614,18 @@ func (p *parser) parseExpression(minPrec int) Expr {
 		cur := p.peek()
 		next := rules[cur.Kind]
 
-		if next.infix == nil || next.prec <= minPrec {
+		if next.infix == nil {
 			break
+		}
+
+		// PHP binds an assignment to the variable before it whatever encloses
+		// it: `!$a = 1` is `!($a = 1)` and `$a % $b = 1` is `$a % ($b = 1)`.
+		if next.prec <= minPrec && (next.prec != precAssign || !assignable(left)) {
+			break
+		}
+
+		if next.prec == precCall && notDereferencable(left) {
+			p.addError(cur.Span.Start, fmt.Sprintf("unexpected %s", cur.Kind))
 		}
 
 		left = next.infix(p, left)
@@ -733,6 +744,10 @@ func parseUpdatePrefix(p *parser) Expr {
 	op := p.advance()
 	operand := p.parseExpression(precUnary)
 
+	if _, ok := operand.(*AssignExpr); ok {
+		p.addError(operand.Span().Start, fmt.Sprintf("cannot apply %s to an assignment", op.Text))
+	}
+
 	return &UpdateExpr{Op: op, Operand: operand, Prefix: true}
 }
 
@@ -787,6 +802,29 @@ func parseAssign(p *parser, left Expr) Expr {
 	return &AssignExpr{Left: left, Op: op, Right: right, ByRef: byRef}
 }
 
+func assignable(e Expr) bool {
+	switch e.(type) {
+	case *VariableExpr, *VarVarExpr, *MemberExpr, *StaticMemberExpr, *SubscriptExpr, *ArrayExpr:
+		return true
+	}
+
+	return false
+}
+
+// notDereferencable reports what PHP's grammar (callable_expr,
+// fully_dereferenceable) never dereferences. Like nonLvalue it lists only
+// the certain cases, so an edge form is accepted, never wrongly rejected.
+func notDereferencable(e Expr) bool {
+	switch v := e.(type) {
+	case *IntExpr, *FloatExpr, *ShellExecExpr, *UpdateExpr, *ClosureExpr, *MatchExpr:
+		return true
+	case *StringExpr:
+		return bytes.HasPrefix(v.Token.Text, []byte("<<<"))
+	}
+
+	return false
+}
+
 // nonLvalue reports whether e can never be an assignment target, so `e = ...`
 // is a PHP compile error ("Can't use function return value in write context"
 // and kin). Rejecting it keeps the formatter from laying out code that cannot
@@ -798,11 +836,11 @@ func nonLvalue(e Expr) bool {
 		*IntExpr, *FloatExpr, *StringExpr, *BoolExpr, *NullExpr, *ShellExecExpr,
 		*NewExpr, *AnonClassExpr,
 		*IdentExpr, // a bare or qualified name is a constant fetch, never a target
-		*UpdateExpr:
+		*UpdateExpr, *BinaryExpr:
 		return true
 	case *UnaryExpr:
-		// PHP reads `!$a = 1` as `!($a = 1)`, so what has to be assignable is the
-		// operand, not the unary expression this parser builds around it.
+		// `!$a = 1` binds as `!($a = 1)`, so a unary arrives here only around
+		// an operand that took no assignment (`!FOO = 1`); judge that operand.
 		return nonLvalue(n.Expr)
 	}
 

@@ -1879,7 +1879,7 @@ func (e *emitter) emitAttr(a *htmlparser.Attr, component bool) {
 
 	// A multiline value (an Alpine `x-data` object, say) is re-indented so its
 	// continuation lines follow the tag rather than keeping their source columns.
-	// Tailwind sort and Alpine normalize are single-line only, so they are skipped.
+	// Tailwind sort is single-line only.
 	// A component value compiles into PHP, so it keeps a lone CR as the byte of the
 	// string it is.
 	if hasValueLineBreak(a.Value, component) {

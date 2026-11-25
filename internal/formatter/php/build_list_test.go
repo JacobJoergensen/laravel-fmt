@@ -115,6 +115,86 @@ func TestCommentOnlyArrayHugsAsAnArgument(t *testing.T) {
 	}
 }
 
+func TestAnonymousClassWithABodyHugsAsTheLastArgument(t *testing.T) {
+	sameLine := config.Default()
+	sameLine.PHP.AnonClassBraceStyle = config.BraceStyleSameLine
+
+	cases := []struct {
+		name string
+		src  string
+		want string
+		cfg  *config.File
+	}{
+		{
+			"sole argument before a chain",
+			"Page::visit(new class extends Widget\n{\n    public $a = null;\n})\n    ->click('@x');",
+			"Page::visit(new class extends Widget\n{\n    public $a = null;\n})->click('@x');",
+			config.Default(),
+		},
+		{
+			"last after another argument",
+			"$this->app->instance(Foo::class, new class implements Foo\n{\n    public function run() {}\n});",
+			"$this->app->instance(Foo::class, new class implements Foo\n{\n    public function run() {}\n});",
+			config.Default(),
+		},
+		{
+			"comment-only body",
+			"$y = foo(new class($a, $b) extends Base\n{\n    // only a comment\n});",
+			"$y = foo(new class($a, $b) extends Base\n{\n    // only a comment\n});",
+			config.Default(),
+		},
+		{
+			"brace on the same line",
+			"Page::visit(new class extends Widget\n{\n    public $a = null;\n});",
+			"Page::visit(new class extends Widget {\n    public $a = null;\n});",
+			sameLine,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, []byte("<?php\n\n"+tc.src+"\n"), tc.cfg)
+
+			if want := "<?php\n\n" + tc.want + "\n"; string(got) != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+
+			if again := mustFormat(t, got, tc.cfg); !bytes.Equal(again, got) {
+				t.Fatalf("not idempotent:\n%s\nthen:\n%s", got, again)
+			}
+		})
+	}
+}
+
+func TestArrowBodyPassingAHeredocHugsWhateverItsLines(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{
+			"long body line",
+			"return $this->tap(fn (Page $page) => $page->script(<<<JS\n" +
+				"    document.querySelectorAll(\"div[name=\\\"select.options.name\\\"] [select-option]\")[index].click();\nJS));",
+		},
+		{
+			"nowdoc between chain links",
+			"$page\n    ->see('Flat')\n    ->tap(fn (Page $page) => $page->script(<<<'JS'\n" +
+				"    document.querySelectorAll(\"div[name=\\\"select.options.name\\\"]\");\nJS))\n    ->waitTo(fn () => true);",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "<?php\n\n" + tc.src + "\n"
+
+			got := mustFormat(t, []byte(src), config.Default())
+			if string(got) != src {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, src)
+			}
+		})
+	}
+}
+
 // The kept break would make the hug a width-forced one does; un-hugged, the
 // arrow added a level without saving a line.
 func TestArrowWithAuthorBrokenBodyCallHugs(t *testing.T) {

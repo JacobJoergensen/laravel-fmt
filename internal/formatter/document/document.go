@@ -354,7 +354,9 @@ func OpeningLineWidth(d *Doc, tabWidth int) (int, bool) {
 // break, and a ConditionalGroup takes its narrowest variant.
 func BrokenPrefixWidth(d *Doc, tabWidth int) (int, bool) {
 	switch d.kind {
-	case kindText, kindAlignGap:
+	case kindText:
+		return textPrefixWidth(d, tabWidth)
+	case kindAlignGap:
 		return FlatWidth(d, tabWidth), false
 	case kindLineSuffix, kindBreakParent:
 		return 0, false
@@ -507,7 +509,9 @@ func suffixWidth(d *Doc, tabWidth int, broken bool) (int, bool) {
 // such groups at all.
 func prefixWidth(d *Doc, tabWidth int, broken, wrap bool) (int, bool) {
 	switch d.kind {
-	case kindText, kindAlignGap:
+	case kindText:
+		return textPrefixWidth(d, tabWidth)
+	case kindAlignGap:
 		return FlatWidth(d, tabWidth), false
 	case kindLine:
 		if broken {
@@ -551,6 +555,14 @@ func prefixWidth(d *Doc, tabWidth int, broken, wrap bool) (int, bool) {
 	}
 
 	return 0, false
+}
+
+func textPrefixWidth(d *Doc, tabWidth int) (int, bool) {
+	if first, _, multiLine := strings.Cut(d.text, "\n"); multiLine {
+		return visualWidth(first, tabWidth), true
+	}
+
+	return FlatWidth(d, tabWidth), false
 }
 
 // Heredoc reindents the raw `<<<LABEL ... LABEL` text to the print indentation

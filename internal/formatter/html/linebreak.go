@@ -133,7 +133,7 @@ func EmitMultilineAttrValue(w *formatter.Writer, src []byte, a *parser.Attr, spa
 		return
 	}
 
-	if !a.Bound && jsfmt.IsAlpineJSAttr(a.Name) {
+	if (!a.Bound && jsfmt.IsAlpineJSAttr(a.Name)) || (a.Bound && jsfmt.IsAlpineBinding(value)) {
 		if spaced, ok := jsfmt.Normalize(value, spaceAfterNot); ok {
 			value = spaced
 		}

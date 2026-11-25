@@ -68,7 +68,8 @@ func docCommentDoc(text []byte, spaced bool) (*document.Doc, bool) {
 // singleLineDocComment normalizes the tag type in a one-line `/** ... */` block,
 // keeping the rest; a non-canonical or empty block is left verbatim.
 func singleLineDocComment(text []byte, spaced bool) (*document.Doc, bool) {
-	if !bytes.HasPrefix(text, []byte("/**")) || !bytes.HasSuffix(text, []byte("*/")) || len(text) < 5 {
+	if !bytes.HasPrefix(text, []byte("/**")) || !bytes.HasSuffix(text, []byte("*/")) ||
+		bytes.HasSuffix(text, []byte("**/")) || len(text) < 5 {
 		return nil, false
 	}
 

@@ -18,6 +18,7 @@ type chainLink struct {
 	call        bool          // an invocation (has an argument list), not a bare property/const/subscript
 	noArgs      bool          // an invocation whose argument list is empty
 	blockHug    bool          // its last argument is a braced/bracketed body that hugs the opener
+	bodyHug     bool          // a bare `(...)` invocation ending in a closure or match, which breaks in every pass
 	access      bool          // carries a chain operator (`->`, `?->`, `::`), so it counts as a link
 	brokeBefore bool          // the author wrote a line break before this link's operator
 	method      string        // the name a `->name(...)` call link invokes, else empty
@@ -350,12 +351,29 @@ func (b *builder) tailRidesCloser(headDoc *document.Doc, links []chainLink, head
 // the fallback is general, the layout the next pass builds from that ladder.
 func (b *builder) closerTail(head parser.Expr, headDoc *document.Doc, links []chainLink, headEnd int, structure bool, general func() *document.Doc) (*document.Doc, bool) {
 	last := runEnd(links, headEnd)
-	if last >= len(links)-1 || slices.ContainsFunc(links[:last+2], brokenBefore) {
+	if last >= len(links)-1 {
 		return nil, false
 	}
 
+	// Below a body that a bare invocation hugs (`->a()(function () {`) the tail
+	// ladders on its own lines, which read back as a break before its first
+	// link that the author did not choose.
+	authored := links[:last+2]
+	if last >= 0 && links[last].bodyHug {
+		authored = links[:last+1]
+	}
+
+	if slices.ContainsFunc(authored, brokenBefore) {
+		return nil, false
+	}
+
+	// A sole call rides while the line it opens fits and breaks inside its
+	// arguments, as it does once that break reads back as authored.
+	only := links[len(links)-1]
+	sole := last == len(links)-2 && only.call
+
 	for _, l := range links[last+1:] {
-		if document.HasForcedBreak(l.doc) {
+		if document.HasForcedBreak(l.doc) && !sole {
 			return nil, false
 		}
 	}
@@ -371,11 +389,6 @@ func (b *builder) closerTail(head parser.Expr, headDoc *document.Doc, links []ch
 	if !document.HasForcedBreak(run) && !document.HidesForcedBreak(run) {
 		return nil, false
 	}
-
-	// A sole call rides while the line it opens fits and breaks inside its
-	// arguments, as it does once that break reads back as authored.
-	only := links[len(links)-1]
-	sole := last == len(links)-2 && only.call
 
 	blockClosed := newEndsInBlockHug(head)
 	if last >= 0 {
@@ -615,6 +628,24 @@ func arrowReturnsPlainCall(args []parser.Expr) bool {
 	call, ok := arrow.Body.(*parser.CallExpr)
 
 	return ok && len(call.Args) > 0 && !argsEndInBlockHug(call.Args) && !hugsBracketedBlock(call) && !isFluentChain(call.Callee)
+}
+
+func argsEndInBody(args []parser.Expr) bool {
+	if len(args) == 0 {
+		return false
+	}
+
+	last := args[len(args)-1]
+	if n, ok := last.(*parser.NamedArgExpr); ok {
+		last = n.Value
+	}
+
+	switch last.(type) {
+	case *parser.ClosureExpr, *parser.MatchExpr:
+		return true
+	}
+
+	return false
 }
 
 // argsEndInBlockHug reports whether args end in a braced or bracketed body, so
@@ -2377,6 +2408,7 @@ func (b *builder) flattenChain(e parser.Expr) (parser.Expr, []chainLink) {
 					doc:      args,
 					call:     true,
 					blockHug: argsEndInBlockHug(n.Args),
+					bodyHug:  argsEndInBody(n.Args),
 					noArgs:   len(n.Args) == 0,
 				})
 				e = n.Callee

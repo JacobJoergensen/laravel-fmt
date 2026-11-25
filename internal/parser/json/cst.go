@@ -30,11 +30,12 @@ func (c *Comment) Span() Span { return c.Range }
 // File is a parsed JSON document; Root is nil when src holds no value.
 // Leading and Trailing hold JSONC comments before and after the root
 // value (both empty for strict JSON); RootTrailing is a same-line comment
-// after the root.
+// after the root. RootBlank records a blank line between Leading and the root.
 type File struct {
 	Src          []byte
 	Root         Value
 	Leading      []Comment
+	RootBlank    bool
 	RootTrailing *Comment
 	Trailing     []Comment
 }

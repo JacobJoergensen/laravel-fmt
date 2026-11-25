@@ -88,6 +88,11 @@ func TestDocCommentTypeNormalization(t *testing.T) {
 			want:  "<?php\n\n/** @var array<int, string> $x */\nfunction foo() {}\n",
 		},
 		{
+			name:  "single-line docblock closed by **/ stays as written",
+			input: "<?php\n\nclass Foo\n{\n    /** Colors **/\n    public $a;\n}\n",
+			want:  "<?php\n\nclass Foo\n{\n    /** Colors **/\n    public $a;\n}\n",
+		},
+		{
 			name:  "description spacing is preserved while the type is normalized",
 			input: "<?php\n\nfunction foo()\n{\n/**\n* @param  array<int,Foo>  $items   The list.\n*/\n    return;\n}\n",
 			want:  "<?php\n\nfunction foo()\n{\n    /**\n     * @param  array<int, Foo>  $items   The list.\n     */\n    return;\n}\n",

@@ -652,14 +652,14 @@ func TestBuildTrailingMethodBreak(t *testing.T) {
 }
 
 func TestBuildOpenerWidthIgnoresVanishingWhitespace(t *testing.T) {
-	callee := strings.Repeat("0", 59)
+	callee := strings.Repeat("f", 59)
 	arg := strings.Repeat("0", 51)
 
-	space := buildPHP(t, "<?php (0("+callee+" ('\n"+arg+"')));")
+	space := buildPHP(t, "<?php (f("+callee+" ('\n"+arg+"')));")
 
 	for _, sep := range []string{"\t", "\r", "\n", "  "} {
 		t.Run(fmt.Sprintf("%q", sep), func(t *testing.T) {
-			got := buildPHP(t, "<?php (0("+callee+sep+"('\n"+arg+"')));")
+			got := buildPHP(t, "<?php (f("+callee+sep+"('\n"+arg+"')));")
 
 			if got != space {
 				t.Fatalf("separator %q changed the layout.\n=== with %q ===\n%s\n=== with a space ===\n%s", sep, sep, got, space)

@@ -1697,12 +1697,37 @@ func (p *bladeParser) stackEntry(name []byte, nameEcho Node) []byte {
 
 	entry := append(bytes.ToLower(name), p.Src[open.Start.Offset:open.End.Offset]...)
 
-	for _, tok := range tokens {
+	// The key is the echo's meaning, not its spelling: a trailing comma and a
+	// plain string's quotes change when the echo is formatted, and an open and
+	// close tag that pair once formatted have to pair before it too.
+	for i, tok := range tokens {
+		if tok.Kind == php.KindComma && (i == len(tokens)-1 || closesList(tokens[i+1].Kind)) {
+			continue
+		}
+
 		entry = append(entry, ' ')
-		entry = append(entry, tok.Text...)
+		entry = append(entry, plainStringValue(tok)...)
 	}
 
 	return entry
+}
+
+func closesList(k php.Kind) bool {
+	return k == php.KindRParen || k == php.KindRBracket || k == php.KindEOF
+}
+
+func plainStringValue(tok php.Token) []byte {
+	text := tok.Text
+	if tok.Kind != php.KindString || len(text) < 2 || text[0] != text[len(text)-1] || text[0] != '\'' && text[0] != '"' {
+		return text
+	}
+
+	body := text[1 : len(text)-1]
+	if bytes.ContainsAny(body, `\$'"`) {
+		return text
+	}
+
+	return append(append([]byte{'\''}, body...), '\'')
 }
 
 // A tag name never holds a `{`, so the first one ends an entry's name.

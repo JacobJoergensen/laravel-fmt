@@ -2956,6 +2956,15 @@ func TestDirectiveArgReservesItsClosingParen(t *testing.T) {
 	}
 }
 
+func TestDirectiveArgumentKeptAcrossLinesLaysOutAlikeOnTheNextPass(t *testing.T) {
+	src := "@check(f(((g) % (f % # c\n0)(((((# d\n0))))))(h)))\n"
+
+	got := mustFormat(t, []byte(src), config.Default())
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
 func TestCarriageReturnDoesNotChangeLayout(t *testing.T) {
 	cfg := config.Default()
 
@@ -2968,11 +2977,11 @@ func TestCarriageReturnDoesNotChangeLayout(t *testing.T) {
 	}{
 		// PHP allows a skipped element only in a destructuring target.
 
-		// Directive argument: the host writes the built bytes as they are, and the
-		// directive's `)` counts toward the width.
-		{"arg fits flat", "@A(0%([$v" + zeros(80) + "\n               ,,$y]=$q))\n", 2},
-		{"arg on the width boundary", "@A(0%([$v" + zeros(81) + "\n               ,,$y]=$q))\n", 2},
-		{"arg breaks at the operator", "@A(0%([$v" + zeros(82) + "\n               ,,$y]=$q))\n", 3},
+		// Directive argument spanning lines: a region kept as written across
+		// lines breaks the layout around it, so no width decision is left for
+		// a CR to tip, as for the multi-line condition below.
+		{"multi-line arg breaks at the operator", "@A(0%([$v" + zeros(80) + "\n               ,,$y]=$q))\n", 3},
+		{"multi-line arg, wider", "@A(0%([$v" + zeros(82) + "\n               ,,$y]=$q))\n", 3},
 
 		// Control-flow condition, single line: the host re-homes the built bytes
 		// under the opener, and the width decision that a CR could tip lives here.

@@ -419,7 +419,16 @@ func (b *builder) verbatim(span parser.Span) *document.Doc {
 
 	b.placeRange(start, end)
 
-	return b.tagCommentRange(b.rehome(string(b.src[start:end]), start), start, end)
+	doc := b.tagCommentRange(b.rehome(string(b.src[start:end]), start), start, end)
+
+	// In a fragment the region's own line break (a lone CR too, which the host
+	// writes as one) is a break the layout around it has to take, as it does
+	// once the next pass reads it back.
+	if b.embed && bytes.ContainsAny(b.src[start:end], "\r\n") {
+		return document.Concat(doc, document.BreakParent())
+	}
+
+	return doc
 }
 
 // verbatimMoving is verbatim whose lines follow its first line wherever that

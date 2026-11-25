@@ -256,6 +256,34 @@ func TestFormatJSONCKeepsEveryComment(t *testing.T) {
 	}
 }
 
+func TestFormatJSONCKeepsABlankLineAroundTopLevelComments(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"before the root", "/* header */\n\n{\"a\": 1}\n", "/* header */\n\n{ \"a\": 1 }\n"},
+		{"after the root", "{\"a\": 1}\n\n// tail\n", "{ \"a\": 1 }\n\n// tail\n"},
+		{"between two comments", "/* one */\n\n\n/* two */\n{\"a\": 1}\n", "/* one */\n\n/* two */\n{ \"a\": 1 }\n"},
+		{"none stays tight", "/* header */\n{\"a\": 1}\n", "/* header */\n{ \"a\": 1 }\n"},
+		{"none at the top of the file", "\n\n// only\n\n", "// only\n"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mustFormat(t, "tsconfig.json", []byte(tc.src), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+
+			twice := mustFormat(t, "tsconfig.json", got, config.Default())
+			if !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent: %q then %q", got, twice)
+			}
+		})
+	}
+}
+
 func TestFormatRejectsInvalidSource(t *testing.T) {
 	out, err := Format("test.json", []byte(`{"a": 1,}`), config.Default())
 

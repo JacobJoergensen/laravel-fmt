@@ -14,8 +14,16 @@ func emitFile(w *formatter.Writer, file *parser.File) {
 		return
 	}
 
-	for _, c := range file.Leading {
+	for i, c := range file.Leading {
+		if i > 0 && c.BlankBefore {
+			w.Newline()
+		}
+
 		emitComment(w, file.Src, c)
+		w.Newline()
+	}
+
+	if len(file.Leading) > 0 && file.RootBlank && file.Root != nil {
 		w.Newline()
 	}
 
@@ -34,6 +42,11 @@ func emitFile(w *formatter.Writer, file *parser.File) {
 
 	for _, c := range file.Trailing {
 		w.Newline()
+
+		if c.BlankBefore {
+			w.Newline()
+		}
+
 		emitComment(w, file.Src, c)
 	}
 

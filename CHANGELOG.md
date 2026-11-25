@@ -1,6 +1,18 @@
 # Changelog
 
 ## Unreleased
+* Improved a directive argument that spans lines to always break the layout around it
+* Fixed an anonymous class losing its hug as a call's last argument, like `Livewire::test(new class extends Component {`
+* Fixed an arrow function losing its hug when its body passes a heredoc, like `->tap(fn ($b) => $b->script(<<<JS`
+* Fixed a one-line docblock closed by `**/` gaining a stray `* */`
+* Fixed a ternary breaking apart when its else opens a block beside a variable, like `return $c ? $item : [`
+* Fixed chains and calls like `)->filter($a, fn ($v) => [`, `->handler()(function () {` and `$a % make($b)(` changing on a second run
+* Fixed a tag named by an echo, like `<{{ $tag }}>`, pairing differently once its echo is formatted
+* Fixed a multi-line `:class` binding not being re-indented like `x-bind:class`
+* Fixed a comment before a destructured array value, like `[$a] = /* c */ [0]`, being written twice
+* Fixed an assignment after an operator, like `$a && $b = foo()`, parsing with the wrong target
+* Fixed calls on numbers, like `0(1)`, and other dereferences PHP rejects being accepted
+* Fixed a blank line beside a top-level JSONC comment, like a `tsconfig.json` header, being dropped
 
 ## Version 0.14.0 (2026-11-25)
 * Added `formattedElsewhere` to the `laravel-fmt/format` reply for files another tool formats

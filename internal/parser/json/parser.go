@@ -23,6 +23,7 @@ type jsonParser struct {
 	fileLeading  []Comment
 	rootTrailing *Comment
 	fileTrailing []Comment
+	rootBlank    bool
 }
 
 // maxNestingDepth caps array/object recursion so a pathological document (a
@@ -83,7 +84,7 @@ func (p *jsonParser) exceedDepth() {
 }
 
 func (p *jsonParser) parseDocument() Value {
-	p.fileLeading, _ = p.leadingComments()
+	p.fileLeading, p.rootBlank = p.leadingComments()
 
 	if p.Eof() {
 		return nil

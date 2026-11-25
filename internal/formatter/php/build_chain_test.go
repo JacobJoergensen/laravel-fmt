@@ -783,3 +783,41 @@ func TestChainWithAMultiLineStringStaysHugged(t *testing.T) {
 	assertLayoutAtLength(t, src, src, 10)
 	assertLayoutAtLength(t, "$x = outer($a\n    ->%s('one\ntwo')->b(''));", src, 10)
 }
+
+func TestSoleTailCallKeepsRidingTheCloserOnceItsArrayBreakReadsBackAsAuthored(t *testing.T) {
+	wrap := func(body string) string {
+		return "<?php\n\nclass Foo\n{\n    public function run()\n    {\n        " + body + "\n    }\n}\n"
+	}
+
+	src := wrap("return $x && $query->where(\n'name')->filter('" + strings.Repeat("0", 49) +
+		"', fn ($v) => ['aaaaaa', 'bbbbbb', 'cccccc', 'dddd']) && $y;")
+	want := wrap("return $x\n            && $query->where(\n                'name',\n            )->filter('" +
+		strings.Repeat("0", 49) + "', fn ($v) => [\n                'aaaaaa',\n                'bbbbbb',\n" +
+		"                'cccccc',\n                'dddd',\n            ])\n            && $y;")
+
+	got := mustFormat(t, []byte(src), config.Default())
+	if string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
+func TestTailBelowABodyABareInvocationHugsStaysThereOnTheNextPass(t *testing.T) {
+	label, suffix := strings.Repeat("a", 67), strings.Repeat("b", 30)
+	src := "<?php\n\nrun(function () {\n    tap(function () {\n        step();\n    }) % (make([]))->handler()(function () {\n        ;\n    })" +
+		"->label('" + label + "')->suffix('" + suffix + "');\n});\n"
+	want := "<?php\n\nrun(function () {\n    tap(function () {\n        step();\n    }) % (make([]))->handler()(function () {\n        ;\n    })\n" +
+		"        ->label('" + label + "')\n        ->suffix('" + suffix + "');\n});\n"
+
+	got := mustFormat(t, []byte(src), config.Default())
+	if string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}

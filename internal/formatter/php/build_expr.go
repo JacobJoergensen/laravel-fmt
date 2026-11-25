@@ -140,9 +140,11 @@ func (b *builder) restoreState(s buildState) {
 // width probe rebuilds its subtree, so without reusing builds from the same
 // state nested calls cost exponential time. A span holding a comment is not
 // reused, since which build claims that comment depends on what is claimed
-// so far. Without one, a probe and a printed build are the same doc.
+// so far; so is one leading the span's first token, which a measured build
+// claims there and a printed one claims as the expression's lead. Without
+// one, a probe and a printed build are the same doc.
 func (b *builder) cachedExpr(e parser.Expr) *document.Doc {
-	if b.spanHasComment(e.Span()) {
+	if span := e.Span(); b.spanHasComment(span) || b.tokenHasComment(span.Start.Offset) {
 		return b.exprInner(e)
 	}
 
@@ -715,6 +717,7 @@ func (b *builder) binaryIndented(n *parser.BinaryExpr, indent, stmtLevel bool) *
 			inner = append(inner, document.Text(glueText), step)
 		} else {
 			headBreaks := document.HasForcedBreak(headDoc)
+
 			inner = append(inner, b.gluedRun(tails, spaced, headBreaks, glueID, glueText, plain, indented)...)
 		}
 
@@ -908,12 +911,6 @@ func (b *builder) unhuggedOperand(operand parser.Expr, hugged, depth, prefix int
 		return nil, 0
 	}
 
-	// noHugNext goes to the first list built, which has to be this call's own:
-	// a callee with a `(` in it, a call, `new` or closure, builds one first.
-	if b.spanHasLParen(call.Callee.Span()) {
-		return nil, 0
-	}
-
 	saved := b.depth
 	b.depth = depth
 	moved, opens := b.blockOpenerWidth(operand)
@@ -928,26 +925,19 @@ func (b *builder) unhuggedOperand(operand parser.Expr, hugged, depth, prefix int
 	}
 
 	b.releaseComments(mark)
+
+	// noHugNext reaches this call's own list: a chain builds its outermost list
+	// before any inside its callee. A callee kept verbatim (a comment between
+	// its steps) builds none, so the flag is cleared, not left for another.
 	b.noHugNext = true
 	unhugged := b.expr(operand)
+	b.noHugNext = false
 
 	if moved >= hugged {
 		moved, _ = document.BrokenPrefixWidth(unhugged, b.cfg.IndentWidth)
 	}
 
 	return unhugged, moved
-}
-
-func (b *builder) spanHasLParen(span parser.Span) bool {
-	i := sort.Search(len(b.tokens), func(i int) bool { return b.tokens[i].Span.Start.Offset >= span.Start.Offset })
-
-	for ; i < len(b.tokens) && b.tokens[i].Span.Start.Offset < span.End.Offset; i++ {
-		if b.tokens[i].Kind == parser.KindLParen {
-			return true
-		}
-	}
-
-	return false
 }
 
 func (b *builder) blockOpenerWidth(operand parser.Expr) (int, bool) {
@@ -2307,7 +2297,7 @@ func (b *builder) ternary(n *parser.TernaryExpr, lineKnown bool) *document.Doc {
 		}
 	}
 
-	if isDefaultValue(n.Then) {
+	if isDefaultValue(n.Then) || !document.CanBreak(then) {
 		// The else line also carries what ends the value: an entry's `,` or a
 		// statement's `;`.
 		if width, ok := b.branchOpenerWidth(n.Else, other, len(";")); ok {

@@ -72,8 +72,8 @@ func TestFormatCodeBlocks(t *testing.T) {
 		{
 			"a lone CR in code is laid out as the line break the fence writes",
 			config.Default(),
-			"```php\n0('0000000\r" + strings.Repeat("0", 100) + "')%([])",
-			"```php\n0('0000000\n" + strings.Repeat("0", 100) + "')\n    % ([])\n```\n",
+			"```php\nf('0000000\r" + strings.Repeat("0", 100) + "')%([])",
+			"```php\nf('0000000\n" + strings.Repeat("0", 100) + "')\n    % ([])\n```\n",
 		},
 		{
 			"a CRLF in code formats as the LF the fence writes",

@@ -1142,6 +1142,10 @@ func TestParsePairsACloseTagByTheEchoGluedToItsName(t *testing.T) {
 		want int
 	}{
 		{"spacing inside the echo differs", `<h{{$a}}>x</h{{ $a }}>`, 0},
+		{"trailing comma differs", `<h{{ $a, }}>x</h{{ $a }}>`, 0},
+		{"trailing comma in a call differs", `<h{{ f($a,) }}>x</h{{ f($a) }}>`, 0},
+		{"quotes of a plain string differ", `<h{{ "a" }}>x</h{{ 'a' }}>`, 0},
+		{"quotes of an interpolating string differ", `<h{{ "a$b" }}>x</h{{ 'a$b' }}>`, unpaired},
 		{"echo was an attribute bag", `<div{!! $a !!}>x</div>`, 0},
 		{"close ends an open child", `<h{{ $a }}><p>x</h{{ $a }}>`, 0},
 		{"other expression", `<h{{ $a }}>x</h{{ $b }}>`, unpaired},

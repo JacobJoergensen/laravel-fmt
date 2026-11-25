@@ -666,6 +666,50 @@ func TestChainedAssignmentMeasuresABrokenListTargetFlat(t *testing.T) {
 	}
 }
 
+func TestAssignmentAsABinaryOperandKeepsItsLayoutOnTheNextPass(t *testing.T) {
+	a, b := strings.Repeat("a", 32), strings.Repeat("b", 46)
+	src := "<?php\n\n$q->a()->b([\n[]], '') % $c = run(fn ($x, $y) => $x % " + a + "() % " + b + "(\n$z));\n"
+	want := "<?php\n\n$q->a()->b([\n    [],\n], '') % $c = run(\n    fn ($x, $y) => $x\n        % " + a + "()\n        % " + b +
+		"(\n            $z,\n        ),\n);\n"
+
+	got := string(mustFormat(t, []byte(src), config.Default()))
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if twice := string(mustFormat(t, []byte(got), config.Default())); twice != got {
+		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
+func TestCommentBeforeADestructuredArrayValueIsWrittenOnce(t *testing.T) {
+	src := "<?php\n\n[$a] = /* c */ [0];\n"
+
+	if got := string(mustFormat(t, []byte(src), config.Default())); got != src {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, src)
+	}
+}
+
+func TestOperandCallingACallResultGluesItsBrokenListOnTheFirstPass(t *testing.T) {
+	long := strings.Repeat("0", 64)
+	wrap := func(body string) string {
+		return "<?php\n\nclass Foo\n{\n    public function run()\n    {\n        " + body + "\n    }\n}\n"
+	}
+
+	callee := "make($" + strings.Repeat("b", 34) + ")"
+	src := wrap("$a % " + callee + "($f . '" + long + "', ['x']);")
+	want := wrap("$a % " + callee + "(\n            $f.'" + long + "',\n            ['x'],\n        );")
+
+	got := string(mustFormat(t, []byte(src), config.Default()))
+	if got != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if twice := string(mustFormat(t, []byte(got), config.Default())); twice != got {
+		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+	}
+}
+
 func TestTernaryElseBlockCountsTheEntryTerminator(t *testing.T) {
 	long := "$" + strings.Repeat("a", 107)
 	src := "<?php\n\nA([0 ? 0 : [" + long + "]]);\n"
@@ -707,17 +751,56 @@ func TestTernaryKeepsTheLineOpeningABlockBesideADefault(t *testing.T) {
 			"return $item === null ? null : (object) [\n    'kind' => 'item',\n    'model' => $item,\n];",
 			"return $item === null ? null : (object) [\n    'kind' => 'item',\n    'model' => $item,\n];",
 		},
-		{
-			"meaningful then before a cast block",
-			"return $item === null ? $fallback : (object) [\n    'kind' => 'item',\n    'model' => $item,\n];",
-			"return $item === null\n    ? $fallback\n    : (object) [\n        'kind' => 'item',\n        'model' => $item,\n    ];",
-		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := string(mustFormat(t, []byte("<?php\n\n"+tc.src+"\n"), config.Default()))
 
+			if want := "<?php\n\n" + tc.want + "\n"; got != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+
+			if twice := string(mustFormat(t, []byte(got), config.Default())); twice != got {
+				t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
+			}
+		})
+	}
+}
+
+func TestTernaryElseBlockHugsBesideAnUnbreakableThen(t *testing.T) {
+	long := strings.Repeat("a", 95)
+
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			"variable then, array else",
+			"return is_array($item) ? $item : [\n    'name' => $key,\n    'value' => $item,\n];",
+			"return is_array($item) ? $item : [\n    'name' => $key,\n    'value' => $item,\n];",
+		},
+		{
+			"variable then, cast block else",
+			"return $item === null ? $fallback : (object) [\n    'kind' => 'item',\n    'model' => $item,\n];",
+			"return $item === null ? $fallback : (object) [\n    'kind' => 'item',\n    'model' => $item,\n];",
+		},
+		{
+			"property then, call hugging an array",
+			"$x = $cond ? $a->b : foo([\n    'name' => $key,\n]);",
+			"$x = $cond ? $a->b : foo([\n    'name' => $key,\n]);",
+		},
+		{
+			"opening line too wide",
+			"return is_array($" + long + ") ? $item : [\n    'name' => $key,\n];",
+			"return is_array($" + long + ")\n    ? $item\n    : [\n        'name' => $key,\n    ];",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(mustFormat(t, []byte("<?php\n\n"+tc.src+"\n"), config.Default()))
 			if want := "<?php\n\n" + tc.want + "\n"; got != want {
 				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 			}
@@ -974,9 +1057,9 @@ func TestCommentInsideAWidthProbeKeepsTheLayout(t *testing.T) {
 		},
 		{
 			name: "trailing comment in a chained call's argument",
-			src: "<?php class A{function a(){0(0)->a(0('00000000000000000000000000000000'#$width%'second-part-of-the-label'\n" +
+			src: "<?php class A{function a(){f(0)->a(f('00000000000000000000000000000000'#$width%'second-part-of-the-label'\n" +
 				".($kind%2?'odd':'even')));}}\n",
-			want: "<?php\n\nclass A\n{\n    function a()\n    {\n        0(0)->a(0(\n" +
+			want: "<?php\n\nclass A\n{\n    function a()\n    {\n        f(0)->a(f(\n" +
 				"            '00000000000000000000000000000000' #$width%'second-part-of-the-label'\n" +
 				"                .($kind % 2 ? 'odd' : 'even'),\n        ));\n    }\n}\n",
 		},

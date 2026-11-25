@@ -708,6 +708,8 @@ func isHuggableArg(arg parser.Expr) bool {
 		return bytes.Contains(v.Token.Text, []byte("\n"))
 	case *parser.NewExpr:
 		return len(v.Args) >= 2 || (len(v.Args) > 0 && isHuggableArg(v.Args[len(v.Args)-1]))
+	case *parser.AnonClassExpr:
+		return len(v.Members) > 0 || commentTrivia(v.RBrace.Leading) > 0
 	case *parser.ArrowFnExpr:
 		return isHuggableArrowBody(v.Body)
 	case *parser.BinaryExpr:

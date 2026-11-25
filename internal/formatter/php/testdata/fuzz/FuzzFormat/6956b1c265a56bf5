@@ -1,2 +1,2 @@
 go test fuzz v1
-[]byte("<?php 0(A000) %0(A000);0()->A(A->A[#0\n[]]);")
+[]byte("<?php f(A000) %f(A000);f()->A(A->A[#0\n[]]);")

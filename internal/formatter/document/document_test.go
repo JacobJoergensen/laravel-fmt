@@ -33,6 +33,19 @@ func TestFlatWidthRefusesMultiLineText(t *testing.T) {
 	}
 }
 
+func TestPrefixWidthOfMultiLineTextIsItsFirstLine(t *testing.T) {
+	doc := Concat(Text("call("), Text("<<<JS\n    a very long body line\nJS"), Text(")"))
+
+	for name, measure := range map[string]func(*Doc, int) (int, bool){
+		"FlatPrefixWidth":   FlatPrefixWidth,
+		"BrokenPrefixWidth": BrokenPrefixWidth,
+	} {
+		if width, broke := measure(doc, 4); width != len("call(<<<JS") || !broke {
+			t.Fatalf("%s = %d, %v; want %d, true", name, width, broke, len("call(<<<JS"))
+		}
+	}
+}
+
 func TestClosingLineWidthMeasuresLastBrokenLine(t *testing.T) {
 	array := func(group func(*Doc) *Doc) *Doc {
 		return group(Concat(Text("["), Indent(Concat(SoftLine(), Text("1"))), SoftLine(), Text("]")))

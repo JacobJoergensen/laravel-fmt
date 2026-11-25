@@ -915,7 +915,7 @@ func TestAStatementCommentIsPrintedOnce(t *testing.T) {
 		name string
 		src  string
 	}{
-		{"island comment above a call taking a closure", "0<?php # note\n0(function () {\n    ;\n});\n"},
+		{"island comment above a call taking a closure", "0<?php # note\nf(function () {\n    ;\n});\n"},
 		{"comment above a call taking a closure", "<?php\n\n// note\nf(function () {\n    return 1;\n});\n"},
 	}
 
@@ -1517,8 +1517,8 @@ func TestFormatIgnoreDirectiveStillFreezesItsNode(t *testing.T) {
 func TestFormatChainNoBreakRunSharesOneIndent(t *testing.T) {
 	cases := map[string]struct{ src, want string }{
 		"call after a property": {
-			"<?php 0()->A->A(([\n0]))->A([\n1])->A;",
-			"<?php\n\n0()->A->A(\n    ([\n        0,\n    ]),\n)\n    ->A([\n        1,\n    ])\n    ->A;\n",
+			"<?php $f()->A->A(([\n0]))->A([\n1])->A;",
+			"<?php\n\n$f()->A->A(\n    ([\n        0,\n    ]),\n)\n    ->A([\n        1,\n    ])\n    ->A;\n",
 		},
 		"bare call after a hug": {
 			"<?php A->A()([\n0])->A([\n1])->A;",
