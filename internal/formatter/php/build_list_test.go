@@ -46,6 +46,37 @@ func TestValueStaysOnItsArrowLineWhenPintJoinsIt(t *testing.T) {
 	}
 }
 
+func TestACommentEndingTheOpeningBracketsLineStaysThere(t *testing.T) {
+	cases := map[string]struct{ src, want string }{
+		"a line comment": {
+			"foo([ // [tl! highlight:2]\n    A::class,\n]);",
+			"foo([ // [tl! highlight:2]\n    A::class,\n]);",
+		},
+		"an empty array": {
+			"$a = [ // [tl! highlight]\n];",
+			"$a = [ // [tl! highlight]\n];",
+		},
+		"a comment before the first element": {
+			"$a = [/* c */ 1];",
+			"$a = [\n    /* c */\n    1,\n];",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := mustFormat(t, []byte("<?php\n\n"+tc.src+"\n"), config.Default())
+
+			if want := "<?php\n\n" + tc.want + "\n"; string(got) != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent:\n%s", twice)
+			}
+		})
+	}
+}
+
 func TestArrayKeyStaysOnOneLinePastThePrintWidth(t *testing.T) {
 	cases := map[string]struct{ src, want string }{
 		"beside a value that cannot break": {

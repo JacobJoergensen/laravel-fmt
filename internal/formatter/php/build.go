@@ -324,7 +324,15 @@ func (b *builder) mixedSeparator(prevEnd, curStart int, prev, next parser.Stmt) 
 }
 
 func (b *builder) mixedBreak(prev, next parser.Stmt) *document.Doc {
-	if b.blankBefore(next.Span().Start.Offset) || b.forceBlankBetween(prev, next) {
+	offset := next.Span().Start.Offset
+	before, _ := b.runHeadTrivia(offset)
+
+	// As in buildSequence: a sorted import's blank-before belonged to another,
+	// and a split `use A, B;` piece shares its blank with the first.
+	piece := prev.Span().Start.Offset == offset
+	authored := !piece && !b.useRunInterior[offset] && b.blankBefore(before)
+
+	if authored || b.forceBlankBetween(prev, next) {
 		return document.Concat(document.HardLine(), document.HardLine())
 	}
 

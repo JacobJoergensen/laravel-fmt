@@ -3698,3 +3698,39 @@ func TestFormatMultilineAttrValueFollowsItsAttribute(t *testing.T) {
 		})
 	}
 }
+
+func TestACommentAfterContentOnItsLineStaysThere(t *testing.T) {
+	cases := map[string]string{
+		"an HTML comment beside a component": "<livewire:todo-count :todos=\"$todos\" /> <!-- [tl! remove] -->\n" +
+			"<livewire:todo-count :todos=\"$this->todos\" /> <!-- [tl! add] -->\n",
+		"a Blade comment":               "<div>\n    <p>x</p> {{-- note --}}\n</div>\n",
+		"after a directive":             "@if ($photo) <!-- [tl! highlight:2] -->\n    <img src=\"{{ $photo }}\">\n@endif\n",
+		"after an open tag before text": "<div wire:loading> <!-- [tl! highlight:2] -->\n    Saving...\n</div>\n",
+	}
+
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := mustFormat(t, []byte(src), config.Default())
+			if string(got) != src {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, src)
+			}
+		})
+	}
+}
+
+func TestABlankLineBeforeADirectiveGoesBelowACommentEndingTheLineAbove(t *testing.T) {
+	cfg := config.Default()
+	cfg.Blade.BlankLineBeforeDirectives = []string{"if"}
+
+	src := "<div>\n    <div>x</div> {{-- note --}}\n    @if ($a)\n        y\n    @endif\n</div>\n"
+	want := "<div>\n    <div>x</div> {{-- note --}}\n\n    @if ($a)\n        y\n    @endif\n</div>\n"
+
+	got := mustFormat(t, []byte(src), cfg)
+	if string(got) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+
+	if twice := mustFormat(t, got, cfg); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent:\n%s", twice)
+	}
+}

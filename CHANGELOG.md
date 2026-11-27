@@ -16,6 +16,12 @@
 * Fixed a blank line beside a top-level JSONC comment, like a `tsconfig.json` header, being dropped
 * Fixed a multi-line attribute value drifting right when its attribute moves off the tag's line
 * Fixed a long array key, like `($a[$k] ?? '') => $v`, being broken across lines
+* Fixed sorted imports in a mixed PHP and HTML file moving the blank line after `<?php`
+* Fixed a comment after an opening `{` or `[`, like `[ // note`, moving to the next line
+* Fixed an HTML or Blade comment ending a line, like `<!-- [tl! highlight] -->`, moving to its own line
+* Fixed a chain like `collect($a)->map(function () {` … `})->all()` losing its hug as an argument
+* Fixed a multi-line trait `use` list being joined onto one line
+* Fixed invalid imports like `use A\{};` and `use A, B,;` being accepted
 
 ## Version 0.14.0 (2026-11-25)
 * Added `formattedElsewhere` to the `laravel-fmt/format` reply for files another tool formats

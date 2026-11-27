@@ -94,7 +94,15 @@ func (b *builder) preprocessUseRuns(stmts []parser.Stmt) []parser.Stmt {
 			// Sorting reordered the run, so an author blank line before any
 			// import now points at the wrong statement; the run stays one
 			// contiguous group, keeping only the blank before its first import.
+			head := run[0].Span().Start.Offset
+
 			for _, u := range run[1:] {
+				// A piece of the head's own split `use A, B;` shares its offset, which
+				// must keep the head's blank-before.
+				if u.Span().Start.Offset == head {
+					continue
+				}
+
 				if b.useRunInterior == nil {
 					b.useRunInterior = make(map[int]bool)
 				}

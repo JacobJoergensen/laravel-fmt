@@ -2753,10 +2753,19 @@ func (e *emitter) emitInlineChildNodes(children []htmlparser.Node) {
 }
 
 func (e *emitter) emitBlockInlineChildren(el *htmlparser.Element) {
+	lines := authoredLines(el.Children)
+
 	e.w.Indent()
+
+	if len(lines) > 1 && e.isTrailingCommentLine(lines[0]) {
+		e.w.Space()
+		e.emitAuthoredLine(lines[0])
+		lines = lines[1:]
+	}
+
 	e.w.Newline()
 
-	for i, line := range authoredLines(el.Children) {
+	for i, line := range lines {
 		if i > 0 {
 			e.w.Newline()
 		}
@@ -2766,6 +2775,29 @@ func (e *emitter) emitBlockInlineChildren(el *htmlparser.Element) {
 
 	e.w.Dedent()
 	e.w.Newline()
+}
+
+func (e *emitter) isTrailingCommentLine(line []htmlparser.Node) bool {
+	comments := 0
+
+	for _, n := range line {
+		switch nn := n.(type) {
+		case *htmlparser.Comment:
+			if !e.trailsItsLine(nn) {
+				return false
+			}
+
+			comments++
+		case *htmlparser.Text:
+			if len(bytes.TrimSpace(nn.Text)) > 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+
+	return comments == 1
 }
 
 // authoredLines splits a body into the lines its author wrote. Only the run's
@@ -3097,6 +3129,14 @@ func (e *emitter) emitInterleaved(nodes []parser.Node, leadFirst bool) bool {
 			return
 		}
 
+		// Checked before the forced blank: the comment stays on the line it ends,
+		// and the blank goes before the directive after it.
+		if (emitted || leadFirst) && e.trailsItsLine(next) {
+			e.w.Space()
+
+			return
+		}
+
 		if force && emitted {
 			e.w.RequestBlankLine()
 		}
@@ -3205,7 +3245,9 @@ func (e *emitter) emitInterleaved(nodes []parser.Node, leadFirst bool) bool {
 				bodyIndent--
 			}
 
+			// A comment ending the line above belongs to that line, not to the directive.
 			_, afterComment := prev.(*parser.CommentNode)
+			afterComment = afterComment && !e.trailsItsLine(prev)
 			forceBlank = !prevText && !afterComment && e.blankBeforeDirective(nodes[i:])
 
 			emitItem(node)
@@ -3249,6 +3291,17 @@ func rawPhpBlockRole(n parser.Node) (opens, closes, branch bool) {
 	}
 
 	return raw.Opens, raw.Closes, raw.Branch
+}
+
+func (e *emitter) trailsItsLine(n parser.Node) bool {
+	switch n.(type) {
+	case *htmlparser.Comment, *parser.CommentNode:
+		span := n.Span()
+
+		return htmlfmt.TrailsALine(e.src, span.Start.Offset, span.End.Offset)
+	}
+
+	return false
 }
 
 func isInlineNode(n parser.Node) bool {

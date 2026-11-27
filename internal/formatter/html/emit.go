@@ -51,7 +51,7 @@ func emitFile(w *formatter.Writer, file *parser.File, cfg *config.File) {
 
 		switch {
 		case first, gluedTo(prevEnd, node):
-		case joinable && !brokeSincePrev && Gluable(node):
+		case joinable && !brokeSincePrev && Gluable(node), trailsItsLine(file.Src, node):
 			w.Space()
 		default:
 			w.Newline()
@@ -487,7 +487,7 @@ func emitStructuralChildren(w *formatter.Writer, src []byte, idx *docIndex, el *
 		switch {
 		case prev == nil && hugOpen:
 		case gluedTo(prevEnd, child):
-		case inline && prev != nil && !brokeSincePrev:
+		case inline && prev != nil && !brokeSincePrev, trailsItsLine(src, child):
 			w.Space()
 		default:
 			w.Newline()

@@ -185,3 +185,28 @@ func TestCommentAfterADocblockBeforeACloserKeepsItsOwnAlignment(t *testing.T) {
 		}
 	}
 }
+
+func TestACommentAfterTheOpeningBraceOfACommentOnlyBodyKeepsItsLine(t *testing.T) {
+	cases := map[string]string{
+		"an if":            "if ($a) { // note\n    // body\n}",
+		"a class":          "class A\n{ // note\n    // body\n}",
+		"a closure":        "$f = function () { // note\n    // body\n};",
+		"a lone comment":   "if ($a) { // note\n}",
+		"a blank below it": "if ($a) { // note\n\n    // body\n}",
+	}
+
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := "<?php\n\n" + src + "\n"
+
+			got := mustFormat(t, []byte(in), config.Default())
+			if string(got) != in {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, in)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent:\n%s", twice)
+			}
+		})
+	}
+}

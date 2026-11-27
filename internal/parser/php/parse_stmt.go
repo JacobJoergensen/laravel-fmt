@@ -608,6 +608,11 @@ func (p *parser) parseUseStmt() Stmt {
 		lb := p.advance()
 		items := p.parseUseItems(true)
 		rb := p.expect(KindRBrace)
+
+		if len(items) == 0 {
+			p.addError(rb.Span.Start, "expected an import in the group")
+		}
+
 		semi := p.expectStmtTerminator()
 
 		return &UseStmt{
@@ -629,11 +634,6 @@ func (p *parser) parseUseStmt() Stmt {
 
 	for p.peekKind() == KindComma {
 		p.advance()
-
-		if p.peekKind() == KindSemicolon {
-			break
-		}
-
 		items = append(items, p.parseUseItem(false))
 	}
 

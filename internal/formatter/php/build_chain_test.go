@@ -821,3 +821,33 @@ func TestTailBelowABodyABareInvocationHugsStaysThereOnTheNextPass(t *testing.T) 
 		t.Fatalf("not idempotent.\n=== once ===\n%s\n=== twice ===\n%s", got, twice)
 	}
 }
+
+func TestAChainBrokenOnlyByAMiddleClosureHugsItAsAnArgument(t *testing.T) {
+	among := "$this->call(\n    'upload',\n    collect($files)->map(function ($file) {\n" +
+		"        return $file->name;\n    })->toArray(),\n    $multiple,\n);"
+	arrow := "$f = fn ($a) => collect($a)->map(function ($x) {\n    return $x;\n})->all();"
+
+	cases := map[string]struct{ src, want string }{
+		"among arguments":  {among, among},
+		"in an arrow body": {arrow, arrow},
+		"unless the last call can break": {
+			"foo(collect($a)->map(function ($x) {\n    return $x;\n})->implode(', ', $aLongArgumentName.$another), $b);",
+			"foo(\n    collect($a)\n        ->map(function ($x) {\n            return $x;\n        })\n" +
+				"        ->implode(', ', $aLongArgumentName.$another),\n    $b,\n);",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := mustFormat(t, []byte("<?php\n\n"+tc.src+"\n"), config.Default())
+
+			if want := "<?php\n\n" + tc.want + "\n"; string(got) != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent:\n%s", twice)
+			}
+		})
+	}
+}

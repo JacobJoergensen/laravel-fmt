@@ -1387,3 +1387,29 @@ func TestFormatEmptyInputStaysEmpty(t *testing.T) {
 		})
 	}
 }
+
+func TestSortingImportsInAMixedFileKeepsTheBlankLineAtTheRunsHead(t *testing.T) {
+	cases := map[string]struct{ src, want string }{
+		"after a comment on the tag line": {
+			"<?php // path\n\nuse B;\nuse A;\n\n$x = 1;\n?>\n<p>x</p>\n",
+			"<?php // path\n\nuse A;\nuse B;\n\n$x = 1;\n?>\n<p>x</p>\n",
+		},
+		"a split list after HTML": {
+			"<p>x</p>\n<?php\n\nuse B, A;\n\n$x = 1; ?>\n",
+			"<p>x</p>\n<?php\n\nuse A;\nuse B;\n\n$x = 1; ?>\n",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := string(mustFormat(t, []byte(tc.src), config.Default()))
+			if got != tc.want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+
+			if twice := string(mustFormat(t, []byte(got), config.Default())); twice != got {
+				t.Fatalf("not idempotent:\n%s", twice)
+			}
+		})
+	}
+}

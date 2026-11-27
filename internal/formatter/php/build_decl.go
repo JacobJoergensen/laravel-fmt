@@ -757,6 +757,14 @@ func (b *builder) traitUseStmt(n *parser.TraitUseStmt) *document.Doc {
 
 	use := document.Concat(document.Text("use "), document.Join(document.Text(", "), names))
 
+	if slices.ContainsFunc(n.Traits[1:], func(t *parser.Name) bool { return b.authorBroke(t.Span().Start.Offset) }) {
+		rest := document.Join(document.Concat(document.Text(","), document.HardLine()), names[1:])
+		use = document.Concat(
+			document.Text("use "), names[0], document.Text(","),
+			document.Indent(document.Concat(document.HardLine(), rest)),
+		)
+	}
+
 	if !has(n.LBrace) {
 		return document.Concat(use, document.Text(";"))
 	}

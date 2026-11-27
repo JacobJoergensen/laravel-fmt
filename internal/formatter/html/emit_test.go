@@ -949,3 +949,20 @@ func TestFormatFormatsAJSONScriptBody(t *testing.T) {
 		})
 	}
 }
+
+func TestACommentAfterContentOnItsLineStaysThere(t *testing.T) {
+	cases := map[string]string{
+		"after a block element": "<div>\n    <p>Save</p> <!-- [tl! highlight] -->\n    <p>x</p>\n</div>\n",
+		"at the top level":      "<p>x</p> <!-- note -->\n<p>y</p>\n",
+		"after an open tag":     "<div> <!-- note -->\n    <p>x</p>\n</div>\n",
+	}
+
+	for name, src := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := mustFormat(t, []byte(src), config.Default())
+			if string(got) != src {
+				t.Fatalf("got %q, want %q", got, src)
+			}
+		})
+	}
+}

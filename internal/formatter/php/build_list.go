@@ -1015,23 +1015,13 @@ func (b *builder) array(n *parser.ArrayExpr) *document.Doc {
 
 	if len(n.Elements) == 0 {
 		// An array with no elements can still hold a comment (a commented-out
-		// entry); print it on its own line rather than dropping it.
-		comments := b.allComments(n.Close.Span.Start.Offset)
-		if len(comments) == 0 {
+		// entry); print it rather than dropping it.
+		body := b.commentOnlyBody(open, closer, n.Close)
+		if body == nil {
 			return document.Text(open + closer)
 		}
 
-		parts := make([]*document.Doc, 0, len(comments)*2)
-		for _, c := range comments {
-			parts = append(parts, document.HardLine(), c)
-		}
-
-		return document.GroupBreak(document.Concat(
-			document.Text(open),
-			document.Indent(document.Concat(parts...)),
-			document.HardLine(),
-			document.Text(closer),
-		))
+		return document.GroupBreak(body)
 	}
 
 	// A hole (`[$a, , $c]`) carries meaning in its exact comma position, which a
@@ -1096,11 +1086,16 @@ func (b *builder) array(n *parser.ArrayExpr) *document.Doc {
 	}
 
 	b.depth++
-	inner, hasComment := b.arrayElements(n, gaps)
+	inner, openerTrail, hasComment := b.arrayElements(n, gaps)
 	b.depth--
 
+	opener := document.Text(open)
+	if openerTrail != nil {
+		opener = document.Concat(opener, openerTrail)
+	}
+
 	body := document.Concat(
-		document.Text(open),
+		opener,
 		document.Indent(document.Concat(document.SoftLine(), inner)),
 		document.SoftLine(),
 		document.Text(closer),
@@ -1206,10 +1201,11 @@ func (b *builder) inlineLeadComment(offset int) *document.Doc {
 
 // arrayElements lays out an array's elements with their comments and commas,
 // reporting whether any comment was found so the caller can force the array
-// broken. gaps, when non-nil, carries each element's aligned key-to-`=>` gap.
-func (b *builder) arrayElements(n *parser.ArrayExpr, gaps []*document.Doc) (*document.Doc, bool) {
+// broken. openerTrail holds the comments sharing the `[` line, which the
+// caller writes after it. gaps, when non-nil, carries each element's aligned
+// key-to-`=>` gap.
+func (b *builder) arrayElements(n *parser.ArrayExpr, gaps []*document.Doc) (inner, openerTrail *document.Doc, hasComment bool) {
 	parts := make([]*document.Doc, 0, len(n.Elements)*4)
-	hasComment := false
 	last := len(n.Elements) - 1
 
 	for i, el := range n.Elements {
@@ -1220,10 +1216,18 @@ func (b *builder) arrayElements(n *parser.ArrayExpr, gaps []*document.Doc) (*doc
 				parts = append(parts, document.HardLine())
 			}
 
-			// Nothing precedes the first element, so every comment before it prints
-			// on its own line. allComments keeps the raw text (no leading space),
-			// which is what a comment sharing the `[` line collapses to on a reprint.
-			comments := b.allComments(offset)
+			// A comment ending the `[` line stays there, as Pint leaves it; one in front
+			// of the first element on that line goes on its own line.
+			comments, trail := b.splitComments(offset)
+			if len(trail) > 0 && !b.hasLeadingNewline(offset) {
+				comments, trail = b.allComments(offset), nil
+			}
+
+			if len(trail) > 0 {
+				openerTrail = document.LineSuffix(document.Concat(trail...))
+				hasComment = true
+			}
+
 			for _, c := range comments {
 				parts = append(parts, c, document.HardLine())
 				hasComment = true
@@ -1291,7 +1295,7 @@ func (b *builder) arrayElements(n *parser.ArrayExpr, gaps []*document.Doc) (*doc
 		hasComment = true
 	}
 
-	return document.Concat(parts...), hasComment
+	return document.Concat(parts...), openerTrail, hasComment
 }
 
 // arrayElement lays out one element; gap, when non-nil, replaces the default

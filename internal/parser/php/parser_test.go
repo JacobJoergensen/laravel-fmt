@@ -1283,3 +1283,22 @@ func TestDeepNestingReportsOneError(t *testing.T) {
 		t.Fatalf("errors = %v, want one depth error", errs)
 	}
 }
+
+func TestImportListsPHPRejectsAreRejected(t *testing.T) {
+	cases := []struct {
+		src    string
+		reject bool
+	}{
+		{`<?php use A\{};`, true},
+		{"<?php use A, B,;", true},
+		{`<?php use A\{B,};`, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.src, func(t *testing.T) {
+			if _, errs := Parse([]byte(tc.src)); (len(errs) != 0) != tc.reject {
+				t.Fatalf("errors for %q: %v, want rejected %v", tc.src, errs, tc.reject)
+			}
+		})
+	}
+}

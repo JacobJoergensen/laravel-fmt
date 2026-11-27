@@ -272,3 +272,31 @@ const CollapsibleSpace = " \t\n\r"
 func IsCollapsibleSpace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }
+
+// TrailsALine reports whether src[start:end] ends a line after other content.
+func TrailsALine(src []byte, start, end int) bool {
+	i := start
+	for i > 0 && (src[i-1] == ' ' || src[i-1] == '\t') {
+		i--
+	}
+
+	if i == 0 || src[i-1] == '\n' || src[i-1] == '\r' {
+		return false
+	}
+
+	j := end
+	for j < len(src) && (src[j] == ' ' || src[j] == '\t') {
+		j++
+	}
+
+	return j == len(src) || src[j] == '\n' || src[j] == '\r'
+}
+
+// A comment ending a line annotates it (Torchlight's `<!-- [tl! highlight] -->`
+// marks the line it sits on), so it stays there.
+func trailsItsLine(src []byte, n parser.Node) bool {
+	_, ok := n.(*parser.Comment)
+	span := n.Span()
+
+	return ok && TrailsALine(src, span.Start.Offset, span.End.Offset)
+}

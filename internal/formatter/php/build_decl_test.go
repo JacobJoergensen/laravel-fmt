@@ -57,6 +57,7 @@ func TestTraitUsesSplitOnlyWhenTheProjectSplitsThem(t *testing.T) {
 	grouped := "    /** @use HasRecords<RecordFactory> */\n    use HasRecords, Notifies, Archives;\n"
 	split := "    /** @use HasRecords<RecordFactory> */\n    use HasRecords;\n    use Notifies;\n    use Archives;\n"
 	adapted := "    use Notifies, Archives {\n        Notifies::send insteadof Archives;\n    }\n"
+	broken := "    use HasRecords,\n        Notifies,\n        Archives;\n"
 
 	tests := []struct {
 		name  string
@@ -68,6 +69,7 @@ func TestTraitUsesSplitOnlyWhenTheProjectSplitsThem(t *testing.T) {
 		{"a split list stays split", false, split, split},
 		{"the project's rules split a grouped list", true, grouped, split},
 		{"a list with adaptations stays grouped", true, adapted, adapted},
+		{"a list the author broke keeps one trait per line", false, broken, broken},
 	}
 
 	for _, tc := range tests {

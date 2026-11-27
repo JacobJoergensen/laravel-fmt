@@ -833,21 +833,45 @@ func (b *builder) hasBreakingTrail(offset int) bool {
 // is comments (the leading trivia of its closing brace), or nil when the body
 // is truly empty.
 func (b *builder) danglingComments(rbrace parser.Token) *document.Doc {
-	comments := b.allComments(rbrace.Span.Start.Offset)
-	if len(comments) == 0 {
+	return b.commentOnlyBody("{", "}", rbrace)
+}
+
+func (b *builder) commentOnlyBody(open, closer string, end parser.Token) *document.Doc {
+	offset := end.Span.Start.Offset
+
+	// A comment after the opener stays on its line once the body spans lines,
+	// as Pint leaves it; Torchlight's `// [tl! …]` marks the line it sits on.
+	var comments, trail []*document.Doc
+	if slices.ContainsFunc(b.leadingAt(offset), breaksLine) {
+		comments, trail = b.splitComments(offset)
+	} else {
+		comments = b.allComments(offset)
+	}
+
+	if len(comments) == 0 && len(trail) == 0 {
 		return nil
 	}
 
-	inner := make([]*document.Doc, 0, len(comments)*2)
+	inner := make([]*document.Doc, 0, len(comments)*2+2)
+	if len(trail) > 0 {
+		inner = append(inner, document.LineSuffix(document.Concat(trail...)))
+
+		// The first own-line comment has no comment before it in lead, so the
+		// blank the author left after the brace's comment is kept here.
+		if len(comments) > 0 && b.blankBefore(offset) {
+			inner = append(inner, document.HardLine())
+		}
+	}
+
 	for _, c := range comments {
 		inner = append(inner, document.HardLine(), c)
 	}
 
 	return document.Concat(
-		document.Text("{"),
+		document.Text(open),
 		document.Indent(document.Concat(inner...)),
 		document.HardLine(),
-		document.Text("}"),
+		document.Text(closer),
 	)
 }
 
@@ -1169,8 +1193,9 @@ func (b *builder) buildSequence(spans []parser.Span, docs []*document.Doc, force
 
 			// A reordered import's author blank-before no longer applies (it
 			// pointed at a different statement); the kind-group separators from
-			// forceBlank still do.
-			authored := !b.useRunInterior[offset] && b.blankBefore(before)
+			// forceBlank still do. A later piece of a split `use A, B;` shares the
+			// first's blank.
+			authored := !repeat && !b.useRunInterior[offset] && b.blankBefore(before)
 
 			if forced || authored {
 				parts = append(parts, document.HardLine())

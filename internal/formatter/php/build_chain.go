@@ -236,6 +236,18 @@ func (b *builder) postfix(e parser.Expr, stmtLevel bool) *document.Doc {
 			return chainConcat(headDoc, links)
 		}
 
+		// Elsewhere the printer judges the same shape at the real column. Only
+		// the opening line is measured there, so the last call must not break:
+		// on its closer line it would read back as authored.
+		if !stmtLevel && methodCalls >= 2 && !slices.ContainsFunc(links, brokenBefore) {
+			if k := middleBreakingCall(headDoc, links); k >= 0 && !document.CanBreak(links[k+1].doc) {
+				opener, _ := document.OpeningLineWidth(chainConcat(headDoc, links[:k+1]), b.cfg.IndentWidth)
+				glued := chainConcat(headDoc, links)
+
+				return document.ConditionalGroup(document.Opener(opener, glued), linkGroup(broken))
+			}
+		}
+
 		if stmtLevel && methodCalls >= 2 && !slices.ContainsFunc(links, brokenBefore) && b.lastCallBreaksAnyway(e, headDoc, links) {
 			return b.onlyLastCallBreaks(headDoc, headLineLinks(links))
 		}
@@ -2639,25 +2651,8 @@ func collectChainSpine(expr parser.Expr) []chainStep {
 // after it: the chain then reads as the head through that call, broken, and
 // the last call riding its closer, while both of those lines fit.
 func (b *builder) middleCallBreaks(headDoc *document.Doc, links []chainLink) bool {
-	if document.HasForcedBreak(headDoc) {
-		return false
-	}
-
-	k := -1
-
-	for i, l := range links {
-		if !document.HasForcedBreak(l.doc) {
-			continue
-		}
-
-		if k >= 0 {
-			return false
-		}
-
-		k = i
-	}
-
-	if k < 0 || k != len(links)-2 || !links[k].call || !links[k+1].call || !slices.ContainsFunc(links[:k], isCallLink) {
+	k := middleBreakingCall(headDoc, links)
+	if k < 0 {
 		return false
 	}
 
@@ -2672,6 +2667,35 @@ func (b *builder) middleCallBreaks(headDoc *document.Doc, links []chainLink) boo
 	tail := document.FlatWidth(links[k+1].doc, b.cfg.IndentWidth)
 
 	return b.depth*b.cfg.IndentWidth+closer+tail+b.chainStmtTail <= b.cfg.PrintWidth
+}
+
+// middleBreakingCall returns the only forced-broken link when it is the
+// next-to-last call with a call before it (`collect($a)->map(function () {`
+// … `})->all()`), or -1.
+func middleBreakingCall(headDoc *document.Doc, links []chainLink) int {
+	if document.HasForcedBreak(headDoc) {
+		return -1
+	}
+
+	k := -1
+
+	for i, l := range links {
+		if !document.HasForcedBreak(l.doc) {
+			continue
+		}
+
+		if k >= 0 {
+			return -1
+		}
+
+		k = i
+	}
+
+	if k < 0 || k != len(links)-2 || !links[k].call || !links[k+1].call || !slices.ContainsFunc(links[:k], isCallLink) {
+		return -1
+	}
+
+	return k
 }
 
 func isCallLink(l chainLink) bool {
