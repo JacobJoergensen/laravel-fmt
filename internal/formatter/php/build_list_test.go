@@ -46,6 +46,37 @@ func TestValueStaysOnItsArrowLineWhenPintJoinsIt(t *testing.T) {
 	}
 }
 
+func TestArrayKeyStaysOnOneLinePastThePrintWidth(t *testing.T) {
+	cases := map[string]struct{ src, want string }{
+		"beside a value that cannot break": {
+			"$a = [\n    realpath(__DIR__.'/../../Routing/Console/stubs/controller.nested.singleton.api.stub')" +
+				" => 'controller.nested.singleton.api.stub',\n];",
+			"$a = [\n    realpath(__DIR__.'/../../Routing/Console/stubs/controller.nested.singleton.api.stub')" +
+				" => 'controller.nested.singleton.api.stub',\n];",
+		},
+		"beside a value that breaks in place": {
+			"$a = [\n    'truncate '.$this->wrapTable($query->from).' restart identity'" +
+				".(static::$cascadeTruncate ? ' cascade' : '') => ['a' => 1, 'b' => 2],\n];",
+			"$a = [\n    'truncate '.$this->wrapTable($query->from).' restart identity'" +
+				".(static::$cascadeTruncate ? ' cascade' : '') => [\n        'a' => 1,\n        'b' => 2,\n    ],\n];",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := mustFormat(t, []byte("<?php\n\n"+tc.src+"\n"), config.Default())
+
+			if want := "<?php\n\n" + tc.want + "\n"; string(got) != want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent:\n%s", twice)
+			}
+		})
+	}
+}
+
 func TestBrokenTrailingArgumentKeepsItsIndentAfterAHuggedArray(t *testing.T) {
 	cases := []struct {
 		name   string

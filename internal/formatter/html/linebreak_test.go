@@ -66,3 +66,35 @@ func TestFormatReindentsAMultilineAlpineBindingByDepth(t *testing.T) {
 		t.Fatalf("not idempotent.\n=== once ===\n%q\n=== twice ===\n%q", got, twice)
 	}
 }
+
+func TestFormatKeepsAValueAlignedUnderItsAttributeWhenItLeavesTheTagLine(t *testing.T) {
+	src := "<div>\n    <div x-transition:enter=\"ease-out\n             duration-300\" class=\"a\">x</div>\n</div>\n"
+	want := "<div>\n    <div\n        x-transition:enter=\"ease-out\n            duration-300\"\n" +
+		"        class=\"a\"\n    >\n        x\n    </div>\n</div>\n"
+
+	got := mustFormat(t, []byte(src), config.Default())
+
+	if string(got) != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent.\n=== once ===\n%q\n=== twice ===\n%q", got, twice)
+	}
+}
+
+func TestFormatPutsAClosingQuoteAtTheTagsColumnOnTheAttributes(t *testing.T) {
+	src := "<div>\n    <div class=\"flex\n                items-center\n    \">x</div>\n</div>\n"
+	want := "<div>\n    <div\n        class=\"flex\n               items-center\n        \"\n" +
+		"    >\n        x\n    </div>\n</div>\n"
+
+	got := mustFormat(t, []byte(src), config.Default())
+
+	if string(got) != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+
+	if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+		t.Fatalf("not idempotent.\n=== once ===\n%q\n=== twice ===\n%q", got, twice)
+	}
+}

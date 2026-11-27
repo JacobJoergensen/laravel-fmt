@@ -3666,3 +3666,35 @@ func TestFormatGluedBlockBodyKeepsItsAuthoredLines(t *testing.T) {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, src)
 	}
 }
+
+func TestFormatMultilineAttrValueFollowsItsAttribute(t *testing.T) {
+	cases := map[string]struct{ in, want string }{
+		"a value with an echo aligned under its attribute": {
+			"<div>\n    <div x-data=\"init(\n             {!! $e !!},\n             @js($a),\n         )\" class=\"p-4\"></div>\n</div>\n",
+			"<div>\n    <div\n        x-data=\"init(\n            {!! $e !!},\n            @js($a),\n        )\"\n" +
+				"        class=\"p-4\"\n    ></div>\n</div>\n",
+		},
+		"a component value aligned under its attribute": {
+			"<div>\n    <x-button class=\"px-4\n                   py-2\" type=\"submit\" />\n</div>\n",
+			"<div>\n    <x-button\n        class=\"px-4\n             py-2\"\n        type=\"submit\"\n    />\n</div>\n",
+		},
+		"a closing quote at the tag's column beside an echo": {
+			"<div>\n    <div class=\"flex {{ $a }}\n                items-center\n    \">x</div>\n</div>\n",
+			"<div>\n    <div\n        class=\"flex {{ $a }}\n               items-center\n        \"\n" +
+				"    >\n        x\n    </div>\n</div>\n",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := mustFormat(t, []byte(tc.in), config.Default())
+			if string(got) != tc.want {
+				t.Fatalf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+
+			if twice := mustFormat(t, got, config.Default()); !bytes.Equal(twice, got) {
+				t.Fatalf("not idempotent:\n%s", twice)
+			}
+		})
+	}
+}

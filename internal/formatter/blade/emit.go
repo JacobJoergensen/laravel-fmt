@@ -2,6 +2,7 @@ package blade
 
 import (
 	"bytes"
+	"math"
 	"slices"
 	"strings"
 
@@ -1893,7 +1894,9 @@ func (e *emitter) emitAttr(a *htmlparser.Attr, component bool) {
 		case !htmlfmt.ValueReflows(a):
 			e.w.WithoutIndent(func() { e.writeAttrTextAsWritten(a.Value, component) })
 		case component:
-			formatter.EmitVerbatimRebasedKeepTrailing(e.w, e.src, a.ValueStart, a.ValueStart+len(a.Value), a.Start.Offset)
+			shallowest := textShallowest(a.Value, false, component)
+			strip := htmlfmt.AttrValueIndent(e.src, a.Start.Offset, shallowest)
+			formatter.EmitVerbatimStrippingKeepTrailing(e.w, e.src[a.ValueStart:a.ValueStart+len(a.Value)], strip)
 		default:
 			htmlfmt.EmitMultilineAttrValue(e.w, e.src, a, e.cfg.PHP.NotOperatorSpace)
 		}
@@ -2010,8 +2013,7 @@ func attrDelimiterFor(quote byte, val []byte) byte {
 // A multiline value re-homes each text run under the (re-indented) tag, the same
 // treatment the echo-free multiline path gives so a continuation line follows the
 // attribute instead of stranding at its source column. Sort is skipped there, as
-// it is for the echo-free case: it is single-line only. naturalIndent is the
-// attribute's own source indent, the amount stripped from each continuation line.
+// it is for the echo-free case: it is single-line only.
 func (e *emitter) emitAttrParts(a *htmlparser.Attr, sortClasses, compilesToPHP bool) {
 	// Re-home only when a text run spans lines: that newline is the attribute's
 	// layout. A newline inside an echo is content the echo emitter re-lays onto one
@@ -2036,16 +2038,19 @@ func (e *emitter) emitAttrParts(a *htmlparser.Attr, sortClasses, compilesToPHP b
 		return
 	}
 
-	naturalIndent := 0
+	naturalIndent, lineIndent := 0, 0
 	if rehome {
-		naturalIndent = attrPartsStrip(a.Parts, formatter.NaturalIndentBefore(e.src, a.Start.Offset), compilesToPHP)
+		shallowest := attrPartsShallowest(a.Parts, compilesToPHP)
+		naturalIndent = min(htmlfmt.AttrValueIndent(e.src, a.Start.Offset, shallowest), shallowest)
+		lineIndent = min(formatter.NaturalIndentBefore(e.src, a.Start.Offset), shallowest)
 	}
 
-	// The closing line keeps its offset, as in EmitMultilineAttrValue.
+	// The closing line keeps its offset from the tag's line, as in
+	// EmitMultilineAttrValue.
 	closerOffset := 0
 	if last, ok := a.Parts[len(a.Parts)-1].(*htmlparser.Text); rehome && ok {
 		if nl := bytes.LastIndexByte(last.Text, '\n'); nl >= 0 && len(bytes.TrimLeft(last.Text[nl+1:], " \t")) == 0 {
-			closerOffset = min(len(last.Text)-nl-1-naturalIndent, 0)
+			closerOffset = min(len(last.Text)-nl-1-lineIndent, 0)
 		}
 	}
 
@@ -2173,42 +2178,43 @@ func (e *emitter) emitAlpinePartsAtDepth(parts []htmlparser.Node) bool {
 	return true
 }
 
-// attrPartsStrip returns the indent a multi-line value's continuation lines lose:
-// the attribute's own, or less when a line sits left of it (a closer at the
-// tag's column), so the lines keep their shape as the echo-free path keeps it.
+// attrPartsShallowest is math.MaxInt when no continuation line holds content.
 // A line an echo starts counts with the whitespace before the echo.
-func attrPartsStrip(parts []htmlparser.Node, natural int, compilesToPHP bool) int {
-	strip := natural
+func attrPartsShallowest(parts []htmlparser.Node, compilesToPHP bool) int {
+	shallowest := math.MaxInt
 
 	for i, p := range parts {
-		t, ok := p.(*htmlparser.Text)
-		if !ok {
-			continue
-		}
-
-		text := t.Text
-		for {
-			nl, width := valueLineBreak(text, compilesToPHP)
-			if nl < 0 {
-				break
-			}
-
-			text = text[nl+width:]
-
-			ws := 0
-			for ws < len(text) && (text[ws] == ' ' || text[ws] == '\t') {
-				ws++
-			}
-
-			next, _ := valueLineBreak(text, compilesToPHP)
-			lineHasContent := ws < len(text) && next != ws || next < 0 && ws == len(text) && i < len(parts)-1
-			if lineHasContent {
-				strip = min(strip, ws)
-			}
+		if t, ok := p.(*htmlparser.Text); ok {
+			shallowest = min(shallowest, textShallowest(t.Text, i < len(parts)-1, compilesToPHP))
 		}
 	}
 
-	return strip
+	return shallowest
+}
+
+// With beforeEcho, a blank tail is a line the echo starts, so it counts.
+func textShallowest(text []byte, beforeEcho, compilesToPHP bool) int {
+	shallowest := math.MaxInt
+
+	for {
+		nl, width := valueLineBreak(text, compilesToPHP)
+		if nl < 0 {
+			return shallowest
+		}
+
+		text = text[nl+width:]
+
+		ws := 0
+		for ws < len(text) && (text[ws] == ' ' || text[ws] == '\t') {
+			ws++
+		}
+
+		next, _ := valueLineBreak(text, compilesToPHP)
+		lineHasContent := ws < len(text) && next != ws || next < 0 && ws == len(text) && beforeEcho
+		if lineHasContent {
+			shallowest = min(shallowest, ws)
+		}
+	}
 }
 
 // writeRebasedAttrText emits one text run of a multi-line attribute value,

@@ -1313,7 +1313,11 @@ func (b *builder) arrayElement(el *parser.ArrayElement, gap *document.Doc) *docu
 	}
 
 	if el.Key != nil {
+		// A key stays on one line and overflows beside its value, as Pint keeps it.
 		key := b.expr(el.Key)
+		if document.CanBreak(key) && !document.HasForcedBreak(key) {
+			key = b.flatDoc(key)
+		}
 
 		arrow := " => "
 		if b.breaksAfterArrow(el.Value, key, value) {

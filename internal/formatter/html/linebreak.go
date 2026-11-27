@@ -2,6 +2,7 @@ package html
 
 import (
 	"bytes"
+	"math"
 	"strings"
 
 	"github.com/JacobJoergensen/laravel-fmt/internal/formatter"
@@ -145,13 +146,13 @@ func EmitMultilineAttrValue(w *formatter.Writer, src []byte, a *parser.Attr, spa
 		}
 	}
 
-	attrIndent := formatter.NaturalIndentBefore(src, a.Start.Offset)
+	attrIndent := AttrValueIndent(src, a.Start.Offset, uniformStrip(value, math.MaxInt))
+	lineIndent := formatter.NaturalIndentBefore(src, a.Start.Offset)
 
-	// The blank line the closing quote sits on keeps its offset from the
-	// lines above it, as Prettier leaves the value as written. Left of the
-	// strip it would otherwise land on the attribute's column.
+	// The blank line the closing quote sits on keeps its offset from the tag's
+	// line, not the attribute's column, as Prettier leaves the value as written.
 	if last := bytes.LastIndexByte(value, '\n'); last >= 0 && isBlankLine(value[last+1:]) {
-		if offset := len(value[last+1:]) - uniformStrip(value[:last], attrIndent); offset < 0 {
+		if offset := len(value[last+1:]) - uniformStrip(value[:last], lineIndent); offset < 0 {
 			formatter.EmitVerbatimStrippingKeepTrailing(w, value[:last+1], attrIndent)
 
 			column := max(w.IndentColumn()+offset, 0)
@@ -195,6 +196,23 @@ func writeAtDepth(w *formatter.Writer, depth jsfmt.Depth, line []byte) {
 
 func isBlankLine(line []byte) bool {
 	return len(bytes.TrimLeft(line, " \t")) == 0
+}
+
+// AttrValueIndent returns the attribute's column when every continuation line
+// sits at or right of it, so the lines move with the attribute; otherwise the
+// indent of the line it starts on.
+func AttrValueIndent(src []byte, attrStart, shallowest int) int {
+	if attrStart <= 0 || attrStart > len(src) {
+		return 0
+	}
+
+	lineStart := bytes.LastIndexByte(src[:attrStart], '\n') + 1
+
+	if column := attrStart - lineStart; shallowest >= column {
+		return column
+	}
+
+	return formatter.NaturalIndentBefore(src, attrStart)
 }
 
 // uniformStrip mirrors the strip EmitVerbatimStripping takes from value.

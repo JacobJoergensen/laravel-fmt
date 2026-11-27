@@ -14,6 +14,8 @@
 * Fixed an assignment after an operator, like `$a && $b = foo()`, parsing with the wrong target
 * Fixed calls on numbers, like `0(1)`, and other dereferences PHP rejects being accepted
 * Fixed a blank line beside a top-level JSONC comment, like a `tsconfig.json` header, being dropped
+* Fixed a multi-line attribute value drifting right when its attribute moves off the tag's line
+* Fixed a long array key, like `($a[$k] ?? '') => $v`, being broken across lines
 
 ## Version 0.14.0 (2026-11-25)
 * Added `formattedElsewhere` to the `laravel-fmt/format` reply for files another tool formats
