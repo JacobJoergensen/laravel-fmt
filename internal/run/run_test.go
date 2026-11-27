@@ -15,9 +15,11 @@ import (
 	"github.com/JacobJoergensen/laravel-fmt/internal/upward"
 )
 
-// A fixture must not pick up the host's files above the temp directory.
+// A fixture must not pick up the host's files above the temp directory, and
+// expected stderr stays plain whatever color the host shell asks for.
 func init() {
 	upward.SetCeiling(os.TempDir())
+	terminal.Disable()
 }
 
 // failingWriter stands in for a stdout whose reader went away: a closed pipe

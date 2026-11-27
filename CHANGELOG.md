@@ -2,6 +2,7 @@
 
 ## Unreleased
 * Improved a directive argument that spans lines to always break the layout around it
+* Improved color detection for `FORCE_COLOR`, `TERM=dumb` and Composer scripts under Git Bash
 * Fixed an anonymous class losing its hug as a call's last argument, like `Livewire::test(new class extends Component {`
 * Fixed an arrow function losing its hug when its body passes a heredoc, like `->tap(fn ($b) => $b->script(<<<JS`
 * Fixed a one-line docblock closed by `**/` gaining a stray `* */`

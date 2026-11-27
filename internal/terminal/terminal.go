@@ -4,6 +4,8 @@ package terminal
 import (
 	"io"
 	"os"
+	"slices"
+	"strings"
 )
 
 // Color escapes for stderr output, set by Enable and blanked by Disable.
@@ -71,10 +73,51 @@ func Colors() Palette {
 	}
 }
 
-// WantsColor reports whether w should get color when the user left --color on
-// auto: it is a terminal, and NO_COLOR is not set.
+// WantsColor reports whether stdout writer w should get color on --color=auto.
 func WantsColor(w io.Writer) bool {
-	return os.Getenv("NO_COLOR") == "" && IsTTY(w)
+	return autoColor(os.Getenv, IsTTY(w), false)
+}
+
+const (
+	envNoColor        = "NO_COLOR"
+	envForceColor     = "FORCE_COLOR"
+	envTerm           = "TERM"
+	envMSystem        = "MSYSTEM"
+	envComposerBinary = "COMPOSER_BINARY"
+	termDumb          = "dumb"
+)
+
+var gitBashSystems = []string{"MINGW32", "MINGW64"}
+
+// autoColor follows Symfony Console's StreamOutput, with FORCE_COLOR and the
+// Git Bash rule kept to stderr. Composer relays a script's stderr through a
+// pipe under Git Bash that still renders color (composer/composer#9690), so
+// that pipe counts as a terminal; other Git Bash pipes, like a hook's captured
+// stderr, do not.
+func autoColor(getenv func(string) string, tty, stderr bool) bool {
+	if getenv(envNoColor) != "" {
+		return false
+	}
+
+	if stderr && getenv(envForceColor) != "" {
+		return true
+	}
+
+	rendered := tty || (stderr && composerUnderGitBash(getenv))
+
+	return rendered && getenv(envTerm) != termDumb
+}
+
+func composerUnderGitBash(getenv func(string) string) bool {
+	if getenv(envComposerBinary) == "" {
+		return false
+	}
+
+	msystem := getenv(envMSystem)
+
+	return slices.ContainsFunc(gitBashSystems, func(system string) bool {
+		return strings.EqualFold(msystem, system)
+	})
 }
 
 const (
@@ -120,7 +163,7 @@ func init() {
 	enableVirtualTerminal()
 
 	// The colored status lines and diagnostics go to stderr, so stderr decides.
-	if !WantsColor(os.Stderr) {
+	if !autoColor(os.Getenv, IsTTY(os.Stderr), true) {
 		Disable()
 	}
 }
