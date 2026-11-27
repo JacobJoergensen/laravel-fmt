@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## Version 0.15.0 (2026-11-27)
 * Improved a directive argument that spans lines to always break the layout around it
 * Improved color detection for `FORCE_COLOR`, `TERM=dumb` and Composer scripts under Git Bash
 * Fixed an anonymous class losing its hug as a call's last argument, like `Livewire::test(new class extends Component {`
